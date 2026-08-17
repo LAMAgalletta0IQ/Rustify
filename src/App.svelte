@@ -127,11 +127,11 @@
     inset: -30%;
     z-index: -2;
     background:
-      radial-gradient(38% 42% at 22% 18%, #2e6d4a 0%, transparent 62%),
-      radial-gradient(34% 38% at 82% 26%, #3a3f7a 0%, transparent 62%),
-      radial-gradient(46% 44% at 62% 88%, #6a2f52 0%, transparent 60%),
+      radial-gradient(42% 46% at 20% 16%, #3d9265 0%, transparent 66%),
+      radial-gradient(38% 42% at 84% 24%, #4a51a0 0%, transparent 66%),
+      radial-gradient(50% 48% at 60% 90%, #8f3d6e 0%, transparent 64%),
       #0c0c10;
-    filter: saturate(1.15);
+    filter: saturate(1.3);
     animation: drift 26s ease-in-out infinite alternate;
   }
   @keyframes drift {
@@ -157,7 +157,10 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: linear-gradient(180deg, rgba(6, 6, 9, 0.55), rgba(6, 6, 9, 0.78));
+    /* Balancing act: dark enough that white text stays legible over the blobs,
+       light enough that the colour survives a screen full of blurred cards.
+       At .55/.78 the content views went flat black. */
+    background: linear-gradient(180deg, rgba(6, 6, 9, 0.34), rgba(6, 6, 9, 0.66));
   }
   .veil::after {
     content: "";

@@ -21,6 +21,16 @@ pub enum AppError {
     #[error("Spotify Web API error: {0}")]
     WebApi(String),
 
+    /// Spotify returned HTTP 403.
+    ///
+    /// Not always a scope problem: Spotify refuses some endpoints outright
+    /// regardless of the token. Observed live 2026-08-17 — the whole
+    /// `*/contains` family answers 403 while the sibling collection endpoints
+    /// (`/me/tracks`, `/me/albums`) succeed on the same token. Callers that
+    /// only need decoration should degrade rather than surface this.
+    #[error("Spotify refused this request (403): {0}")]
+    Forbidden(String),
+
     /// Spotify returned HTTP 429.
     ///
     /// Usually *not* caused by this app's own request volume: librespot's
@@ -44,6 +54,7 @@ impl AppError {
             Self::Auth(_) => "Auth",
             Self::Playback(_) => "Playback",
             Self::WebApi(_) => "WebApi",
+            Self::Forbidden(_) => "Forbidden",
             Self::RateLimited { .. } => "RateLimited",
             Self::Other(_) => "Other",
         }

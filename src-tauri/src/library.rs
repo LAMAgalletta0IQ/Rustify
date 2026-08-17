@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::search::ArtistSummary;
 use crate::webapi::WebApi;
 
@@ -235,7 +235,11 @@ pub async fn playlist_tracks(
     let page: Page<PlaylistItem> = api
         .get(
             token,
-            &format!("/playlists/{playlist_id}/tracks"),
+            // `/tracks` now answers 403 Forbidden (observed live 2026-08-17,
+            // on a private client ID with playlist-read-private granted).
+            // `/me/playlists` itself hands back `items.href` pointing at
+            // `/playlists/{id}/items`, so that is the path Spotify expects now.
+            &format!("/playlists/{playlist_id}/items"),
             &[
                 ("limit", limit.min(100).to_string()),
                 ("offset", offset.to_string()),
@@ -352,12 +356,22 @@ pub async fn tracks_saved(
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    api.get(
-        token,
-        "/me/tracks/contains",
-        &[("ids", ids.join(","))],
-    )
-    .await
+    match api
+        .get(token, "/me/tracks/contains", &[("ids", ids.join(","))])
+        .await
+    {
+        Ok(v) => Ok(v),
+        // Spotify currently refuses the whole `*/contains` family with 403,
+        // even though `/me/tracks` itself succeeds on the same token. The
+        // saved-state is only the heart icon's fill, so answering "unknown"
+        // keeps every track list usable instead of failing it outright with a
+        // banner the user can do nothing about.
+        Err(AppError::Forbidden(msg)) => {
+            log::warn!("/me/tracks/contains refused ({msg}); showing tracks as unsaved");
+            Ok(vec![false; ids.len()])
+        }
+        Err(e) => Err(e),
+    }
 }
 
 // ---- artist -------------------------------------------------------------

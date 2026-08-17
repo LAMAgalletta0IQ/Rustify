@@ -119,6 +119,7 @@ pub fn run() {
             commands::get_saved_tracks,
             commands::get_saved_albums,
             commands::get_album_tracks,
+            commands::probe_webapi,
             commands::get_followed_artists,
             commands::get_recently_played,
             commands::set_tracks_saved,

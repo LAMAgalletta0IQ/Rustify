@@ -8,6 +8,7 @@ export interface AppErrorPayload {
     | "Auth"
     | "Playback"
     | "WebApi"
+    | "Forbidden"
     | "RateLimited"
     | "Other";
   message: string;
@@ -129,6 +130,11 @@ export const MAX_VOLUME = 65535;
 
 export function volumeToPercent(v: number): number {
   return Math.round((v * 100) / MAX_VOLUME);
+}
+
+/** "1 track" / "2 tracks" — playlists of one are common enough to notice. */
+export function trackCountLabel(n: number): string {
+  return `${n} ${n === 1 ? "track" : "tracks"}`;
 }
 
 export function formatMs(ms: number): string {

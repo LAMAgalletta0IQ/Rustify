@@ -405,6 +405,15 @@ pub async fn get_saved_albums(
     library::saved_albums(&WebApi::new(), &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
 }
 
+/// TEMPORARY diagnostic: GET an arbitrary Web API path and report what comes
+/// back. Used to map which endpoints Spotify is currently refusing. Remove.
+#[tauri::command]
+pub async fn probe_webapi(state: State<'_, AppState>, path: String) -> AppResult<String> {
+    let t = token(&state).await?;
+    let v: serde_json::Value = WebApi::new().get(&t, &path, &[]).await?;
+    Ok(v.to_string().chars().take(300).collect())
+}
+
 /// `after` is the `next` cursor from the previous page, not an item count —
 /// `/me/following` is cursor-paginated. Omit it for the first page.
 #[tauri::command]

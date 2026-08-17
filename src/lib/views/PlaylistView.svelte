@@ -2,6 +2,7 @@
   import * as api from "../api";
   import { store } from "../store.svelte";
   import TrackList from "../components/TrackList.svelte";
+  import { trackCountLabel } from "../types";
   import type { PlaylistSummary, TrackSummary } from "../types";
 
   let { playlist, onBack }: { playlist: PlaylistSummary; onBack: () => void } =
@@ -66,7 +67,7 @@
     <span class="meta">
       <span class="truncate name">{playlist.name}</span>
       <span class="truncate muted">
-        {playlist.owner} · {playlist.trackCount} tracks
+        {playlist.owner} · {trackCountLabel(playlist.trackCount)}
       </span>
     </span>
     <button

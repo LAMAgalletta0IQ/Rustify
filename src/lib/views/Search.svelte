@@ -106,7 +106,6 @@
           <button class="card artist" onclick={() => (openArtist = a)}>
             {#if a.imageUrl}<img src={a.imageUrl} alt="" loading="lazy" />{/if}
             <span class="truncate title">{a.name}</span>
-            <span class="truncate sub">Artist</span>
           </button>
         {/each}
       </div>

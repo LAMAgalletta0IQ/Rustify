@@ -86,6 +86,9 @@ impl WebApi {
                     }
                 });
             log::warn!("{method} {url} -> {status}: {msg}");
+            if status == reqwest::StatusCode::FORBIDDEN {
+                return Err(AppError::Forbidden(msg));
+            }
             return Err(AppError::WebApi(format!("{status}: {msg}")));
         }
 

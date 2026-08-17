@@ -8,7 +8,14 @@
 
   /** Home is a landing surface, not a browser: one row of shortcuts only. */
   const PILLS = 6;
+  /** How many recently-played tiles to show. */
   const RECENT = 12;
+  /**
+   * Play history has one entry per *play*, so it is deduped by URI. Ask for the
+   * maximum and trim afterwards — asking for exactly RECENT returned 10 tiles
+   * once duplicates were dropped, leaving a half-empty row.
+   */
+  const RECENT_FETCH = 50;
 
   let pills = $state<PlaylistSummary[]>([]);
   let recent = $state<TrackSummary[]>([]);
@@ -36,11 +43,11 @@
         // Two independent shelves — fire together rather than in series.
         const [p, r] = await Promise.all([
           api.getPlaylists(PILLS, 0),
-          api.getRecentlyPlayed(RECENT),
+          api.getRecentlyPlayed(RECENT_FETCH),
         ]);
         if (!cancelled) {
           pills = p;
-          recent = r;
+          recent = r.slice(0, RECENT);
         }
       } catch (e) {
         if (!cancelled) store.error = api.asAppError(e).message;
@@ -87,7 +94,7 @@
               {:else}
                 <span class="art"></span>
               {/if}
-              <span class="truncate">{p.name}</span>
+              <span class="truncate label">{p.name}</span>
             </button>
           {/each}
         </div>
@@ -168,8 +175,12 @@
     flex: none;
     background: rgba(255, 255, 255, 0.06);
   }
-  .pill span {
+  /* min-width: 0 is what actually lets the label ellipsis — a flex child will
+     not shrink below its content width without it, so long playlist names
+     would push the pill wider instead of truncating. */
+  .pill .label {
     font-weight: 500;
+    min-width: 0;
   }
 
   .link {

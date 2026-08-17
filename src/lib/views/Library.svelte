@@ -6,6 +6,7 @@
   import AlbumView from "./AlbumView.svelte";
   import ArtistView from "./ArtistView.svelte";
   import PlaylistView from "./PlaylistView.svelte";
+  import { trackCountLabel } from "../types";
   import type {
     AlbumSummary,
     ArtistSummary,
@@ -209,7 +210,7 @@
                 <span class="art"></span>
               {/if}
               <span class="truncate title">{p.name}</span>
-              <span class="truncate sub">{p.trackCount} tracks</span>
+              <span class="truncate sub">{trackCountLabel(p.trackCount)}</span>
             </button>
           {:else}
             <p class="muted">{filter ? "Nothing matches." : "No playlists."}</p>
@@ -240,8 +241,9 @@
               {:else}
                 <span class="art"></span>
               {/if}
+              <!-- No "Artist" sublabel: the circle already says so, and in this
+                   section every tile is one. -->
               <span class="truncate title">{a.name}</span>
-              <span class="truncate sub">Artist</span>
             </button>
           {:else}
             <p class="muted">

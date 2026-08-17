@@ -88,7 +88,11 @@
           <span class="name truncate">{t.name}</span>
           <span class="artist muted truncate">{t.artists.join(", ")}</span>
         </span>
-        <span class="album muted truncate">{t.album}</span>
+        <!-- Singles name the album after the track, which just prints the
+             title twice on the same row. Show it only when it adds something. -->
+        <span class="album muted truncate">
+          {t.album === t.name ? "" : t.album}
+        </span>
         <span class="dur muted">{formatMs(t.durationMs)}</span>
       </button>
       <button
@@ -128,7 +132,10 @@
     flex: 1;
     min-width: 0;
     display: grid;
-    grid-template-columns: 28px 36px minmax(0, 2fr) minmax(0, 1.4fr) 48px;
+    /* The title column was 2fr, which at full width left a wide void between
+       the title text and the album column — titles rarely fill 400px. */
+    grid-template-columns: 28px 36px minmax(0, 1.5fr) minmax(0, 1fr) 48px;
+    max-width: 1000px;
     align-items: center;
     gap: 12px;
     padding: 6px 8px;

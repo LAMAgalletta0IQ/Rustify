@@ -35,8 +35,13 @@
     class="trigger"
     onclick={toggle}
     title="Connect to a device"
-    class:active={store.playback.isActiveDevice}>▣</button
+    class:active={store.playback.isActiveDevice}
   >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="2" y="4" width="14" height="10" rx="2" />
+      <rect x="17" y="9" width="5" height="11" rx="1.5" />
+    </svg>
+  </button>
 
   {#if open}
     <!-- Click-away backdrop; keeps the popover logic to a single element. -->
@@ -76,9 +81,16 @@
     position: relative;
   }
   .trigger {
-    padding: 6px 10px;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
     color: var(--fg-dim);
-    font-size: 16px;
+  }
+  .trigger:hover {
+    background: var(--glass-hover);
+    color: var(--fg);
   }
   .trigger.active {
     color: var(--accent);
