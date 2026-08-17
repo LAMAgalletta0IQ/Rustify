@@ -36,7 +36,10 @@ to every holder at once. See [[auth-and-tokens]].
 is_playing, is_loading, is_active_device,
 track: Option<TrackInfo>,
 position_ms, duration_ms, volume,
-shuffle, repeat_context, repeat_track
+shuffle, repeat_context, repeat_track,
+
+#[serde(skip)] position_base_ms,   // anchor
+#[serde(skip)] position_at,        // Option<Instant>
 ```
 
 Deliberately flat and cheap to clone: it is serialised on every position
@@ -48,11 +51,27 @@ saves.
 in [[types.ts]]. **This scale is a live hazard** — see [[player.rs]] for the
 `initial_volume` bug it caused.
 
+### The position anchor
+
+`position_base_ms` + `position_at` are not serialised; they exist so
+`position_ms` can be recomputed on demand.
+
+librespot reports a position only on *some* events — `Playing`, `Paused`,
+`Loading`, `Seeked`, periodic corrections. `VolumeChanged`, `ShuffleChanged` and
+`RepeatChanged` carry none. Since the whole snapshot is sent on every event,
+those events shipped the **last reported** position, normally 0 from the start
+of the track, and the UI's clock jumped back to 0:00 while audio kept playing.
+
+- `set_position()` re-anchors on events that report one.
+- `refresh_position()` adds elapsed time, clamped to `duration_ms`, and is
+  called before *any* snapshot leaves the backend — in the event pump and in
+  `snapshot()`, which previously handed out a stale read too.
+
 ## The event pump
 
-`spawn_event_pump` in [[player.rs]] is the only writer of `playback`. It
-consumes librespot's `PlayerEvent` stream (21 variants) and maps the ones the
-UI renders:
+`spawn_event_pump` in [[player.rs]] is the primary writer of `playback` — the
+remote poller below is the only other. It consumes librespot's `PlayerEvent`
+stream (21 variants) and maps the ones the UI renders:
 
 | `PlayerEvent` | Effect |
 | --- | --- |
@@ -78,6 +97,17 @@ returns ready-to-use CDN cover URLs, where librespot returns raw file IDs.
 
 Cost: one HTTP request per *new* track. A metadata failure logs a warning and
 leaves the previous track shown rather than blanking the bar.
+
+## The remote poller — the second writer
+
+`spawn_remote_poller` ([[player.rs]]) mirrors playback happening on *other*
+Connect devices, which `PlayerEvent`s never describe. It writes the same
+`PlaybackState` via `apply_remote`, and is skipped entirely while
+`is_active_device` so the two writers cannot fight.
+
+Both tasks are owned by `SpotifySession` (`refresh_task`, `remote_task`) and
+aborted together on logout — dropping a `JoinHandle` detaches rather than
+cancels, so this must be explicit. See [[playback-and-connect]].
 
 ## Emitting to the frontend
 
@@ -110,6 +140,11 @@ it on failure, so any component gets the error banner for one line of code.
 
 librespot exposes no explicit "am I the active device" flag. The pump infers
 it: `true` on `Playing`/`Paused`/`Loading`, `false` on `SessionDisconnected`.
+The remote poller also sets it `false` whenever `/me/player` reports playback
+elsewhere.
+
+It is no longer `true` from login onward: `start_session` stopped calling
+`spirc.activate()`, so a freshly launched app is correctly passive.
 
 Good enough in practice, but it is a heuristic — if you transfer playback away
 and the flag looks wrong, this is why. Listed in [[known-limitations]].

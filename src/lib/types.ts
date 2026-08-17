@@ -46,6 +46,16 @@ export interface AuthState {
   avatarUrl: string | null;
 }
 
+/** Shape of the login flow, from `get_login_info`. */
+export interface LoginInfo {
+  /** True when a private Web API client ID is set: login opens two browser tabs. */
+  privateClientId: boolean;
+  /** Env var name carrying the client ID, e.g. `RUSTIFY_CLIENT_ID`. */
+  clientIdEnv: string;
+  /** Redirect URI to register against a self-registered Spotify app. */
+  webapiRedirectUri: string;
+}
+
 export interface Device {
   id: string | null;
   name: string;
@@ -87,6 +97,12 @@ export interface ArtistSummary {
   id: string;
   name: string;
   imageUrl: string | null;
+}
+
+/** Cursor-paginated: `next` feeds the `after` argument of the following call. */
+export interface ArtistPage {
+  items: ArtistSummary[];
+  next: string | null;
 }
 
 export interface PlaylistHit {

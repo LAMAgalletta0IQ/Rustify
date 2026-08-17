@@ -13,16 +13,16 @@ dependency, and the size-tuned release profile.
 ## Key items
 
 ### `[package]`
-`name = "spotify-rust"`, `version = "0.1.0"`, `edition = "2021"`,
+`name = "rustify"`, `version = "0.1.0"`, `edition = "2021"`,
 `rust-version = "1.82"` (verified building on 1.97.1).
 
 ### `[lib]`
 ```toml
-name = "spotify_rust_lib"
+name = "rustify_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 ```
-Underscored because Rust library names cannot contain hyphens — this is the
-name [[main.rs]] calls into. The three crate types are the Tauri 2 template
+The `_lib` suffix keeps the library target from colliding with the binary — this
+is the name [[main.rs]] calls into. The three crate types are the Tauri 2 template
 default, supporting desktop and (hypothetically) mobile linking.
 
 ### `[build-dependencies]`
@@ -47,6 +47,9 @@ librespot-oauth = { version = "0.8.0", default-features = false,
 
 `reqwest` also uses `default-features = false` with `native-tls`, matching
 librespot so only one TLS stack is compiled in.
+
+`dotenvy` loads `.env` at startup ([[lib.rs]]). Tiny, and the only way the app
+takes configuration from outside the binary — see [[build-and-config]].
 
 ### `[profile.release]`
 ```toml
@@ -73,7 +76,7 @@ Read by cargo. Determines what is compiled and linked.
   further, but a panicking background task — the event pump in [[player.rs]] or
   the refresher in [[auth.rs]] — should not take down the whole app.
 - **Changing the `[lib] name` breaks [[main.rs]]**, which calls
-  `spotify_rust_lib::run()` by that exact name.
+  `rustify_lib::run()` by that exact name.
 - **`futures-util` is declared but barely used**; harmless, and a candidate for
   removal.
 - Version specs are loose (`"2"`, `"1"`); reproducibility comes from

@@ -106,6 +106,12 @@ fn pick_image(images: &[WireImage]) -> Option<String> {
         .map(|i| i.url.clone())
 }
 
+/// Spotify's ceiling on `limit` for `/search`, per item type.
+///
+/// Deliberately not the 50 used elsewhere: the search endpoint is stricter than
+/// the library ones and rejects anything higher outright.
+pub const MAX_SEARCH_LIMIT: u32 = 10;
+
 /// Search across tracks, albums, artists and playlists in one request.
 ///
 /// Note: Spotify returns `null` entries inside `items` for unavailable
@@ -127,7 +133,10 @@ pub async fn search(
             &[
                 ("q", query.to_string()),
                 ("type", "track,album,artist,playlist".to_string()),
-                ("limit", limit.clamp(1, 50).to_string()),
+                // `/search` caps `limit` at 10 — far lower than the 50 most
+                // other endpoints allow. Exceeding it is a 400 "Invalid limit",
+                // not a silent truncation, so this clamp is load-bearing.
+                ("limit", limit.clamp(1, MAX_SEARCH_LIMIT).to_string()),
             ],
         )
         .await?;

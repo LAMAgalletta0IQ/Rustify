@@ -41,7 +41,7 @@ cargo directives
 ## Dependencies
 
 **Imports:** `tauri_build` (from `[build-dependencies]` in [[Cargo.toml]])
-**Runs for:** the `spotify-rust` crate, before [[lib.rs]] compiles
+**Runs for:** the `rustify` crate, before [[lib.rs]] compiles
 
 ## Notable logic / gotchas
 

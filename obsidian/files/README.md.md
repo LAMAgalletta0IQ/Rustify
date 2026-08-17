@@ -22,7 +22,7 @@ overlap (architecture, limitations), the vault goes deeper. See [[MOC]].
 | Setup / commands | [[build-and-config]] |
 | Pinned dependency (`vergen`) | [[Cargo.lock]] |
 | Architecture tree | [[architecture]] |
-| One login, two consumers | [[auth-and-tokens]] |
+| Two logins, two client IDs | [[auth-and-tokens]] |
 | Playing a context, not a track | [[playback-and-connect]] |
 | Why `Spirc` rather than raw `Player` | [[playback-and-connect]] |
 | Premium enforcement | [[auth-and-tokens]] |
@@ -35,14 +35,14 @@ overlap (architecture, limitations), the vault goes deeper. See [[MOC]].
 
 Recorded 2026-08-17 on the development machine, release build, both apps idle:
 
-| | spotify-rust | Official client |
+| | Rustify | Official client |
 | --- | --- | --- |
 | Processes | 7 (1 Rust + 6 WebView2) | 7 |
 | Private (commit) | **157 MB** | 1442 MB |
 | Working set | 347 MB | 818 MB |
 
 > **The README flags this as not apples-to-apples**, and the caveat matters:
-> spotify-rust was on the login screen while the official client was logged in
+> Rustify was on the login screen while the official client was logged in
 > with a home feed rendered. The ratio is an upper bound, not a result.
 
 The breakdown that *is* clean: the Rust process is **5.9 MB private / 27.5 MB

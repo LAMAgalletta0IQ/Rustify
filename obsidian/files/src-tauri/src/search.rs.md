@@ -3,7 +3,7 @@ tags: [file, backend, webapi, rust]
 ---
 # `src-tauri/src/search.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **202 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **192 lines**
 
 ## Purpose
 
@@ -34,7 +34,15 @@ redefined, so [[TrackList.svelte]] renders search results unchanged.
 - Returns `SearchResults::default()` immediately for a blank query, avoiding a
   request that would 400.
 - `type=track,album,artist,playlist` in one call.
-- `limit` clamped to `1..=50`.
+- `limit` clamped to `1..=MAX_SEARCH_LIMIT` (**10**), and 10 is also the default
+  used by `search_spotify`.
+
+> ### `/search` caps `limit` at 10
+> Far below the 50 most endpoints accept, and exceeding it is a hard
+> `400 Bad Request: Invalid limit` — not a silent truncation. The code clamped
+> to 50 and defaulted to 20, so **every search failed** until this was found.
+> The constant is shared with [[commands.rs]] so the clamp and the default
+> cannot drift apart. The 50s in [[library.rs]] are correct for those endpoints.
 - Each category is `Option` in the response, handled with
   `.map(...).unwrap_or_default()`.
 

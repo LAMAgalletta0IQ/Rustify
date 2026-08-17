@@ -51,12 +51,19 @@
   />
 {:else}
 <div class="search">
-  <input
-    type="search"
-    placeholder="Search tracks, albums, artists, playlists…"
-    bind:value={query}
-    oninput={onInput}
-  />
+  <div class="searchwrap" class:empty={!results}>
+    <span class="find big">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+      </svg>
+      <input
+        type="search"
+        placeholder="What do you want to listen to?"
+        bind:value={query}
+        oninput={onInput}
+      />
+    </span>
+  </div>
 
   {#if loading}
     <p class="muted">Searching…</p>
@@ -96,62 +103,40 @@
       <h3>Artists</h3>
       <div class="grid">
         {#each results.artists as a (a.id)}
-          <button class="card" onclick={() => (openArtist = a)}>
-            {#if a.imageUrl}<img class="round" src={a.imageUrl} alt="" loading="lazy" />{/if}
+          <button class="card artist" onclick={() => (openArtist = a)}>
+            {#if a.imageUrl}<img src={a.imageUrl} alt="" loading="lazy" />{/if}
             <span class="truncate title">{a.name}</span>
+            <span class="truncate sub">Artist</span>
           </button>
         {/each}
       </div>
     {/if}
   {:else}
-    <p class="muted">Type to search.</p>
+    <p class="hint muted">Search across tracks, albums, artists and playlists.</p>
   {/if}
 </div>
 {/if}
 
 <style>
   .search {
-    padding: 20px 24px 8px;
+    padding-bottom: 8px;
   }
-  input {
-    width: 100%;
-    max-width: 520px;
-    margin-bottom: 20px;
+  /* Centred and dropped down the page until there is something to show, then
+     it rises to the top so results get the room. */
+  .searchwrap {
+    display: grid;
+    place-items: center;
+    padding: 18px 0 22px;
+    transition: padding 0.25s;
+  }
+  .searchwrap.empty {
+    padding-top: 70px;
+  }
+  .hint {
+    text-align: center;
   }
   h3 {
-    margin: 20px 0 8px;
+    margin: 24px 0 10px;
     font-size: 15px;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 14px;
-  }
-  .card {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 10px;
-    background: var(--bg-elev);
-    text-align: left;
-  }
-  .card:hover {
-    background: var(--bg-elev-2);
-  }
-  .card img {
-    width: 100%;
-    aspect-ratio: 1;
-    border-radius: 6px;
-    object-fit: cover;
-    margin-bottom: 6px;
-  }
-  .card img.round {
-    border-radius: 50%;
-  }
-  .title {
-    font-weight: 600;
-  }
-  .sub {
-    font-size: 12px;
   }
 </style>

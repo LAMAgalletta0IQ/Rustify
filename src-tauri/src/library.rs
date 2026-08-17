@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
+use crate::search::ArtistSummary;
 use crate::webapi::WebApi;
 
 /// Flattened shape the UI renders. Keeping the Web API's nested envelopes out
@@ -24,6 +25,15 @@ pub struct AlbumSummary {
     pub name: String,
     pub artists: Vec<String>,
     pub image_url: Option<String>,
+}
+
+/// A page of followed artists plus the cursor for the next one, since
+/// `/me/following` cannot be paged by offset. `next` is `None` at the end.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistPage {
+    pub items: Vec<ArtistSummary>,
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,6 +64,11 @@ struct WirePlaylist {
     name: String,
     owner: WireNamed,
     images: Option<Vec<WireImage>>,
+    /// Spotify renamed this object on `/me/playlists`: it is now `items`
+    /// (`{href, total}`), not `tracks`. Verified live 2026-08-17 — the response
+    /// carries no `tracks` key at all, which silently made every playlist show
+    /// "0 tracks". The alias accepts both so either shape keeps working.
+    #[serde(alias = "items")]
     tracks: Option<WireTrackRef>,
 }
 
@@ -111,6 +126,37 @@ struct SavedTrack {
 #[derive(Debug, Deserialize)]
 struct PlaylistItem {
     track: Option<WireTrack>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlayHistoryItem {
+    track: WireTrack,
+}
+
+/// `/me/following` wraps its page in an extra object; nothing else here does.
+#[derive(Debug, Deserialize)]
+struct FollowedArtists {
+    artists: CursorPage<WireFullArtist>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CursorPage<T> {
+    items: Vec<T>,
+    cursors: Option<Cursors>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Cursors {
+    after: Option<String>,
+}
+
+/// Full artist object — unlike the stub inside a track, this one carries images.
+#[derive(Debug, Deserialize)]
+struct WireFullArtist {
+    id: String,
+    uri: String,
+    name: String,
+    images: Option<Vec<WireImage>>,
 }
 
 fn pick_image(images: &[WireImage]) -> Option<String> {
@@ -348,4 +394,65 @@ pub async fn artist_albums(
         )
         .await?;
     Ok(page.items.into_iter().map(Into::into).collect())
+}
+
+/// Artists the user follows.
+///
+/// The odd one out in this module: `/me/following` is **cursor**-paginated
+/// rather than offset-paginated, so the caller must hand back the `next`
+/// cursor from the previous page instead of counting how many items it holds.
+/// It also nests its page under an `artists` key rather than returning the
+/// page object at the top level, hence the extra wrapper.
+pub async fn followed_artists(
+    api: &WebApi,
+    token: &str,
+    limit: u32,
+    after: Option<&str>,
+) -> AppResult<ArtistPage> {
+    let mut query = vec![
+        ("type", "artist".to_string()),
+        ("limit", limit.min(50).to_string()),
+    ];
+    if let Some(cursor) = after {
+        query.push(("after", cursor.to_string()));
+    }
+
+    let resp: FollowedArtists = api.get(token, "/me/following", &query).await?;
+    Ok(ArtistPage {
+        next: resp.artists.cursors.and_then(|c| c.after),
+        items: resp
+            .artists
+            .items
+            .into_iter()
+            .map(|a| ArtistSummary {
+                image_url: pick_image(a.images.as_deref().unwrap_or_default()),
+                id: a.id,
+                uri: a.uri,
+                name: a.name,
+            })
+            .collect(),
+    })
+}
+
+/// The 50 most recently played tracks, newest first.
+///
+/// History contains one entry per *play*, so a track on repeat fills the whole
+/// response. Deduplicated by URI here — a "recently played" shelf showing the
+/// same album six times is worse than showing six items.
+pub async fn recently_played(api: &WebApi, token: &str, limit: u32) -> AppResult<Vec<TrackSummary>> {
+    let page: Page<PlayHistoryItem> = api
+        .get(
+            token,
+            "/me/player/recently-played",
+            &[("limit", limit.min(50).to_string())],
+        )
+        .await?;
+
+    let mut seen = std::collections::HashSet::new();
+    Ok(page
+        .items
+        .into_iter()
+        .map(|h| TrackSummary::from(h.track))
+        .filter(|t| seen.insert(t.uri.clone()))
+        .collect())
 }

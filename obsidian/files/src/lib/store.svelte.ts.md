@@ -70,6 +70,13 @@ A module-level singleton — the same instance everywhere it is imported.
   corrections. See [[known-limitations]].
 - **The ticker re-syncs on every playback event**, so pausing stops it promptly
   rather than waiting a tick.
+- **Wholesale replacement makes the backend's position authoritative.** Every
+  event discards the ticker's accumulated progress and adopts the payload's
+  `positionMs`. That was correct in principle but broken in practice: events
+  carrying no position (volume, shuffle, repeat) shipped a stale 0, so nudging
+  the volume snapped the clock to 0:00 while audio played on. Fixed on the
+  backend — [[state.rs]] now recomputes position before every emit — precisely
+  so this side can stay a dumb overwrite.
 - **Events replace state wholesale** (`this.playback = e.payload`) rather than
   merging. Correct, because the backend always sends a complete snapshot — see
   [[state-and-events]].

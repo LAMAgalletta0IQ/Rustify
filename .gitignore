@@ -7,3 +7,6 @@ src-tauri/gen/
 
 # Local Spotify credentials + audio cache written at runtime.
 src-tauri/.cache/
+
+# Local config. `.env.example` is the committed template.
+.env

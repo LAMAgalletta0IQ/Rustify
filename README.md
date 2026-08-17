@@ -1,4 +1,4 @@
-# spotify-rust
+# Rustify
 
 A native, lightweight Spotify client for Windows: Tauri + Rust backend,
 Svelte 5 frontend, [librespot](https://github.com/librespot-org/librespot)
@@ -139,13 +139,13 @@ These are upstream gaps, flagged rather than guessed at:
 
 Taken on this machine, 2026-08-17, release build:
 
-| Idle | spotify-rust | Official client |
+| Idle | Rustify | Official client |
 | --- | --- | --- |
 | Processes | 7 (1 Rust + 6 WebView2) | 7 |
 | Private (commit) | **157 MB** | 1442 MB |
 | Working set | 347 MB | 818 MB |
 
-**Not apples-to-apples**: spotify-rust was on the login screen, the official
+**Not apples-to-apples**: Rustify was on the login screen, the official
 client was logged in with a home feed rendered. Redo this with both logged in
 and playing before quoting a ratio.
 
@@ -166,7 +166,7 @@ memory work means shrinking or replacing the webview, not optimising Rust.
    Same for an album, Liked Songs, and a track picked from search results.
 5. **Transport** — pause/resume, next/prev, seek, volume, shuffle, repeat.
 6. **Connect (inbound)** — open Spotify on a phone, open the device list, and
-   confirm `<COMPUTERNAME> (spotify-rust)` is listed and selectable; controlling
+   confirm `<COMPUTERNAME> (Rustify)` is listed and selectable; controlling
    from the phone must update this app's UI.
 7. **Connect (outbound)** — use the ▣ button to move playback to another
    device, then "Play here" to pull it back.

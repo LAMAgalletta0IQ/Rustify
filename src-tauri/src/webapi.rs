@@ -24,7 +24,7 @@ impl WebApi {
     pub fn new() -> Self {
         Self {
             http: reqwest::Client::builder()
-                .user_agent(concat!("spotify-rust/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!("rustify/", env!("CARGO_PKG_VERSION")))
                 .build()
                 .expect("failed to build HTTP client"),
         }
@@ -35,7 +35,20 @@ impl WebApi {
         req: reqwest::RequestBuilder,
         token: &str,
     ) -> AppResult<T> {
-        let resp = req.bearer_auth(token).send().await?;
+        // Built rather than sent directly so the URL is available for logging
+        // when something fails — a bare "400 Bad Request" says nothing about
+        // which request or why.
+        let request = req.bearer_auth(token).build()?;
+        let method = request.method().clone();
+        let url = request.url().clone();
+
+        // A malformed Authorization header makes Spotify answer 400, not 401,
+        // which is indistinguishable from a bad query unless it is called out.
+        if token.is_empty() {
+            log::error!("{method} {url} attempted with an empty bearer token");
+        }
+
+        let resp = self.http.execute(request).await?;
         let status = resp.status();
 
         // 429 is common with librespot's shared default client ID: the quota is
@@ -72,6 +85,7 @@ impl WebApi {
                         body.clone()
                     }
                 });
+            log::warn!("{method} {url} -> {status}: {msg}");
             return Err(AppError::WebApi(format!("{status}: {msg}")));
         }
 

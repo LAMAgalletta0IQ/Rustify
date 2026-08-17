@@ -32,174 +32,278 @@
   }
 </script>
 
-<footer>
-  <button class="now" onclick={onOpenNowPlaying} title="Open now playing">
-    {#if pb.track?.coverUrl}
-      <img src={pb.track.coverUrl} alt="" width="52" height="52" />
-    {:else}
-      <span class="ph"></span>
-    {/if}
-    <span class="meta">
-      <span class="name truncate">{pb.track?.name ?? "Nothing playing"}</span>
-      <span class="artist muted truncate"
-        >{pb.track?.artists.join(", ") ?? ""}</span
-      >
-    </span>
-  </button>
+<div class="wrap">
+  <footer>
+    <button class="now" onclick={onOpenNowPlaying} title="Open now playing">
+      {#if pb.track?.coverUrl}
+        <img src={pb.track.coverUrl} alt="" width="46" height="46" />
+      {:else}
+        <span class="ph"></span>
+      {/if}
+      <span class="meta">
+        <span class="name truncate">{pb.track?.name ?? "Nothing playing"}</span>
+        <span class="artist muted truncate">
+          {pb.track?.artists.join(", ") ?? ""}
+        </span>
+      </span>
+    </button>
 
-  <div class="center">
-    <div class="controls">
-      <button
-        class:on={pb.shuffle}
-        onclick={() => store.run(() => api.setShuffle(!pb.shuffle))}
-        title="Shuffle">⤨</button
-      >
-      <button onclick={() => store.run(api.previousTrack)} title="Previous"
-        >⏮</button
-      >
-      <button
-        class="pp"
-        onclick={() => store.run(api.playPause)}
-        title={pb.isPlaying ? "Pause" : "Play"}
-      >
-        {pb.isLoading ? "…" : pb.isPlaying ? "⏸" : "▶"}
-      </button>
-      <button onclick={() => store.run(api.nextTrack)} title="Next">⏭</button>
-      <button
-        class:on={pb.repeatContext || pb.repeatTrack}
-        onclick={cycleRepeat}
-        title="Repeat">{pb.repeatTrack ? "🔂" : "🔁"}</button
-      >
+    <div class="center">
+      <div class="controls">
+        <button
+          class:on={pb.shuffle}
+          onclick={() => store.run(() => api.setShuffle(!pb.shuffle))}
+          title="Shuffle"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+          </svg>
+        </button>
+        <button onclick={() => store.run(api.previousTrack)} title="Previous">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 5h2v14H6zM20 5v14L9 12z" />
+          </svg>
+        </button>
+        <button
+          class="pp"
+          onclick={() => store.run(api.playPause)}
+          title={pb.isPlaying ? "Pause" : "Play"}
+        >
+          {#if pb.isLoading}
+            <span class="dots">…</span>
+          {:else if pb.isPlaying}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M7 4h4v16H7zM13 4h4v16h-4z" />
+            </svg>
+          {:else}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 4l14 8-14 8z" />
+            </svg>
+          {/if}
+        </button>
+        <button onclick={() => store.run(api.nextTrack)} title="Next">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16 5h2v14h-2zM4 5v14l11-7z" />
+          </svg>
+        </button>
+        <button
+          class:on={pb.repeatContext || pb.repeatTrack}
+          onclick={cycleRepeat}
+          title={pb.repeatTrack ? "Repeat track" : "Repeat"}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+            <path d="M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" />
+          </svg>
+          {#if pb.repeatTrack}<span class="one">1</span>{/if}
+        </button>
+      </div>
+
+      <div class="scrub">
+        <span class="t muted">{formatMs(pb.positionMs)}</span>
+        <span class="rail" style="--pct: {pct}%">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="0.1"
+            value={pct}
+            onchange={onSeek}
+            disabled={!pb.track}
+            aria-label="Seek"
+          />
+        </span>
+        <span class="t muted">{formatMs(pb.durationMs)}</span>
+      </div>
     </div>
 
-    <div class="scrub">
-      <span class="t muted">{formatMs(pb.positionMs)}</span>
-      <input
-        type="range"
-        min="0"
-        max="100"
-        step="0.1"
-        value={pct}
-        onchange={onSeek}
-        disabled={!pb.track}
-        aria-label="Seek"
-      />
-      <span class="t muted">{formatMs(pb.durationMs)}</span>
+    <div class="right">
+      <DevicePicker />
+      <svg class="vicon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 8a5 5 0 0 1 0 8" />
+      </svg>
+      <span class="rail vol" style="--pct: {volumeToPercent(pb.volume)}%">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={volumeToPercent(pb.volume)}
+          onchange={onVolume}
+          aria-label="Volume"
+        />
+      </span>
     </div>
-  </div>
-
-  <div class="right">
-    <DevicePicker />
-    <input
-      class="vol"
-      type="range"
-      min="0"
-      max="100"
-      value={volumeToPercent(pb.volume)}
-      onchange={onVolume}
-      aria-label="Volume"
-    />
-  </div>
-</footer>
+  </footer>
+</div>
 
 <style>
+  /* The bar floats with margin on three sides. Edge-to-edge kills the glass
+     illusion — the background has to wrap around it to read as depth. */
+  .wrap {
+    padding: 0 18px 18px;
+  }
   footer {
     display: grid;
-    grid-template-columns: minmax(160px, 1fr) minmax(320px, 2fr) minmax(
-        160px,
-        1fr
-      );
+    grid-template-columns: minmax(180px, 1fr) minmax(320px, 2fr) minmax(170px, 1fr);
     align-items: center;
-    gap: 16px;
-    padding: 10px 16px;
-    background: var(--bg-elev);
-    border-top: 1px solid var(--border);
+    gap: 22px;
+    padding: 11px 18px;
+    border-radius: var(--r-lg);
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(36px) saturate(1.6);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
   }
+
   .now {
     display: flex;
     align-items: center;
     gap: 12px;
     min-width: 0;
-    padding: 4px;
+    padding: 0;
     text-align: left;
   }
-  img,
+  .now img,
   .ph {
-    width: 52px;
-    height: 52px;
-    border-radius: 6px;
-    background: var(--bg-elev-2);
+    width: 46px;
+    height: 46px;
+    border-radius: 9px;
     object-fit: cover;
     flex: none;
+    background: rgba(255, 255, 255, 0.08);
   }
   .meta {
     display: flex;
     flex-direction: column;
     min-width: 0;
   }
+  .name {
+    font-weight: 600;
+  }
   .artist {
     font-size: 12px;
   }
+
   .center {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    gap: 7px;
   }
   .controls {
     display: flex;
-    justify-content: center;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
   .controls button {
-    padding: 4px 8px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
     color: var(--fg-dim);
-    font-size: 15px;
+    transition: color 0.15s, background 0.15s;
   }
   .controls button:hover {
     color: var(--fg);
+    background: var(--glass-hover);
   }
   .controls button.on {
     color: var(--accent);
   }
-  .pp {
-    font-size: 20px !important;
-    color: var(--fg) !important;
+  .one {
+    position: absolute;
+    right: 2px;
+    bottom: 1px;
+    font-size: 9px;
+    font-weight: 700;
   }
+  .pp {
+    width: 38px;
+    height: 38px;
+    background: var(--fg);
+    color: #0b0b0d;
+  }
+  .pp:hover {
+    background: #fff;
+    color: #0b0b0d;
+    transform: scale(1.05);
+  }
+  .dots {
+    font-size: 15px;
+    line-height: 1;
+  }
+
   .scrub {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    width: 100%;
   }
   .t {
     font-size: 11px;
     min-width: 34px;
     text-align: center;
+    font-variant-numeric: tabular-nums;
   }
-  input[type="range"] {
+
+  /* The filled portion is painted on the wrapper from --pct, so the native
+     input can stay fully transparent and still handle the interaction. */
+  .rail {
+    position: relative;
     flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to right,
+      var(--fg) 0 var(--pct),
+      rgba(255, 255, 255, 0.16) var(--pct) 100%
+    );
+  }
+  footer:hover .rail {
+    background: linear-gradient(
+      to right,
+      var(--accent) 0 var(--pct),
+      rgba(255, 255, 255, 0.16) var(--pct) 100%
+    );
+  }
+  .rail input[type="range"] {
+    position: absolute;
+    inset: -6px 0;
+    width: 100%;
+    height: 16px;
     -webkit-appearance: none;
     appearance: none;
-    height: 4px;
-    padding: 0;
-    border: none;
-    border-radius: 2px;
-    background: #3a3a44;
+    background: none;
+    cursor: pointer;
   }
-  input[type="range"]::-webkit-slider-thumb {
+  .rail input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 11px;
+    height: 11px;
     border-radius: 50%;
     background: var(--fg);
+    opacity: 0;
+    transition: opacity 0.15s;
   }
+  footer:hover .rail input[type="range"]::-webkit-slider-thumb {
+    opacity: 1;
+  }
+
   .right {
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 10px;
+    color: var(--fg-dim);
+  }
+  .vicon {
+    flex: none;
   }
   .vol {
-    max-width: 110px;
+    max-width: 74px;
+    flex: none;
+    width: 74px;
   }
 </style>

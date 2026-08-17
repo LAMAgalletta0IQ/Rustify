@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    spotify_rust_lib::run()
+    rustify_lib::run()
 }

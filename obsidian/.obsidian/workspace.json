@@ -4,17 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "0bd06be2bed22310",
+        "id": "efceaf9df75f2cbf",
         "type": "tabs",
         "children": [
           {
-            "id": "f6e275d5243c4554",
+            "id": "9796b900bd22943d",
             "type": "leaf",
             "state": {
-              "type": "graph",
+              "type": "empty",
               "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "icon": "lucide-file",
+              "title": "New tab"
             }
           }
         ]
@@ -172,36 +172,38 @@
   },
   "left-ribbon": {
     "hiddenItems": {
-      "obsidian42-brat:BRAT": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
-      "bases:Create new base": false
+      "bases:Create new base": false,
+      "obsidian42-brat:BRAT": false
     }
   },
-  "active": "f6e275d5243c4554",
+  "active": "9796b900bd22943d",
   "lastOpenFiles": [
+    "concepts/rate-limiting.md.tmp.10208.d0104273fe73",
+    "00-index/MOC.md.tmp.10208.0dd13dff2bc4",
+    "00-index/MOC.md.tmp.10208.648626458d73",
+    "concepts/external-dependencies.md.tmp.10208.8c618367b47e",
+    "concepts/external-dependencies.md.tmp.10208.2fc565c4c84e",
+    "modules/project-root.md.tmp.10208.d6c0cab385dc",
+    "files/src-tauri/Cargo.toml.md.tmp.10208.6e0ea958ec10",
+    "files/src/lib/types.ts.md.tmp.10208.688693871dcf",
+    "files/src-tauri/src/webapi.rs.md.tmp.10208.9ec723c53982",
+    "files/src-tauri/src/commands.rs.md.tmp.10208.346a08482ebd",
+    "modules/frontend-svelte.md",
+    "modules/frontend-components.md",
+    "files/vite.config.ts.md",
     "00-index/MOC.md.tmp.1652.cde852177847",
-    "concepts/external-dependencies.md.tmp.1652.9392e0c42e63",
-    "concepts/known-limitations.md.tmp.1652.1fdfe5ca9f0c",
-    "concepts/build-and-config.md.tmp.1652.2a712da12cd1",
-    "concepts/auth-and-tokens.md.tmp.1652.1032b3537128",
-    "concepts/auth-and-tokens.md.tmp.1652.d86c91d3a7e2",
-    "files/src/lib/types.ts.md.tmp.1652.133d2abced9a",
-    "concepts/rate-limiting.md.tmp.1652.665e1ce53e1b",
-    "files/src/lib/views/Login.svelte.md.tmp.1652.ba8e98b60376",
-    "files/src/lib/views/Login.svelte.md.tmp.1652.df8be61ff93d",
-    "files/src-tauri/src/commands.rs.md.tmp.1652.edb7ae0a6396",
     "concepts/rate-limiting.md",
     "files/app-icon.png.md",
     "files/README.md.md",
     "files/index.html.md",
     "files/tsconfig.json.md",
     "files/svelte.config.js.md",
-    "files/vite.config.ts.md",
     "files/package-lock.json.md",
     "files/package.json.md",
     "files/src-tauri/capabilities/default.json.md",
@@ -217,8 +219,6 @@
     "files/src/lib/views/ArtistView.svelte.md",
     "files/src/lib/views/AlbumView.svelte.md",
     "files/src/lib/views/NowPlaying.svelte.md",
-    "files/src/lib/views/Search.svelte.md",
-    "files/src/lib/views/Home.svelte.md",
-    "files/src/lib/views/Login.svelte.md"
+    "files/src/lib/views/Search.svelte.md"
   ]
 }

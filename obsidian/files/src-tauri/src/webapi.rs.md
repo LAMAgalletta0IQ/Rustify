@@ -3,7 +3,7 @@ tags: [file, backend, webapi, rust]
 ---
 # `src-tauri/src/webapi.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **88 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **130 lines**
 
 ## Purpose
 
@@ -18,7 +18,7 @@ Web API modules stay free of HTTP concerns.
 ### `struct WebApi { http: reqwest::Client }`
 **Holds no token.** The caller passes it per request, so there is exactly one
 credential in the app, owned by `TokenStore` in [[state.rs]]. Constructed with
-a `User-Agent` of `spotify-rust/<version>` from `CARGO_PKG_VERSION`.
+a `User-Agent` of `rustify/<version>` from `CARGO_PKG_VERSION`.
 
 ### `async fn send<T>(req, token) -> AppResult<T>`
 The core path used by every verb:
@@ -63,6 +63,15 @@ const MAX_RETRIES: u32 = 2;
 
 ## Notable logic / gotchas
 
+- **Every failed request is logged with method, URL, status and Spotify's own
+  message.** `send` builds the `Request` rather than sending the builder
+  directly, purely so the URL is available for that line. A bare
+  `400 Bad Request` in the UI identifies nothing; `GET …/search?…&limit=20 ->
+  400: Invalid limit` identifies the bug immediately — which is exactly how the
+  search ceiling in [[search.rs]] was found.
+- **An empty bearer token is called out explicitly.** Spotify answers a
+  malformed `Authorization` header with **400**, not 401, so it is otherwise
+  indistinguishable from a bad query.
 - **The `204` special case is load-bearing.** Without it, `transfer_playback`
   and `add_to_queue` would report a parse error on success. `serde_json` maps
   `null` onto `()` and `Value::Null`, which is why the trick works.

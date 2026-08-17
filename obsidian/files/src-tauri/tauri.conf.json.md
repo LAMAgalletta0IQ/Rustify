@@ -13,8 +13,8 @@ frontend is built and located, and what is bundled.
 ## Key items
 
 ### Identity
-`productName: "spotify-rust"`, `version: "0.1.0"`,
-`identifier: "dev.local.spotify-rust"`.
+`productName: "Rustify"`, `version: "0.1.0"`,
+`identifier: "dev.local.rustify"`.
 
 The identifier is a reverse-DNS bundle ID. **It determines the app data
 directory**, which is where [[auth.rs]] writes `tokens.json` and [[player.rs]]

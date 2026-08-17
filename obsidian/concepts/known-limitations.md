@@ -3,10 +3,21 @@ tags: [concept, limitations]
 ---
 # Known limitations
 
-Deliberate gaps, each with its cause. None of these are bugs to fix in this
-codebase — most are upstream constraints.
+Deliberate gaps, each with its cause. Most are upstream constraints rather than
+bugs to fix in this codebase.
 
 ## Not supported at all
+
+### Username / password login
+Spotify **removed password authentication server-side at the end of July 2024**.
+`Credentials::with_password` still exists in librespot 0.8's API and compiles
+without warning, but the server answers `Bad credentials` every time. The
+function is a leftover.
+
+OAuth is the only route. The user still types their password — into Spotify's
+own page, in the browser. What is lost is the in-app form, not account access.
+ncspot has no password path either, which is part of why it "always works":
+there is no fallback to hide behind. See [[auth-and-tokens]].
 
 ### Jams
 Spotify's real-time collaborative listening. **No public Web API exists** and
@@ -28,15 +39,20 @@ message — see [[auth-and-tokens]].
 
 ## API-limited
 
+### Search returns at most 10 per type
+`/search` caps `limit` at **10** (default 5) — far below the 50 most other
+endpoints allow, and exceeding it is a hard `400 Invalid limit`, not a silent
+truncation. `search::MAX_SEARCH_LIMIT` encodes the ceiling. Unrelated to the
+50s in [[library.rs]], which those endpoints do accept.
+
 ### Queue reorder / remove
 `POST /me/player/queue` appends. The Web API offers **no reorder or remove
 operation**. [[queue.rs]] can only read and append; jumping into the queue is
 implemented as replaying it as an explicit track list from the chosen entry.
 
 ### Queue reflects the active device
-`GET /me/player/queue` returns the **active** device's queue. Accurate while
-this app is active — the normal case — but it can show another device's queue
-after a transfer.
+`GET /me/player/queue` returns the **active** device's queue, which may be
+another device's after a transfer.
 
 ### Artist top tracks have no context
 `/artists/{id}/top-tracks` returns a synthesised list, not a browsable Spotify
@@ -48,28 +64,43 @@ context, so [[ArtistView.svelte]] plays them via `load_tracks` rather than
 so `imageUrl` is null on every row. [[AlbumView.svelte]] shows the art in the
 header instead.
 
+## Incomplete
+
+### Transport controls do not drive remote devices
+`play`, `pause`, `next`, `seek`, `set_volume` and friends all go through
+`Spirc`, which controls **this app's player only**. While another device is
+active, the UI reflects its state (via the poller) but the buttons do not
+command it — Spotify wants `PUT /me/player/play` and siblings for that.
+
+Playing something from Rustify activates this device first, so the controls work
+from that point on. Driving a remote device as a true remote is unimplemented.
+
 ## Shared-quota rate limiting
 
-**Observed in practice, not theoretical.** librespot's built-in client ID is
-shared by every librespot-based client, and Spotify meters per client ID over a
-rolling 30-second window. A 429 can therefore arrive on a first request with no
-prior usage — including on the login screen's Premium check.
+**Observed in practice, not theoretical.** Without a private `RUSTIFY_CLIENT_ID`,
+Web API traffic uses librespot's built-in client ID, shared by every
+librespot-based client and metered per client ID over a rolling 30-second
+window. A 429 can arrive on a first request with no prior usage.
 
-The app now detects it, honours `Retry-After`, retries short windows on GETs,
-and counts longer ones down in the UI. It cannot be fixed outright from here;
-[[rate-limiting]] covers the full picture, including why registering your own
-client ID usually makes things worse.
+Setting a private client ID fixes it for Web API calls; playback necessarily
+stays on the shared ID. [[rate-limiting]] covers the full picture.
 
 ## Implementation heuristics
 
 ### `is_active_device` is inferred
-librespot exposes no explicit flag. [[player.rs]] infers it from player events.
+librespot exposes no explicit flag. [[player.rs]] infers it from player events,
+and the remote poller clears it when `/me/player` reports another device.
 Reliable in practice, but a heuristic. See [[state-and-events]].
 
+### Remote state is up to 5 s stale
+The poller runs on a fixed 5 s interval, so a track change on another device can
+take that long to appear. A deliberate trade against quota consumption.
+
 ### The position ticker can drift
-[[store.svelte.ts]] ticks position locally at 1 Hz between backend updates.
-Between `PositionCorrection` events it may drift by a fraction of a second. A
-deliberate CPU trade-off.
+[[store.svelte.ts]] ticks position locally at 1 Hz between backend updates. The
+backend now anchors position with a timestamp and recomputes it on every
+snapshot, so a snapshot can no longer *reset* the clock — but sub-second drift
+between corrections remains. A deliberate CPU trade-off.
 
 ### Media keys are best-effort
 Media keys are a globally exclusive OS resource. If another player already
@@ -88,21 +119,27 @@ side effect of `tauri icon` — they are unused. See [[icons]].
 libraries will accumulate DOM nodes.
 
 ### Search results are not paginated
-[[Search.svelte]] requests a single page (default 20 per type).
+[[Search.svelte]] requests a single page (10 per type, the API maximum).
 
 ### No offline mode
 librespot caches audio (2 GB cap) but there is no offline UI; all metadata
 requires network.
 
-## Untested surface
+## Verification status
 
-As of this vault, the app **compiles, links, and launches**, and the frontend
-type-checks. Not yet exercised against a live Premium account: login,
-playback, Connect registration, and every Web API call. The manual checklist in
-[[README.md]] covers them in order.
+Exercised against a live Premium account: **login (both authorizations),
+playback, search, and the device registration**. The startup log confirms `.env`
+pickup and which client ID mode is active.
 
-Highest residual risk is Connect/`Spirc` behaviour — the piece with the least
-verifiable surface without a real account and a second device.
+Not yet confirmed by the author at the time of writing:
+
+- Passive device behaviour — opening the app while music plays elsewhere should
+  now show that track rather than "Nothing playing".
+- Transfer between devices via the picker.
+- Restore-after-restart with the corrected token persistence.
+
+Highest residual risk remains Connect/`Spirc` behaviour, the piece with the
+least verifiable surface without a real account and a second device.
 
 ## See also
 

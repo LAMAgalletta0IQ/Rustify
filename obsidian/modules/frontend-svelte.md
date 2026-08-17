@@ -18,7 +18,7 @@ src/
 ├── app.css             global styles / design tokens
 ├── vite-env.d.ts       ambient types
 └── lib/
-    ├── api.ts          typed wrappers for all 32 commands
+    ├── api.ts          typed wrappers for all 33 commands
     ├── types.ts        mirrors the Rust serde shapes
     ├── store.svelte.ts runes store, event subscriptions
     ├── views/          full-screen views

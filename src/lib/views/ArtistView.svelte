@@ -120,21 +120,26 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 10px;
-    background: var(--bg-elev);
+    padding: 12px;
+    border-radius: var(--r-md);
+    background: var(--glass);
+    border: 1px solid var(--hairline);
+    backdrop-filter: blur(var(--blur));
     text-align: left;
+    transition: background 0.18s, transform 0.18s;
   }
   .card:hover {
-    background: var(--bg-elev-2);
+    background: var(--glass-hover);
+    transform: translateY(-3px);
   }
   .card img,
   .ph {
     width: 100%;
     aspect-ratio: 1;
-    border-radius: 6px;
+    border-radius: 11px;
     object-fit: cover;
-    background: var(--bg-elev-2);
-    margin-bottom: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    margin-bottom: 11px;
   }
   .title {
     font-weight: 600;

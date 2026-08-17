@@ -3,7 +3,7 @@ tags: [file, backend, state, rust]
 ---
 # `src-tauri/src/state.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **100 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **127 lines**
 
 ## Purpose
 
@@ -37,9 +37,26 @@ The single snapshot pushed to the UI:
 | `position_ms`, `duration_ms` | |
 | `volume` | **Raw `0..=65535`**, librespot's scale |
 | `shuffle`, `repeat_context`, `repeat_track` | |
+| `position_base_ms`, `position_at` | `#[serde(skip)]` — the position anchor |
 
 Deliberately flat and cheap to clone — serialised on every position correction,
 and the target hardware is a low-end CPU.
+
+#### `set_position()` / `refresh_position()`
+
+librespot reports a position on only *some* events; `VolumeChanged`,
+`ShuffleChanged` and `RepeatChanged` carry none. Because the whole snapshot goes
+out on every event, those shipped the **last reported** position — normally 0,
+from the start of the track — and the UI clock jumped back to 0:00 while audio
+kept playing.
+
+- `set_position(ms)` records the value *and* `Instant::now()`.
+- `refresh_position()` adds elapsed wall time, clamped to `duration_ms`, and is
+  a no-op while paused.
+
+Every write to `position_ms` goes through `set_position`; every read that leaves
+the backend is preceded by `refresh_position`. The two skipped fields never
+reach the webview, so [[types.ts]] is unaffected.
 
 ### `AuthState`
 `logged_in`, `display_name`, `user_id`, `product`, `avatar_url`. `user_id`
@@ -67,6 +84,7 @@ Live librespot handles, present only while logged in:
 | `session` | Kept alive for the login's lifetime. `#[allow(dead_code)]` — never read, but dropping it would end the connection |
 | `spirc` | The transport handle every playback command goes through |
 | `refresh_task` | `JoinHandle`, aborted on logout so the refresher cannot outlive the session |
+| `remote_task` | `JoinHandle` for the remote-playback poller, aborted alongside it — otherwise it keeps polling after logout with a dead token |
 
 ### `AppState`
 ```rust
@@ -96,6 +114,10 @@ Pure data definitions. No I/O. All serialisable types use
 - **`tokens` sits outside `SpotifySession`** so reading the token does not
   require locking the whole session. Important because the event pump reads it
   on every track change.
+- **Both `JoinHandle`s must be aborted explicitly.** Dropping one *detaches* the
+  task rather than cancelling it. Forgetting this for `refresh_task` once left
+  two refreshers hitting the token endpoint on independent schedules — see
+  [[rate-limiting]]. `remote_task` has the same hazard.
 - **`tokio::sync::RwLock`, not `std::sync`** — these are held across `.await`
   points; a `std` lock would deadlock the runtime.
 - `AppState` derives `Default`, which is what `AppState::new()` returns —

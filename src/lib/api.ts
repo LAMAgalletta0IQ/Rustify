@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AlbumSummary,
   AppErrorPayload,
+  ArtistPage,
   AuthState,
   Device,
+  LoginInfo,
   PlaybackState,
   PlaylistSummary,
   QueueView,
@@ -33,6 +35,7 @@ export function asAppError(e: unknown): AppErrorPayload {
 
 // ---- auth ---------------------------------------------------------------
 export const getAuthState = () => invoke<AuthState>("get_auth_state");
+export const getLoginInfo = () => invoke<LoginInfo>("get_login_info");
 export const login = () => invoke<AuthState>("login");
 export const restoreSession = () => invoke<AuthState>("restore_session");
 export const logout = () => invoke<void>("logout");
@@ -88,6 +91,14 @@ export const getSavedAlbums = (limit?: number, offset?: number) =>
   invoke<AlbumSummary[]>("get_saved_albums", { limit, offset });
 export const getAlbumTracks = (albumId: string) =>
   invoke<TrackSummary[]>("get_album_tracks", { albumId });
+/**
+ * Followed artists page by cursor, not offset: pass the `next` returned by the
+ * previous page. `next: null` means there are no more.
+ */
+export const getFollowedArtists = (limit?: number, after?: string) =>
+  invoke<ArtistPage>("get_followed_artists", { limit, after });
+export const getRecentlyPlayed = (limit?: number) =>
+  invoke<TrackSummary[]>("get_recently_played", { limit });
 export const setTracksSaved = (ids: string[], saved: boolean) =>
   invoke<void>("set_tracks_saved", { ids, saved });
 export const setAlbumsSaved = (ids: string[], saved: boolean) =>

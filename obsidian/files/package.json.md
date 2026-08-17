@@ -13,7 +13,7 @@ the build depends on.
 ## Key items
 
 ### Identity
-`name: "spotify-rust"`, `private: true`, `version: "0.1.0"`,
+`name: "rustify"`, `private: true`, `version: "0.1.0"`,
 **`type: "module"`** — so `.js` files are ES modules, which is why
 [[svelte.config.js]] uses `export default`.
 

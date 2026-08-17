@@ -3,7 +3,7 @@ tags: [file, frontend, state]
 ---
 # `src/lib/types.ts`
 
-**Module:** [[frontend-svelte]] · **Language:** TypeScript · **121 lines**
+**Module:** [[frontend-svelte]] · **Language:** TypeScript · **118 lines**
 
 ## Purpose
 
@@ -33,6 +33,16 @@ verifies it against Rust. It also carries
 ## Helpers
 
 ### `MAX_VOLUME = 65535`
+### `interface LoginInfo`
+`privateClientId`, `clientIdEnv`, `webapiRedirectUri` — mirrors
+`commands::LoginInfo`. Lets [[Login.svelte]] describe the login flow and print
+the dashboard steps without hardcoding values owned by [[auth.rs]].
+
+### `interface PlaybackState`
+Mirrors the Rust struct, **minus** `position_base_ms` / `position_at`: those are
+`#[serde(skip)]` and never cross the IPC boundary. The UI sees only the
+already-recomputed `positionMs`. See [[state.rs]].
+
 ### `volumeToPercent(v: number): number`
 Converts librespot's raw scale to `0..100` for display. The inverse,
 `percent_to_volume`, lives in [[player.rs]] — conversion happens at both

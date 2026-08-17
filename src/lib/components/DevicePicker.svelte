@@ -96,9 +96,12 @@
     z-index: 11;
     width: 260px;
     padding: 8px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    /* A popover needs its own darkening: pure --glass over the player bar's
+       glass would stack two translucent layers and read as unreadable haze. */
+    background: rgba(22, 22, 28, 0.82);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    backdrop-filter: blur(var(--blur));
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   }
   header {
@@ -120,7 +123,8 @@
     text-align: left;
   }
   .dev:hover:not(:disabled) {
-    background: var(--bg-elev);
+    background: var(--glass-hover);
+    border-radius: var(--r-sm);
   }
   .dmeta {
     display: flex;
@@ -147,7 +151,7 @@
     width: 100%;
     margin-top: 6px;
     padding: 8px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--hairline);
     color: var(--fg-dim);
   }
   .here:hover {

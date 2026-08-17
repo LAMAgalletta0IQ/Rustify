@@ -2,7 +2,18 @@
   import * as api from "../api";
   import { store } from "../store.svelte";
 
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
+
+  /** Null until loaded; the copy below degrades gracefully while it is. */
+  let info = $state<import("../types").LoginInfo | null>(null);
+
+  onMount(async () => {
+    try {
+      info = await api.getLoginInfo();
+    } catch {
+      // Purely cosmetic — a failure here must not block logging in.
+    }
+  });
 
   let busy = $state(false);
   let errKind = $state<string | null>(null);
@@ -77,7 +88,7 @@
 
 <div class="wrap">
   <div class="card">
-    <h1>spotify-rust</h1>
+    <h1>Rustify</h1>
     <p class="muted">
       A native, lightweight Spotify client. Playback is handled by librespot;
       library and search use the official Web API.
@@ -97,7 +108,13 @@
 
     {#if busy}
       <p class="muted small">
-        Your browser has been opened. Approve access, then return here.
+        {#if info?.privateClientId}
+          Your browser has been opened. Approve access — then approve a
+          <strong>second</strong> time, in the tab that opens after it. One
+          login is for playback, the other for library and search.
+        {:else}
+          Your browser has been opened. Approve access, then return here.
+        {/if}
       </p>
     {/if}
 
@@ -117,15 +134,31 @@
         <span>{errMsg}</span>
         {#if errKind === "RateLimited"}
           <span class="small">
-            This is usually not caused by anything you did. librespot's built-in
-            client ID is shared by every librespot-based app, so its Spotify API
-            quota is used up globally — a fresh login can be refused.
+            {#if info?.privateClientId}
+              Unusual with your own client ID configured — this quota is
+              private to your app, so it is most likely a short burst rather
+              than the shared-quota problem.
+            {:else}
+              This is not caused by anything you did. Without a client ID of
+              your own, library and search share librespot's built-in one with
+              every librespot-based app in the world, so its Spotify API quota
+              is used up globally and a fresh login can be refused.
+            {/if}
             {#if cooldown !== null}
               Waiting out Spotify's window and retrying automatically.
             {:else}
               Waiting a few minutes and trying again normally clears it.
             {/if}
           </span>
+          {#if info && !info.privateClientId}
+            <span class="small">
+              To fix it properly: create an app at
+              <code>developer.spotify.com/dashboard</code>, add
+              <code>{info.webapiRedirectUri}</code> as a redirect URI, and put
+              the Client ID in <code>.env</code> as
+              <code>{info.clientIdEnv}</code>.
+            </span>
+          {/if}
         {/if}
         {#if errKind === "PremiumRequired"}
           <span class="small">
@@ -153,9 +186,10 @@
     align-items: flex-start;
     max-width: 420px;
     padding: 32px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 12px;
+    background: var(--glass);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    backdrop-filter: blur(var(--blur));
   }
   h1 {
     margin: 0;
@@ -173,13 +207,20 @@
     flex-direction: column;
     gap: 6px;
     padding: 12px 14px;
-    border-radius: var(--radius);
-    background: #2a1618;
-    border: 1px solid #57282c;
+    border-radius: var(--r-sm);
+    background: rgba(180, 50, 60, 0.22);
+    border: 1px solid rgba(220, 90, 100, 0.35);
     line-height: 1.45;
   }
   .err.premium {
-    background: #2a2416;
-    border-color: #574d28;
+    background: rgba(190, 160, 50, 0.18);
+    border-color: rgba(220, 190, 90, 0.3);
+  }
+  code {
+    font-size: 11px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    word-break: break-all;
   }
 </style>

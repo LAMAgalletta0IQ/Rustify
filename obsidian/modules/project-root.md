@@ -22,11 +22,13 @@ Frontend tooling config and project-level files. The Rust half lives under
 | [[.gitattributes]] | LF normalisation |
 | [[README.md]] | Human-facing docs, setup, test checklist, measurements |
 | [[app-icon.png]] | Source image for the generated [[icons]] |
+| `.env.example` | Committed template for local config — see [[build-and-config]] |
+| `.env` | Local config, gitignored. `RUSTIFY_CLIENT_ID`, optionally `RUST_LOG` |
 
 ## Directory layout
 
 ```
-spotify-rust/
+rustify/
 ├── index.html          ← Vite entry
 ├── package.json        ← npm scripts
 ├── vite.config.ts
@@ -34,6 +36,8 @@ spotify-rust/
 ├── tsconfig.json
 ├── app-icon.png        ← icon source
 ├── README.md
+├── .env.example        ← config template (committed)
+├── .env                ← local config (gitignored)
 ├── src/                → [[frontend-svelte]]
 ├── src-tauri/          → [[backend-rust]] + [[tauri-config]]
 ├── obsidian/           ← this vault

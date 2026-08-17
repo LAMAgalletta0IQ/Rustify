@@ -3,13 +3,14 @@ tags: [file, backend, entrypoint, rust]
 ---
 # `src-tauri/src/lib.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **73 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **111 lines**
 
 ## Purpose
 
-The crate root and application assembly point. Declares every backend module,
-configures the Tauri builder, and registers all 32 commands. The single best
-file to read first — it is the table of contents for the backend.
+The crate root and application assembly point. Loads `.env`, declares every
+backend module, configures the Tauri builder, and registers all 33 commands.
+The single best file to read first — it is the table of contents for the
+backend.
 
 ## Key items
 
@@ -20,21 +21,35 @@ mod media_keys; mod player; mod queue; mod search; mod state; mod webapi;
 ```
 All private: nothing in this crate is a public API surface except `run()`.
 
+### `fn load_dotenv() -> Option<PathBuf>`
+
+Loads `.env` into the process environment. `dotenvy::dotenv()` walks up from the
+working directory — `src-tauri/` under `tauri dev`, so a project-root `.env` is
+found. Falls back to the executable's own directory for bundled builds, whose
+launch directory is arbitrary.
+
+Returns the path rather than logging it: this runs *before* the logger exists.
+
 ### `pub fn run()`
 
 Annotated `#[cfg_attr(mobile, tauri::mobile_entry_point)]` — inert on desktop,
 kept from the Tauri template. Executes in order:
 
-1. **Logging** — `env_logger` with `default_filter_or("info,librespot=warn")`.
+1. **`load_dotenv()`** — must precede the logger so `RUST_LOG` can live in the
+   file.
+2. **Logging** — `env_logger` with `default_filter_or("info,librespot=warn")`.
    librespot is extremely verbose at `debug`; `warn` keeps its noise out while
    leaving app logs at `info`. `RUST_LOG` overrides both.
-2. **`tauri_plugin_opener`** — used by librespot's OAuth helper to open the
+3. **Startup report** — logs the `.env` path (or its absence) and whether the
+   Web API client ID is private or the shared default. The fastest way to tell
+   which quota is in play; see [[rate-limiting]].
+4. **`tauri_plugin_opener`** — used by librespot's OAuth helper to open the
    system browser.
-3. **`tauri_plugin_global_shortcut`** — backs [[media_keys.rs]].
-4. **`.setup(...)`** — calls `media_keys::register(app.handle())`.
-5. **`.manage(AppState::new())`** — installs shared state ([[state.rs]]).
-6. **`.invoke_handler(generate_handler![...])`** — the 32 commands.
-7. **`.run(generate_context!())`** — reads [[tauri.conf.json]] at compile time;
+5. **`tauri_plugin_global_shortcut`** — backs [[media_keys.rs]].
+6. **`.setup(...)`** — calls `media_keys::register(app.handle())`.
+7. **`.manage(AppState::new())`** — installs shared state ([[state.rs]]).
+8. **`.invoke_handler(generate_handler![...])`** — the 33 commands.
+9. **`.run(generate_context!())`** — reads [[tauri.conf.json]] at compile time;
    blocks until exit.
 
 ## The command registry
@@ -43,7 +58,7 @@ Grouped by comment in the source:
 
 | Group | Commands |
 | --- | --- |
-| auth | `get_auth_state`, `login`, `restore_session`, `logout` |
+| auth | `get_auth_state`, `get_login_info`, `login`, `restore_session`, `logout` |
 | playback | `get_playback`, `play`, `pause`, `play_pause`, `next_track`, `previous_track`, `seek`, `set_volume`, `set_shuffle`, `set_repeat`, `load_context`, `load_tracks` |
 | connect | `list_devices`, `transfer_playback`, `activate_this_device` |
 | library | `get_playlists`, `get_playlist_tracks`, `get_saved_tracks`, `get_saved_albums`, `get_album_tracks`, `set_tracks_saved`, `set_albums_saved`, `get_tracks_saved`, `get_artist_top_tracks`, `get_artist_albums` |
@@ -64,6 +79,11 @@ Grouped by comment in the source:
 
 ## Notable logic / gotchas
 
+- **`.env` must load before the logger.** `RUST_LOG` is read at
+  `env_logger::init()`, so a `.env` loaded afterwards would silently not apply.
+  The consequence is that `load_dotenv` cannot log its own outcome — an earlier
+  version called `log::debug!` inside it, which compiled, ran, and emitted
+  nothing at all because no logger was installed yet.
 - **Ordering matters.** `.setup()` runs before any login, so
   [[media_keys.rs]] handlers must tolerate `spotify == None`. They do —
   each returns early when logged out.

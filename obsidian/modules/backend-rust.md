@@ -14,7 +14,7 @@ exposed to the webview.
 | File | Role |
 | --- | --- |
 | [[main.rs]] | OS entry point. 6 lines |
-| [[lib.rs]] | Declares modules, builds the Tauri app, registers 32 commands |
+| [[lib.rs]] | Declares modules, builds the Tauri app, registers 33 commands |
 | [[state.rs]] | `AppState`, `PlaybackState`, `AuthState`, `TokenStore`, event names |
 | [[error.rs]] | `AppError` — the one error type crossing the IPC boundary |
 

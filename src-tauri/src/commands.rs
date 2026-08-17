@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::auth;
 use crate::connect::{self, Device};
 use crate::error::{AppError, AppResult};
-use crate::library::{self, AlbumSummary, PlaylistSummary, TrackSummary};
+use crate::library::{self, AlbumSummary, ArtistPage, PlaylistSummary, TrackSummary};
 use crate::player;
 use crate::queue::{self, QueueView};
 use crate::search::{self, SearchResults};
@@ -35,8 +35,8 @@ fn device_name() -> String {
     std::env::var("COMPUTERNAME")
         .ok()
         .filter(|s| !s.is_empty())
-        .map(|s| format!("{s} (spotify-rust)"))
-        .unwrap_or_else(|| "spotify-rust".to_string())
+        .map(|s| format!("{s} (Rustify)"))
+        .unwrap_or_else(|| "Rustify".to_string())
 }
 
 // ---- auth ---------------------------------------------------------------
@@ -46,40 +46,63 @@ pub async fn get_auth_state(state: State<'_, AppState>) -> AppResult<AuthState> 
     Ok(state.auth.read().await.clone())
 }
 
+/// Shape of the login flow, so the UI can describe it accurately instead of
+/// guessing. Read at render time, not cached, because `.env` is only loaded at
+/// startup but the value is cheap to recompute.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginInfo {
+    /// True when a private Web API client ID is configured, which means the
+    /// login opens the browser twice and rate limits are far less likely.
+    pub private_client_id: bool,
+    /// Name of the variable to set, so the UI never hardcodes it.
+    pub client_id_env: &'static str,
+    /// Redirect URI the user must register against their own app.
+    pub webapi_redirect_uri: String,
+}
+
+#[tauri::command]
+pub fn get_login_info() -> LoginInfo {
+    LoginInfo {
+        private_client_id: auth::webapi_client_id().is_some(),
+        client_id_env: auth::CLIENT_ID_ENV,
+        webapi_redirect_uri: auth::webapi_redirect_uri(),
+    }
+}
+
 /// Completes a login given an OAuth token: verifies Premium, starts librespot,
 /// persists the refresh token.
 async fn establish(
     app: &AppHandle,
     state: &AppState,
     api: &WebApi,
-    tok: librespot_oauth::OAuthToken,
+    toks: auth::SessionTokens,
 ) -> AppResult<AuthState> {
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
 
-    // Persist the refresh token *before* the Premium gate. The OAuth flow has
+    // Persist the refresh tokens *before* the Premium gate. The OAuth flow has
     // already succeeded by this point, so if the gate then fails on a
     // transient error (notably a 429 on /me), a retry can go through
     // `restore_session` silently instead of reopening the browser.
-    auth::save_stored_tokens(
-        &data_dir,
-        &auth::StoredTokens {
-            refresh_token: tok.refresh_token.clone(),
-        },
-    )?;
+    let stored = toks.stored();
+    auth::save_stored_tokens(&data_dir, &stored)?;
 
     // Premium gate, so a free account gets a clear message rather than a
-    // silent playback failure later.
-    let auth_state = auth::fetch_profile_require_premium(api, &tok.access_token).await?;
+    // silent playback failure later. Uses the Web API token, which is the one
+    // authorised for `/me`.
+    let auth_state = auth::fetch_profile_require_premium(api, &toks.webapi.access_token).await?;
 
     // Publish the token before anything reads it.
-    state.tokens.set(tok.access_token.clone()).await;
+    state.tokens.set(toks.webapi.access_token.clone()).await;
 
+    // librespot gets the *streaming* bearer, which is the one carrying the
+    // `streaming` scope from Spotify's desktop client ID.
     let started = player::start_session(
         app.clone(),
-        Credentials::with_access_token(tok.access_token.clone()),
+        Credentials::with_access_token(toks.streaming_access.clone()),
         state.tokens.clone(),
         device_name(),
         data_dir.join("cache"),
@@ -89,11 +112,11 @@ async fn establish(
     // Access tokens last ~1h; without this every Web API call would start
     // failing mid-session.
     let refresh_task = auth::spawn_refresher(
-        auth::default_client_id(),
-        tok.refresh_token,
+        toks.webapi_client_id.clone(),
+        stored,
         state.tokens.clone(),
         data_dir,
-        tok.expires_at,
+        toks.webapi.expires_at,
     );
 
     // Replacing the session must tear the old one down explicitly. Dropping a
@@ -105,12 +128,18 @@ async fn establish(
         log::warn!("replacing an existing session; shutting the old one down");
         let _ = old.spirc.shutdown();
         old.refresh_task.abort();
+        old.remote_task.abort();
     }
+
+    // Reflects playback on the user's other devices, so opening the app while
+    // listening on a phone shows the current track instead of "Nothing playing".
+    let remote_task = player::spawn_remote_poller(app.clone(), state.tokens.clone());
 
     *state.spotify.write().await = Some(SpotifySession {
         session: started.session,
         spirc: started.spirc,
         refresh_task,
+        remote_task,
     });
     *state.auth.write().await = auth_state.clone();
 
@@ -121,9 +150,8 @@ async fn establish(
 #[tauri::command]
 pub async fn login(app: AppHandle, state: State<'_, AppState>) -> AppResult<AuthState> {
     let api = WebApi::new();
-    let client_id = auth::default_client_id();
-    let tok = auth::interactive_login(&client_id).await?;
-    establish(&app, &state, &api, tok).await
+    let toks = auth::interactive_login().await?;
+    establish(&app, &state, &api, toks).await
 }
 
 /// Attempted once at startup. Returns a logged-out state rather than an error
@@ -140,15 +168,21 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
     };
 
     let api = WebApi::new();
-    let client_id = auth::default_client_id();
 
-    match auth::refresh_login(&client_id, &stored.refresh_token).await {
-        Ok(tok) => establish(&app, &state, &api, tok).await,
+    match auth::restore_login(&stored).await {
+        Ok(toks) => establish(&app, &state, &api, toks).await,
         Err(e) => {
-            // Refresh token revoked/expired: drop it and fall back to the
-            // login screen instead of surfacing a scary error.
-            log::warn!("stored refresh token unusable: {e}");
-            auth::clear_stored_tokens(&data_dir);
+            // Only discard the stored tokens when Spotify says the grant
+            // itself is dead. A network blip at startup, a 429, or a 5xx are
+            // all transient — deleting on those was silently logging the user
+            // out roughly whenever the app started faster than the network
+            // came up.
+            if auth::is_grant_rejected(&e) {
+                log::warn!("stored refresh token rejected by Spotify, clearing it: {e}");
+                auth::clear_stored_tokens(&data_dir);
+            } else {
+                log::warn!("could not restore session (tokens kept, will retry next launch): {e}");
+            }
             Ok(AuthState::default())
         }
     }
@@ -159,6 +193,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
     if let Some(s) = state.spotify.write().await.take() {
         let _ = s.spirc.shutdown();
         s.refresh_task.abort();
+        s.remote_task.abort();
     }
     state.tokens.set(String::new()).await;
     *state.auth.write().await = AuthState::default();
@@ -243,7 +278,16 @@ pub async fn load_context(
     context_uri: String,
     track_uri: Option<String>,
 ) -> AppResult<()> {
+    // Taking over playback is the point of an explicit load, so activate here
+    // rather than at login — see the note in `player::start_session`. Skipped
+    // when already active, which librespot would otherwise log as
+    // "SpircCommand::Activate will be ignored while already active".
+    let activate = !state.playback.read().await.is_active_device;
+
     with_spirc(&state, move |s| {
+        if activate {
+            s.activate()?;
+        }
         s.load(LoadRequest::from_context_uri(
             context_uri,
             LoadRequestOptions {
@@ -269,7 +313,12 @@ pub async fn load_tracks(
     if uris.is_empty() {
         return Ok(());
     }
+    let activate = !state.playback.read().await.is_active_device;
+
     with_spirc(&state, move |s| {
+        if activate {
+            s.activate()?;
+        }
         s.load(LoadRequest::from_tracks(
             uris,
             LoadRequestOptions {
@@ -356,6 +405,27 @@ pub async fn get_saved_albums(
     library::saved_albums(&WebApi::new(), &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
 }
 
+/// `after` is the `next` cursor from the previous page, not an item count —
+/// `/me/following` is cursor-paginated. Omit it for the first page.
+#[tauri::command]
+pub async fn get_followed_artists(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+    after: Option<String>,
+) -> AppResult<ArtistPage> {
+    let t = token(&state).await?;
+    library::followed_artists(&WebApi::new(), &t, limit.unwrap_or(50), after.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn get_recently_played(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> AppResult<Vec<TrackSummary>> {
+    let t = token(&state).await?;
+    library::recently_played(&WebApi::new(), &t, limit.unwrap_or(50)).await
+}
+
 #[tauri::command]
 pub async fn get_album_tracks(
     state: State<'_, AppState>,
@@ -421,7 +491,8 @@ pub async fn search_spotify(
     limit: Option<u32>,
 ) -> AppResult<SearchResults> {
     let t = token(&state).await?;
-    search::search(&WebApi::new(), &t, &query, limit.unwrap_or(20)).await
+    let limit = limit.unwrap_or(search::MAX_SEARCH_LIMIT);
+    search::search(&WebApi::new(), &t, &query, limit).await
 }
 
 // ---- queue --------------------------------------------------------------

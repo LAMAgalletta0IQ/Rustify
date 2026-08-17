@@ -42,6 +42,44 @@ pub struct PlaybackState {
     pub shuffle: bool,
     pub repeat_context: bool,
     pub repeat_track: bool,
+
+    /// Position as of [`Self::position_at`], and when that reading was taken.
+    ///
+    /// Not serialised — they exist so `position_ms` can be recomputed on
+    /// demand. librespot reports a position only on some events (`Playing`,
+    /// `Seeked`, periodic corrections); volume and shuffle changes carry none.
+    /// Without this, emitting a snapshot after one of those would ship the last
+    /// reported position — normally 0, from the start of the track — and reset
+    /// the UI's clock while audio kept playing.
+    #[serde(skip)]
+    pub position_base_ms: u32,
+    #[serde(skip)]
+    pub position_at: Option<std::time::Instant>,
+}
+
+impl PlaybackState {
+    /// Anchors the position so elapsed time can be added to it later.
+    pub fn set_position(&mut self, position_ms: u32) {
+        self.position_ms = position_ms;
+        self.position_base_ms = position_ms;
+        self.position_at = Some(std::time::Instant::now());
+    }
+
+    /// Brings `position_ms` up to date from the anchor. Call before handing a
+    /// snapshot to the UI.
+    pub fn refresh_position(&mut self) {
+        if !self.is_playing {
+            return;
+        }
+        let Some(at) = self.position_at else { return };
+        let elapsed = at.elapsed().as_millis().min(u32::MAX as u128) as u32;
+        let pos = self.position_base_ms.saturating_add(elapsed);
+        self.position_ms = if self.duration_ms > 0 {
+            pos.min(self.duration_ms)
+        } else {
+            pos
+        };
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -81,6 +119,9 @@ pub struct SpotifySession {
     pub spirc: Spirc,
     /// Aborted on logout so the refresher does not outlive the session.
     pub refresh_task: tauri::async_runtime::JoinHandle<()>,
+    /// Mirrors playback from other Connect devices; aborted alongside the
+    /// refresher, or it would keep polling after logout with a dead token.
+    pub remote_task: tauri::async_runtime::JoinHandle<()>,
 }
 
 #[derive(Default)]

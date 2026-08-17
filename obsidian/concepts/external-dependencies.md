@@ -19,6 +19,7 @@ What the project depends on and how each is used.
 | `serde` / `serde_json` | 1 | Serialisation across IPC and HTTP |
 | `thiserror` | 2 | Error derive |
 | `log` / `env_logger` | 0.4 / 0.11 | Logging |
+| `dotenvy` | 0.15 | Loads `.env` before the logger — see [[build-and-config]] |
 | `futures-util` | 0.3 | Async utilities |
 
 ### librespot feature selection
@@ -40,7 +41,8 @@ Connect device through Spotify's dealer/websocket, so mDNS is dead weight.
 | Item | Where | Purpose |
 | --- | --- | --- |
 | `OAuthClientBuilder` | [[auth.rs]] | Login, refresh |
-| `SessionConfig::default().client_id` | [[auth.rs]] | Spotify's desktop client ID |
+| `SessionConfig::default().client_id` | [[auth.rs]] | Spotify's desktop client ID — streaming only; Web API uses `RUSTIFY_CLIENT_ID` |
+| `Credentials::with_access_token` | [[commands.rs]] | Streaming credentials. `with_password` also exists but Spotify disabled it server-side in 2024 — see [[known-limitations]] |
 | `Session`, `Cache` | [[player.rs]] | Connection, audio/credential cache |
 | `Player`, `PlayerEvent` | [[player.rs]] | Audio; the event stream driving the UI |
 | `Spirc`, `ConnectConfig`, `LoadRequest`, `PlayingTrack` | [[player.rs]], [[commands.rs]] | Connect device + transport |

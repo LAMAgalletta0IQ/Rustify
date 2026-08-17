@@ -11,7 +11,7 @@ Two processes, one binary:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ spotify-rust.exe  (Rust, ~5.9 MB private)                │
+│ Rustify.exe  (Rust, ~5.9 MB private)                │
 │                                                          │
 │  ┌────────────┐   Tauri commands    ┌─────────────────┐  │
 │  │ commands.rs│ ◄──────────────────  │                 │  │

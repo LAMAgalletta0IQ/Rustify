@@ -1,11 +1,11 @@
 ---
 tags: [moc, index]
 ---
-# Map of Content — spotify-rust
+# Map of Content — Rustify
 
 Everything in this vault is reachable from here.
 
-**spotify-rust** is a native, lightweight Spotify client for Windows. A Rust
+**Rustify** is a native, lightweight Spotify client for Windows. A Rust
 backend inside [Tauri 2](https://tauri.app) embeds the
 [librespot](https://github.com/librespot-org/librespot) crate for login and
 audio; a Svelte 5 frontend renders the UI in a WebView2 webview. Metadata comes
@@ -24,12 +24,12 @@ from the official Spotify Web API.
 | [[entry-points]] | How the app starts, both processes, and in what order |
 | [[data-flow]] | Click → command → librespot → event → UI, traced end to end |
 | [[state-and-events]] | The single `PlaybackState` snapshot and how it is pushed |
-| [[auth-and-tokens]] | One OAuth login serving both librespot and the Web API |
-| [[rate-limiting]] | Why 429s happen with zero usage, and how the app rides them out |
+| [[auth-and-tokens]] | Two OAuth logins, two client IDs, and the token lifecycle |
+| [[rate-limiting]] | Why 429s happen with zero usage, and why a private client ID fixes it |
 | [[playback-and-connect]] | Why `Spirc` is the core primitive; Connect in and out |
 | [[external-dependencies]] | librespot, Tauri, Svelte, reqwest, the Web API |
-| [[build-and-config]] | Toolchain, build commands, the pinned `vergen` dependency |
-| [[known-limitations]] | Jams, Blends, lyrics, queue reorder — and *why* |
+| [[build-and-config]] | Toolchain, build commands, and `.env` configuration |
+| [[known-limitations]] | Password login, Jams, Blends, lyrics, queue reorder — and *why* |
 
 ## Modules
 
@@ -62,6 +62,9 @@ Components: [[PlayerBar.svelte]] · [[DevicePicker.svelte]] · [[TrackList.svelt
 
 ### Root configuration `#config`
 [[package.json]] · [[package-lock.json]] · [[vite.config.ts]] · [[svelte.config.js]] · [[tsconfig.json]] · [[index.html]] · [[.gitignore]] · [[.gitattributes]] · [[README.md]] · [[app-icon.png]]
+
+`.env.example` (template) and `.env` (local, gitignored) are covered in
+[[build-and-config]] and listed in [[project-root]].
 
 ---
 

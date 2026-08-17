@@ -16,6 +16,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
+use crate::connect;
 use crate::error::{AppError, AppResult};
 use crate::state::{events, AppState, PlaybackState, TokenStore, TrackInfo};
 use crate::webapi::WebApi;
@@ -99,7 +100,12 @@ pub async fn start_session(
 
     spawn_event_pump(app.clone(), event_rx, tokens);
 
-    spirc.activate()?;
+    // Deliberately NOT activated here. `Spirc::activate` makes this the active
+    // Connect device, which pauses whatever is playing on the user's phone or
+    // desktop client. Merely launching the app must not do that — it should
+    // appear in the device list and stay idle until asked to play. Activation
+    // happens on an explicit load (see `load_context`/`load_tracks`) or via
+    // `activate_this_device`.
 
     // Seed the volume from the mixer rather than assuming a default, so the
     // slider is correct before the first VolumeChanged event arrives.
@@ -144,7 +150,7 @@ fn spawn_event_pump(
                     pb.is_playing = true;
                     pb.is_loading = false;
                     pb.is_active_device = true;
-                    pb.position_ms = position_ms;
+                    pb.set_position(position_ms);
                     track_to_resolve = Some(track_id);
                 }
                 PlayerEvent::Paused {
@@ -155,7 +161,7 @@ fn spawn_event_pump(
                     pb.is_playing = false;
                     pb.is_loading = false;
                     pb.is_active_device = true;
-                    pb.position_ms = position_ms;
+                    pb.set_position(position_ms);
                     track_to_resolve = Some(track_id);
                 }
                 PlayerEvent::Loading {
@@ -165,18 +171,18 @@ fn spawn_event_pump(
                 } => {
                     pb.is_loading = true;
                     pb.is_active_device = true;
-                    pb.position_ms = position_ms;
+                    pb.set_position(position_ms);
                     track_to_resolve = Some(track_id);
                 }
                 PlayerEvent::Stopped { .. } => {
                     pb.is_playing = false;
                     pb.is_loading = false;
-                    pb.position_ms = 0;
+                    pb.set_position(0);
                 }
                 PlayerEvent::PositionCorrection { position_ms, .. }
                 | PlayerEvent::PositionChanged { position_ms, .. }
                 | PlayerEvent::Seeked { position_ms, .. } => {
-                    pb.position_ms = position_ms;
+                    pb.set_position(position_ms);
                 }
                 PlayerEvent::VolumeChanged { volume } => {
                     pb.volume = volume;
@@ -235,6 +241,10 @@ fn spawn_event_pump(
                     }
                 }
             }
+
+            // Events like VolumeChanged carry no position, so bring it up to
+            // date from the anchor rather than shipping a stale one.
+            pb.refresh_position();
 
             let snapshot = pb.clone();
             drop(pb);
@@ -324,7 +334,123 @@ fn pick_cover(images: &[ApiImage]) -> Option<String> {
         .map(|i| i.url.clone())
 }
 
+/// How often to ask Spotify what is playing elsewhere.
+///
+/// Only runs while this app is *not* the active device, so it costs nothing
+/// during local playback. Slow enough to stay clear of rate limits, fast
+/// enough that the UI is not visibly stale.
+const REMOTE_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Mirrors playback happening on other Connect devices into `PlaybackState`.
+///
+/// Without this the UI shows "Nothing playing" whenever the user is listening
+/// on their phone, because librespot only reports audio this app produces.
+pub fn spawn_remote_poller(
+    app: AppHandle,
+    tokens: TokenStore,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        let api = WebApi::new();
+
+        // Polls before the first sleep: opening the app while music plays on
+        // another device must show it immediately, not after a delay.
+        loop {
+            let state = app.state::<AppState>();
+
+            // Local playback is authoritative and event-driven; polling over
+            // it would fight the event pump and waste quota.
+            let skip = state.playback.read().await.is_active_device;
+            let token = tokens.get().await;
+
+            if skip || token.is_empty() {
+                tokio::time::sleep(REMOTE_POLL).await;
+                continue;
+            }
+
+            match connect::current_playback(&api, &token).await {
+                Ok(remote) => {
+                    if apply_remote(&state, remote).await {
+                        let snap = snapshot(&state).await;
+                        let _ = app.emit(events::PLAYBACK, &snap);
+                    }
+                }
+                // Transient by nature — the next tick retries. Logged at debug
+                // so a flaky network does not fill the log every 5s.
+                Err(e) => log::debug!("remote playback poll failed: {e}"),
+            }
+
+            tokio::time::sleep(REMOTE_POLL).await;
+        }
+    })
+}
+
+/// Folds a `/me/player` response into `PlaybackState`. Returns whether
+/// anything changed, so an unchanged poll emits no event.
+async fn apply_remote(
+    state: &tauri::State<'_, AppState>,
+    remote: Option<connect::RemotePlayback>,
+) -> bool {
+    let mut pb = state.playback.write().await;
+    let before = (pb.is_playing, pb.position_ms, pb.track.as_ref().map(|t| t.uri.clone()));
+
+    let Some(r) = remote else {
+        // 204: nothing playing anywhere.
+        if pb.track.is_none() && !pb.is_playing {
+            return false;
+        }
+        pb.is_playing = false;
+        pb.track = None;
+        pb.set_position(0);
+        pb.duration_ms = 0;
+        return true;
+    };
+
+    pb.is_active_device = false;
+    pb.is_playing = r.is_playing;
+    pb.set_position(r.progress_ms.unwrap_or(0));
+
+    if let Some(shuffle) = r.shuffle_state {
+        pb.shuffle = shuffle;
+    }
+    if let Some(repeat) = r.repeat_state.as_deref() {
+        pb.repeat_context = repeat == "context";
+        pb.repeat_track = repeat == "track";
+    }
+    if let Some(v) = r.device.as_ref().and_then(|d| d.volume_percent) {
+        pb.volume = percent_to_volume(v);
+    }
+
+    if let Some(item) = r.item {
+        pb.duration_ms = item.duration_ms;
+        let cover = item
+            .album
+            .as_ref()
+            .map(|a| a.images.as_slice())
+            .filter(|i| !i.is_empty())
+            .unwrap_or(item.images.as_slice())
+            .iter()
+            .min_by_key(|i| (i.width.unwrap_or(640) as i32 - 300).abs())
+            .map(|i| i.url.clone());
+
+        pb.track = Some(TrackInfo {
+            uri: item.uri,
+            name: item.name,
+            artists: item.artists.into_iter().map(|a| a.name).collect(),
+            album: item.album.map(|a| a.name).unwrap_or_default(),
+            cover_url: cover,
+            duration_ms: item.duration_ms,
+        });
+    }
+
+    let after = (pb.is_playing, pb.position_ms, pb.track.as_ref().map(|t| t.uri.clone()));
+    before != after
+}
+
 /// Rebuilds a fresh playback snapshot (used on reconnect / initial load).
 pub async fn snapshot(state: &AppState) -> PlaybackState {
-    state.playback.read().await.clone()
+    // Write lock so the position can be advanced to now — a snapshot taken
+    // mid-track must not report the position from the last event.
+    let mut pb = state.playback.write().await;
+    pb.refresh_position();
+    pb.clone()
 }

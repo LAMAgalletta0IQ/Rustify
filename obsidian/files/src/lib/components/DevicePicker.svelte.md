@@ -52,9 +52,15 @@ device**), and `activate_this_device`.
 > [[playback-and-connect]].
 
 - **This app appears in its own list** — it registers as a Connect device
-  through `Spirc`, so `list_devices` includes `<COMPUTERNAME> (spotify-rust)`.
+  through `Spirc`, so `list_devices` includes `<COMPUTERNAME> (Rustify)`.
 - **The list is a snapshot.** Devices appearing or disappearing while the
   popover is open are not reflected until the ⟳ button or a reopen.
+- **"No devices found" is ambiguous, and once hid a real bug.** A deserialisation
+  failure in [[connect.rs]] (`missing field 'isActive'`, from a two-way
+  `rename_all`) produced an error, not an empty list — but the error banner was
+  easy to miss and the popover's empty state read as a normal "nothing here".
+  If this appears while other devices are demonstrably online, check the log for
+  a `GET /me/player/devices` failure before believing the UI.
 - **`isActiveDevice` is a backend heuristic**, so the trigger's accent colour
   inherits that imprecision. See [[known-limitations]].
 - **The backdrop is a `<button>`**, giving keyboard dismissal and an accessible

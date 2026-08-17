@@ -55,7 +55,7 @@ playback. This single ordering constraint is what makes the whole UI work.
 
 | Field | Value |
 | --- | --- |
-| `name` | `<COMPUTERNAME> (spotify-rust)` |
+| `name` | `<COMPUTERNAME> (Rustify)` |
 | `device_type` | `DeviceType::Computer` |
 | `initial_volume` | `percent_to_volume(50)` — **raw 0..=65535 scale** |
 
@@ -64,7 +64,27 @@ mDNS. This is why librespot's `with-libmdns` default feature is disabled in
 [[Cargo.toml]] — zeroconf discovery only matters for the "log in from another
 device" flow, which this app does not use.
 
-`spirc.activate()` claims active-device status at startup.
+### Registering is not activating
+
+`start_session` deliberately does **not** call `spirc.activate()`.
+
+`Spirc::activate` claims active-device status, which by the Connect protocol
+pauses whatever is playing elsewhere. Calling it at login meant that merely
+*opening* Rustify stopped music on the user's phone — a full device takeover as
+a side effect of launching an app.
+
+The device still registers and appears in the picker; it just stays idle.
+Activation now happens only where taking over is the intent:
+
+| Trigger | Path |
+| --- | --- |
+| User plays something | `load_context` / `load_tracks`, which activate first |
+| User picks "Play here" | `activate_this_device` |
+
+Both load commands check `is_active_device` before activating, since librespot
+logs `SpircCommand::Activate will be ignored while already active` otherwise.
+
+ncspot behaves the same way — it never activates on connect.
 
 > ### The `initial_volume` trap
 > The field is on the **raw `0..=65535`** scale, not a percentage — librespot's
@@ -91,6 +111,29 @@ Pulling playback back is the opposite: `activate_this_device` calls
 So the device picker in [[DevicePicker.svelte]] mixes both mechanisms: HTTP to
 list and push away, librespot to pull back.
 
+> **`Device` deserialises from snake_case, serialises to camelCase.** Spotify
+> sends `is_active`; the webview expects `isActive`. `rename_all = "camelCase"`
+> applies to *both* directions, so it made every device list fail to parse with
+> `missing field 'isActive'` — surfacing as an empty picker reading "No devices
+> found". Hence `rename_all(serialize = "camelCase")` in [[connect.rs]].
+
+## Seeing playback on other devices
+
+`PlayerEvent`s describe only audio **this app** produces, so a passive Connect
+device is blind to the rest of the account. `spawn_remote_poller` ([[player.rs]])
+closes that gap with `GET /v1/me/player`:
+
+- Runs only while **not** `is_active_device`; local playback stays event-driven.
+- Polls immediately on login, then every 5 s.
+- Folds device volume, shuffle, repeat, progress and the current item into
+  `PlaybackState`, emitting only on an actual change.
+- `Ok(None)` (HTTP 204) means nothing is playing anywhere.
+
+Without it the UI showed "Nothing playing" whenever the user was listening on a
+phone. This only became visible once the login-time `activate()` was removed —
+before that, the app manufactured the state it displayed. See [[rate-limiting]]
+for why this is the single sanctioned poll.
+
 ## Loading content
 
 `LoadRequest` has two constructors, both in [[commands.rs]]:
@@ -100,7 +143,8 @@ list and push away, librespot to pull back.
 | `load_context` | `from_context_uri` | Playlist, album, artist, Liked Songs |
 | `load_tracks` | `from_tracks` | Search results, queue entries |
 
-Both set `start_playing: true`. **The default is `false`** — relying on the
+Both activate this device first (see *Registering is not activating* above),
+then set `start_playing: true`. **The default is `false`** — relying on the
 default and calling `play()` afterwards is a needless second round trip and a
 race.
 

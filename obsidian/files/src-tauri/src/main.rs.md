@@ -17,7 +17,7 @@ in principle, a mobile entry point).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    spotify_rust_lib::run()
+    rustify_lib::run()
 }
 ```
 
@@ -32,11 +32,11 @@ This conditional is why `cargo run` shows logs but a double-clicked release exe
 does not. To see logs from a release build, run it from a terminal that
 captures stdout, or redirect to a file.
 
-### `spotify_rust_lib`
+### `rustify_lib`
 
-The crate name comes from `[lib] name = "spotify_rust_lib"` in [[Cargo.toml]].
-The package is `spotify-rust`, but Rust library names cannot contain hyphens,
-hence the underscored alias.
+The crate name comes from `[lib] name = "rustify_lib"` in [[Cargo.toml]].
+The package is `rustify`; the library is given the `_lib` suffix so the
+binary and library targets do not collide.
 
 ## Inputs / outputs / side effects
 

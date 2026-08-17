@@ -3,11 +3,11 @@ tags: [file, backend, rust]
 ---
 # `src-tauri/src/commands.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **424 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **428 lines**
 
 ## Purpose
 
-The complete IPC surface — all 32 `#[tauri::command]` functions. This is the
+The complete IPC surface — all 33 `#[tauri::command]` functions. This is the
 *only* backend code the frontend can reach. It holds no domain logic: each
 command unwraps state, delegates to a feature module, and lets errors
 propagate.
@@ -24,20 +24,32 @@ the closure against the live `Spirc`. Every playback command funnels through
 this, so none can act on a dead session.
 
 ### `fn device_name() -> String`
-`<COMPUTERNAME> (spotify-rust)`, falling back to `"spotify-rust"`. This is the
+`<COMPUTERNAME> (Rustify)`, falling back to `"Rustify"`. This is the
 name that appears in Spotify's device list.
 
-### `async fn establish(app, state, api, tok) -> AuthState`
-Shared by `login` and `restore_session`. **Order is load-bearing:**
+### `fn get_login_info() -> LoginInfo`
+Reports `privateClientId`, `clientIdEnv` and `webapiRedirectUri` so
+[[Login.svelte]] can describe the flow accurately — one browser tab or two —
+and print the dashboard steps without hardcoding values that live in
+[[auth.rs]].
+
+### `async fn establish(app, state, api, toks) -> AuthState`
+Shared by `login` and `restore_session`. Takes a `SessionTokens` (both logins).
+**Order is load-bearing:**
 
 1. Resolve the app data dir.
-2. **Persist the refresh token** — before the Premium gate.
-3. **Premium check** ([[auth.rs]]) — fail before starting audio.
-4. `tokens.set(access_token)` — publish before anything reads it.
-5. `player::start_session(...)`.
-6. `spawn_refresher(...)`.
-7. **Tear down any existing session**, then store the new `SpotifySession`,
-   update `auth`, emit `auth:changed`.
+2. **Persist both refresh tokens** — before the Premium gate.
+3. **Premium check** ([[auth.rs]]) using the *Web API* token.
+4. `tokens.set(webapi access_token)` — publish before anything reads it.
+5. `player::start_session(...)` with the *streaming* token, the one carrying
+   the `streaming` scope.
+6. `spawn_refresher(...)` under the Web API client ID.
+7. `spawn_remote_poller(...)`.
+8. **Tear down any existing session** (aborting both its tasks), then store the
+   new `SpotifySession`, update `auth`, emit `auth:changed`.
+
+Steps 3–5 are where the two tokens diverge: mixing them up yields a 403 on
+library calls or a failure to stream.
 
 > **Why the token is saved before the gate.** OAuth has already succeeded by
 > step 2. If the Premium check then fails transiently — a 429 on `/me` is the
@@ -51,9 +63,10 @@ Shared by `login` and `restore_session`. **Order is load-bearing:**
 | Command | Notes |
 | --- | --- |
 | `get_auth_state` | Clone of current `AuthState` |
-| `login` | Interactive; opens the browser |
-| `restore_session` | Silent. **Returns a logged-out state rather than erroring** when nothing is stored or the token is rejected — the UI just shows the login screen |
-| `logout` | Shuts down Spirc, **aborts the refresh task**, clears token and state, deletes `tokens.json`, emits `auth:changed` |
+| `get_login_info` | Shape of the login flow, for UI copy |
+| `login` | Interactive; opens the browser **twice** when a private client ID is set |
+| `restore_session` | Silent. **Returns a logged-out state rather than erroring** when nothing is stored or the grant is rejected — the UI just shows the login screen. Deletes `tokens.json` **only** on `auth::is_grant_rejected`; a transient failure keeps them |
+| `logout` | Shuts down Spirc, **aborts both background tasks**, clears token and state, deletes `tokens.json`, emits `auth:changed` |
 
 ### Playback
 `play`, `pause`, `play_pause`, `next_track`, `previous_track`, `seek`,
@@ -66,6 +79,13 @@ Shared by `login` and `restore_session`. **Order is load-bearing:**
 - `load_context(context_uri, track_uri?)` — plays a container starting at a
   track. `load_tracks(uris, start_uri?)` — ad-hoc list, returns `Ok(())` early
   on an empty list. Both set `start_playing: true`.
+- **Both load commands activate this device first**, since [[player.rs]] no
+  longer activates at login. Each reads `is_active_device` beforehand and skips
+  the call when already active, avoiding librespot's
+  `SpircCommand::Activate will be ignored while already active`.
+- **These control this app's player only.** While another device is active the
+  UI mirrors its state via the poller, but these buttons do not command it —
+  Spotify wants `PUT /me/player/play` for that. See [[known-limitations]].
 
 ### Connect
 `list_devices`, `transfer_playback` (Web API), `activate_this_device`

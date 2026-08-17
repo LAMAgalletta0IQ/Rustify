@@ -63,7 +63,7 @@ at runtime.
   reject, [[store.svelte.ts]] would never receive `playback:changed`, and the
   interface would simply stop updating — with no obvious error.
 - **`#[tauri::command]`s are not individually gated.** `core:default` covers
-  `invoke`; the app's own 32 commands need no per-command permission.
+  `invoke`; the app's own 33 commands need no per-command permission.
 - The permission set is intentionally minimal — no filesystem, shell, HTTP or
   dialog access is granted to the webview.
 

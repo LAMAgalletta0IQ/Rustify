@@ -9,7 +9,7 @@ Every way execution begins, in boot order.
 
 [[main.rs]] is the OS entry point and does exactly two things: suppress the
 console window on release builds (`windows_subsystem = "windows"`), then call
-`spotify_rust_lib::run()`.
+`rustify_lib::run()`.
 
 The real work is in [[lib.rs]] because [[Cargo.toml]] declares both a binary
 and a library target — the library form is what a future mobile entry point
@@ -28,7 +28,7 @@ would call.
    logged-out state.
 4. **`manage(AppState::new())`** — installs shared state ([[state.rs]]).
    Everything is empty at this point.
-5. **`invoke_handler`** — registers all 32 commands from [[commands.rs]].
+5. **`invoke_handler`** — registers all 33 commands from [[commands.rs]].
 6. **`run(generate_context!())`** — reads [[tauri.conf.json]] at compile time,
    creates the window, and blocks.
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "spotify-rust",
+  "productName": "Rustify",
   "version": "0.1.0",
-  "identifier": "dev.local.spotify-rust",
+  "identifier": "dev.local.rustify",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -10,15 +10,18 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
-        "title": "spotify-rust",
+        "title": "Rustify",
         "width": 1100,
         "height": 720,
         "minWidth": 780,
         "minHeight": 520,
         "resizable": true,
-        "theme": "Dark"
+        "theme": "Dark",
+        "decorations": false,
+        "transparent": true
       }
     ],
     "security": {

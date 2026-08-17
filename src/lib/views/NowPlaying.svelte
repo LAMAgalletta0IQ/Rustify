@@ -121,9 +121,10 @@
   .ph {
     width: min(340px, 46vh);
     aspect-ratio: 1;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     object-fit: cover;
-    background: var(--bg-elev-2);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
     margin-bottom: 16px;
   }
   .art h2 {
@@ -168,7 +169,8 @@
     min-width: 0;
   }
   .q:hover {
-    background: var(--bg-elev-2);
+    background: var(--glass-hover);
+    border-radius: var(--r-sm);
   }
   .q.current {
     color: var(--accent);

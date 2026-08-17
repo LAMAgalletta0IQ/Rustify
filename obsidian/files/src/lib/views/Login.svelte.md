@@ -3,18 +3,34 @@ tags: [file, frontend, ui, auth]
 ---
 # `src/lib/views/Login.svelte`
 
-**Module:** [[frontend-views]] · **Language:** Svelte 5 · **106 lines**
+**Module:** [[frontend-views]] · **Language:** Svelte 5 · **211 lines**
 
 ## Purpose
 
 The logged-out screen. Starts the OAuth flow and — importantly — presents the
-Premium-required case as an explanation rather than a generic failure.
+Premium-required and rate-limited cases as explanations rather than generic
+failures.
 
 ## Key items
 
 ### State
 `busy`, `errKind`, `errMsg`, `cooldown`, plus a `timer` handle — all local.
 This view deliberately does **not** use `store.error`.
+
+### `info: LoginInfo | null`
+Loaded in `onMount` from `api.getLoginInfo()`, inside a `try`/`catch` so a
+failure here can never block logging in. `null` until it resolves, and every
+use is written to degrade gracefully in that window.
+
+It drives two pieces of copy that would otherwise be wrong half the time:
+
+| `privateClientId` | Browser hint | Rate-limit hint |
+| --- | --- | --- |
+| `true` | Warns that **two** tabs open, one for playback and one for library/search | Notes the quota is private, so a 429 is likely a short burst |
+| `false` | Single tab | Explains the shared-quota cause **and** prints the fix: dashboard URL, `webapiRedirectUri`, `clientIdEnv` |
+
+Those values come from the backend rather than being hardcoded, so they cannot
+drift from [[auth.rs]].
 
 ### `async doLogin(silent = false)`
 Sets `busy` and calls the backend. When `silent`, it first tries
@@ -24,7 +40,8 @@ through to the interactive `api.login()`. On rejection it captures `kind` and
 `RateLimited` with a `retryAfter`.
 
 While `busy`, the button reads "Waiting for browser…" and a hint explains that
-the browser has opened and to return after approving.
+the browser has opened and to return after approving — mentioning the **second**
+tab when the split is active, since users otherwise assume the app has hung.
 
 ### `startCooldown(secs)` / `stopCooldown()`
 A 1 Hz interval counting down `cooldown`; on reaching zero it calls

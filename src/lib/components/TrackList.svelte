@@ -116,10 +116,10 @@
   .row {
     display: flex;
     align-items: center;
-    border-radius: var(--radius);
+    border-radius: var(--r-sm);
   }
   .row:hover {
-    background: var(--bg-elev-2);
+    background: var(--glass-hover);
   }
   .row.active .name {
     color: var(--accent);
@@ -138,8 +138,8 @@
   .ph {
     width: 36px;
     height: 36px;
-    border-radius: 4px;
-    background: var(--bg-elev-2);
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.06);
     object-fit: cover;
   }
   .idx {

@@ -3,7 +3,7 @@ tags: [file, backend, playback, rust]
 ---
 # `src-tauri/src/player.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **330 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **405 lines**
 
 The most intricate file in the project. Owns the librespot audio pipeline, the
 Connect device identity, and the event pump that drives the entire UI.
@@ -30,17 +30,33 @@ Builds and starts everything. Order is significant:
 8. `Spirc::new(connect_config, session, credentials, player, mixer)`.
 9. Spawn `spirc_task` (the Connect protocol loop).
 10. `spawn_event_pump(...)`.
-11. `spirc.activate()`.
-12. Seed `playback.volume` from `mixer.volume()`.
+11. Seed `playback.volume` from `mixer.volume()`.
+
+**No `spirc.activate()`.** It used to sit at step 11 and was removed: activating
+claims active-device status, which pauses whatever is playing on the user's
+other devices. Opening the app should not be a takeover. See the gotcha below.
 
 ### `struct StartedSession { session, spirc }`
 What is handed back; [[commands.rs]] pairs it with the refresher handle to
 build a `SpotifySession`.
 
 ### `fn spawn_event_pump(app, rx, tokens)`
-The only writer of `AppState.playback`. Consumes librespot's `PlayerEvent`
-stream, mutates the snapshot, resolves metadata, and emits
-`playback:changed`. Unhandled variants `continue` without emitting.
+The primary writer of `AppState.playback`. Consumes librespot's `PlayerEvent`
+stream, mutates the snapshot, resolves metadata, calls `refresh_position()`, and
+emits `playback:changed`. Unhandled variants `continue` without emitting.
+
+### `const REMOTE_POLL: Duration = 5s`
+### `fn spawn_remote_poller(app, tokens) -> JoinHandle<()>`
+The second writer. Mirrors playback from **other** Connect devices, which
+`PlayerEvent`s never describe. Polls `GET /me/player` immediately, then every
+`REMOTE_POLL` — but only while `is_active_device` is false, so local playback
+stays purely event-driven and costs no quota. Emits only on an actual change.
+
+### `async fn apply_remote(state, Option<RemotePlayback>) -> bool`
+Folds a `/me/player` response into `PlaybackState`, returning whether anything
+changed. `None` (HTTP 204) means nothing is playing anywhere and clears the
+track. Prefers the album's images for cover art, falling back to the item's own
+(episodes carry theirs directly).
 
 ### `async fn fetch_track_info(api, token, uri) -> TrackInfo`
 Branches on `uri.item_type()`: `"episode"` → `/v1/episodes/{id}`, everything
@@ -51,20 +67,23 @@ Chooses the image closest to **300px** rather than the largest, so a low-end
 CPU is not decoding a 640px JPEG for a 52px thumbnail.
 
 ### `async fn snapshot(state) -> PlaybackState`
-Clones the current state; backs the `get_playback` command.
+Backs the `get_playback` command. Takes a **write** lock rather than a read one,
+because it calls `refresh_position()` first — a snapshot taken mid-track must
+not report the position from the last event.
 
 ## Inputs / outputs / side effects
 
 - **Audio output** via rodio/WASAPI — the app's core side effect.
 - **Network:** librespot's Spotify connection; Web API metadata lookups.
 - **Filesystem:** librespot cache under `<app data>/cache`.
-- **Spawns** two long-lived tasks: `spirc_task` and the event pump.
+- **Spawns** three long-lived tasks: `spirc_task`, the event pump, and the
+  remote poller.
 - **Emits** `playback:changed` to the webview.
 
 ## Dependencies
 
 **Imports:** `librespot::{connect, core, playback}`, `tauri`, `tokio`, `serde`,
-[[state.rs]], [[webapi.rs]], [[error.rs]]
+[[state.rs]], [[connect.rs]], [[webapi.rs]], [[error.rs]]
 **Imported by:** [[commands.rs]]
 
 ## Notable logic / gotchas
@@ -89,8 +108,26 @@ Clones the current state; backs the `get_playback` command.
   track displayed rather than blanking the bar.
 - **The pump reads the token through `TokenStore`**, so refreshes are picked up
   automatically. Passing a `String` here was a real bug.
+> ### 3. Registering as a device is not activating it
+> `Spirc::activate` claims active-device status, which by protocol pauses
+> playback elsewhere. Calling it in `start_session` meant simply **opening the
+> app stopped music on the user's phone**. It now happens only on an explicit
+> load or `activate_this_device`, both in [[commands.rs]], which check
+> `is_active_device` first to avoid librespot's
+> `SpircCommand::Activate will be ignored while already active`.
+
+> ### 4. Not every event carries a position
+> `VolumeChanged`, `ShuffleChanged` and `RepeatChanged` report none, yet the
+> whole snapshot is sent on every event — so they shipped the last reported
+> position, normally 0, and the UI clock jumped to 0:00 while audio played on.
+> Positions now go through `set_position()` (anchor) and `refresh_position()`
+> (recompute), never a bare assignment. See [[state.rs]].
+
 - **`is_active_device` is inferred** from `Playing`/`Paused`/`Loading` vs.
-  `SessionDisconnected`; librespot exposes no explicit flag.
+  `SessionDisconnected`; librespot exposes no explicit flag. The remote poller
+  also clears it when `/me/player` reports another device.
+- **The poller is the app's only recurring network timer**, and it is gated on
+  *not* being the active device. See [[rate-limiting]] before adding another.
 - **`spirc_task` must keep running.** Drop it and the device disappears from
   Spotify Connect.
 - **The 2 GB cache cap** is explicit; librespot would otherwise grow unbounded.

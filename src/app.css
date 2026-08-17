@@ -1,18 +1,26 @@
 :root {
-  --bg: #0b0b0d;
-  --bg-elev: #141418;
-  --bg-elev-2: #1c1c22;
-  --fg: #f2f2f4;
-  --fg-dim: #a0a0aa;
+  /* Ink */
+  --fg: #f4f4f6;
+  --fg-dim: #9b9ba6;
+  --fg-faint: #6a6a76;
   --accent: #1db954;
-  --border: #26262e;
-  --radius: 8px;
+
+  /* Glass. The whole visual language is these five values — panels differ by
+     which one they use, never by inventing their own rgba(). */
+  --glass: rgba(255, 255, 255, 0.045);
+  --glass-hover: rgba(255, 255, 255, 0.075);
+  --glass-strong: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(255, 255, 255, 0.09);
+  --blur: 28px;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
 
   color-scheme: dark;
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
   color: var(--fg);
-  background: var(--bg);
 }
 
 * {
@@ -27,13 +35,20 @@ body,
   overflow: hidden;
 }
 
+body {
+  /* The window itself is transparent and undecorated; this rounds the corners
+     of the content so the desktop shows through them. */
+  background: transparent;
+  border-radius: var(--r-lg);
+}
+
 button {
   font: inherit;
   color: inherit;
   background: none;
   border: none;
   cursor: pointer;
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
 }
 
 button:disabled {
@@ -44,37 +59,176 @@ button:disabled {
 input {
   font: inherit;
   color: inherit;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 12px;
+  background: none;
+  border: none;
   outline: none;
 }
 
-input:focus {
-  border-color: var(--accent);
-}
-
-/* Scrollbars: thin and dark, so panes don't look like raw HTML. */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #33333d;
-  border-radius: 5px;
-  border: 2px solid var(--bg);
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
+/* ---- shared primitives -------------------------------------------------
+   Svelte scopes component styles, so anything more than one view needs is
+   defined once here rather than copied into each `<style>` block. */
+
 .btn-primary {
-  background: var(--accent);
-  color: #04120a;
+  background: var(--fg);
+  color: #0b0b0d;
   font-weight: 600;
-  padding: 10px 20px;
+  padding: 9px 22px;
   border-radius: 999px;
+  transition: transform 0.15s, background 0.15s;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #fff;
+  transform: scale(1.03);
+}
+
+/* Any frosted surface. */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+}
+
+/* Pill toggles: tabs, library filters, sort controls. */
+.chip {
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--fg-dim);
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+.chip:hover {
+  background: var(--glass-hover);
+  color: var(--fg);
+}
+.chip.on {
+  background: var(--fg);
+  color: #0b0b0d;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  display: block;
+  padding: 12px;
+  border-radius: var(--r-md);
+  text-align: left;
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+  transition: background 0.18s, transform 0.18s, border-color 0.18s;
+}
+.card:hover {
+  background: var(--glass-hover);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-3px);
+}
+
+/* Artwork inside a card is a block-level square. Without `display: block` a
+   <span> here stays inline and silently ignores every dimension below. */
+.card .art,
+.card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 11px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+  margin-bottom: 11px;
+}
+
+/* Artists read as circles — the shape carries the type, so no label is needed
+   to tell an artist tile from an album tile. */
+.card.artist {
+  text-align: center;
+}
+.card.artist .art,
+.card.artist img {
+  border-radius: 50%;
+}
+
+.card .title {
+  display: block;
+  font-weight: 600;
+}
+.card .sub {
+  display: block;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+/* Section rule: uppercase label with a hairline running to the right edge. */
+.sec {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 30px 0 14px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.sec::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
+/* Search / filter input in a frosted pill. */
+.find {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: var(--fg-dim);
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+  transition: border-color 0.18s, background 0.18s;
+}
+.find:focus-within {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: var(--glass-hover);
+}
+.find input {
+  color: var(--fg);
+  width: 150px;
+}
+.find input::placeholder {
+  color: var(--fg-faint);
+}
+.find.big {
+  width: min(520px, 100%);
+  padding: 12px 20px;
+  font-size: 15px;
+}
+.find.big input {
+  width: 100%;
 }
 
 .muted {
