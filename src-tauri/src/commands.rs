@@ -54,14 +54,25 @@ async fn establish(
     api: &WebApi,
     tok: librespot_oauth::OAuthToken,
 ) -> AppResult<AuthState> {
-    // Premium gate first, so a free account gets a clear message rather than a
-    // silent playback failure later.
-    let auth_state = auth::fetch_profile_require_premium(api, &tok.access_token).await?;
-
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    // Persist the refresh token *before* the Premium gate. The OAuth flow has
+    // already succeeded by this point, so if the gate then fails on a
+    // transient error (notably a 429 on /me), a retry can go through
+    // `restore_session` silently instead of reopening the browser.
+    auth::save_stored_tokens(
+        &data_dir,
+        &auth::StoredTokens {
+            refresh_token: tok.refresh_token.clone(),
+        },
+    )?;
+
+    // Premium gate, so a free account gets a clear message rather than a
+    // silent playback failure later.
+    let auth_state = auth::fetch_profile_require_premium(api, &tok.access_token).await?;
 
     // Publish the token before anything reads it.
     state.tokens.set(tok.access_token.clone()).await;
@@ -75,13 +86,6 @@ async fn establish(
     )
     .await?;
 
-    auth::save_stored_tokens(
-        &data_dir,
-        &auth::StoredTokens {
-            refresh_token: tok.refresh_token.clone(),
-        },
-    )?;
-
     // Access tokens last ~1h; without this every Web API call would start
     // failing mid-session.
     let refresh_task = auth::spawn_refresher(
@@ -91,6 +95,17 @@ async fn establish(
         data_dir,
         tok.expires_at,
     );
+
+    // Replacing the session must tear the old one down explicitly. Dropping a
+    // tokio JoinHandle *detaches* the task rather than cancelling it, so a
+    // second `establish` without a logout would leave the previous refresher
+    // running — two tasks then hit the token endpoint on their own schedules,
+    // which is exactly how a client walks itself into a 429.
+    if let Some(old) = state.spotify.write().await.take() {
+        log::warn!("replacing an existing session; shutting the old one down");
+        let _ = old.spirc.shutdown();
+        old.refresh_task.abort();
+    }
 
     *state.spotify.write().await = Some(SpotifySession {
         session: started.session,

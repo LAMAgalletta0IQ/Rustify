@@ -25,6 +25,7 @@ from the official Spotify Web API.
 | [[data-flow]] | Click → command → librespot → event → UI, traced end to end |
 | [[state-and-events]] | The single `PlaybackState` snapshot and how it is pushed |
 | [[auth-and-tokens]] | One OAuth login serving both librespot and the Web API |
+| [[rate-limiting]] | Why 429s happen with zero usage, and how the app rides them out |
 | [[playback-and-connect]] | Why `Spirc` is the core primitive; Connect in and out |
 | [[external-dependencies]] | librespot, Tauri, Svelte, reqwest, the Web API |
 | [[build-and-config]] | Toolchain, build commands, the pinned `vergen` dependency |
@@ -60,7 +61,7 @@ Components: [[PlayerBar.svelte]] · [[DevicePicker.svelte]] · [[TrackList.svelt
 [[tauri.conf.json]] · [[Cargo.toml]] · [[Cargo.lock]] · [[build.rs]] · [[default.json]]
 
 ### Root configuration `#config`
-[[package.json]] · [[package-lock.json]] · [[vite.config.ts]] · [[svelte.config.js]] · [[tsconfig.json]] · [[index.html]] · [[.gitignore]] · [[README.md]] · [[app-icon.png]]
+[[package.json]] · [[package-lock.json]] · [[vite.config.ts]] · [[svelte.config.js]] · [[tsconfig.json]] · [[index.html]] · [[.gitignore]] · [[.gitattributes]] · [[README.md]] · [[app-icon.png]]
 
 ---
 

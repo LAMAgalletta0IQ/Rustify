@@ -38,6 +38,20 @@ impl WebApi {
         let resp = req.bearer_auth(token).send().await?;
         let status = resp.status();
 
+        // 429 is common with librespot's shared default client ID: the quota is
+        // pooled across every librespot-based client worldwide, so this can fire
+        // on a first request with no prior usage. Surface it as its own variant
+        // with the server's own wait hint rather than a generic HTTP error.
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok());
+            log::warn!("rate limited by Spotify (retry_after={retry_after:?})");
+            return Err(AppError::RateLimited { retry_after });
+        }
+
         if status == reqwest::StatusCode::NO_CONTENT {
             // PUT/POST player endpoints answer 204 with an empty body.
             return serde_json::from_str::<T>("null")
@@ -50,7 +64,14 @@ impl WebApi {
             let msg = serde_json::from_str::<Value>(&body)
                 .ok()
                 .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
-                .unwrap_or_else(|| body.clone());
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| {
+                    if body.trim().is_empty() {
+                        "no response body".to_string()
+                    } else {
+                        body.clone()
+                    }
+                });
             return Err(AppError::WebApi(format!("{status}: {msg}")));
         }
 
@@ -58,17 +79,42 @@ impl WebApi {
             .map_err(|e| AppError::WebApi(format!("failed to parse response: {e}")))
     }
 
+    /// Longest `Retry-After` we will sit through automatically. Beyond this the
+    /// error goes to the UI so the user is not left staring at a frozen view.
+    const MAX_AUTO_RETRY_SECS: u64 = 8;
+    const MAX_RETRIES: u32 = 2;
+
+    /// GETs are safe to repeat, so a short rate-limit window is absorbed here
+    /// rather than surfaced. Longer waits, and all non-GET verbs, are returned
+    /// to the caller untouched.
     pub async fn get<T: DeserializeOwned>(
         &self,
         token: &str,
         path: &str,
         query: &[(&str, String)],
     ) -> AppResult<T> {
-        let mut req = self.http.get(format!("{BASE}{path}"));
-        if !query.is_empty() {
-            req = req.query(query);
+        let mut attempt = 0;
+        loop {
+            let mut req = self.http.get(format!("{BASE}{path}"));
+            if !query.is_empty() {
+                req = req.query(query);
+            }
+
+            match self.send(req, token).await {
+                Err(AppError::RateLimited { retry_after }) if attempt < Self::MAX_RETRIES => {
+                    // No header means Spotify did not say; back off gently
+                    // rather than hammering.
+                    let wait = retry_after.unwrap_or(1 << attempt);
+                    if wait > Self::MAX_AUTO_RETRY_SECS {
+                        return Err(AppError::RateLimited { retry_after });
+                    }
+                    log::warn!("rate limited on {path}, retrying in {wait}s");
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    attempt += 1;
+                }
+                other => return other,
+            }
         }
-        self.send(req, token).await
     }
 
     pub async fn put(&self, token: &str, path: &str, body: Value) -> AppResult<()> {

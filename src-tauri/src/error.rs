@@ -21,6 +21,17 @@ pub enum AppError {
     #[error("Spotify Web API error: {0}")]
     WebApi(String),
 
+    /// Spotify returned HTTP 429.
+    ///
+    /// Usually *not* caused by this app's own request volume: librespot's
+    /// default client ID is shared by every librespot-based client, so the
+    /// quota is consumed globally by other people's apps.
+    #[error("Spotify is rate limiting this client{}.", match .retry_after {
+        Some(s) => format!(" — retry in about {s}s"),
+        None => String::new(),
+    })]
+    RateLimited { retry_after: Option<u64> },
+
     #[error("{0}")]
     Other(String),
 }
@@ -33,6 +44,7 @@ impl AppError {
             Self::Auth(_) => "Auth",
             Self::Playback(_) => "Playback",
             Self::WebApi(_) => "WebApi",
+            Self::RateLimited { .. } => "RateLimited",
             Self::Other(_) => "Other",
         }
     }
@@ -41,9 +53,18 @@ impl AppError {
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut st = s.serialize_struct("AppError", 2)?;
+        let mut st = s.serialize_struct("AppError", 3)?;
         st.serialize_field("kind", self.kind())?;
         st.serialize_field("message", &self.to_string())?;
+        // Exposed as its own field so the UI can run a countdown rather than
+        // parsing the number back out of the message text.
+        st.serialize_field(
+            "retryAfter",
+            &match self {
+                Self::RateLimited { retry_after } => *retry_after,
+                _ => None,
+            },
+        )?;
         st.end()
     }
 }

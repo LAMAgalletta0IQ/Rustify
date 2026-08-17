@@ -29,9 +29,13 @@ logins for one app. See [[auth.rs]].
 ships with librespot. The redirect is `http://127.0.0.1:8898/login`, served by
 librespot's OAuth helper on loopback.
 
-Using a first-party client ID is what allows the broad scope list below. If a
-scope is ever refused, the fallback is to register your own Spotify Developer
-app and substitute the ID in [[auth.rs]].
+Using a first-party client ID is what allows the broad scope list below.
+
+It is also the source of the app's 429s: that ID is shared by **every**
+librespot-based client, so its Web API quota is consumed globally. Overriding it
+with `SPOTIFY_RUST_CLIENT_ID` is possible but usually counterproductive — a
+newly registered app starts in restricted quota mode and often cannot obtain
+the `streaming` scope. See [[rate-limiting]].
 
 ## Scopes
 
@@ -61,6 +65,12 @@ This runs **before** librespot starts, so a free account gets a clear message
 instead of silence. [[Login.svelte]] branches on the `kind` field to show a
 dedicated explanation.
 
+> **The gate is also the most rate-limit-exposed call in the app** — one
+> `GET /v1/me` per login. A 429 there once failed a login whose OAuth had
+> already succeeded, which is why the refresh token is now persisted *before*
+> the gate: a retry can then go through `restore_session` with no browser. See
+> [[rate-limiting]].
+
 This is a plain read of the account's own stated plan. Nothing is spoofed or
 bypassed — it exists to produce a good error message, not to gate anything.
 
@@ -73,11 +83,12 @@ bypassed — it exists to produce a good error message, not to gate anything.
                                 ▼
                  ┌──────────────────────────────┐
                  │ establish()                  │
-                 │  1. Premium check            │
-                 │  2. tokens.set(access)       │
-                 │  3. start_session (librespot)│
-                 │  4. save refresh token       │
+                 │  1. save refresh token       │
+                 │  2. Premium check            │
+                 │  3. tokens.set(access)       │
+                 │  4. start_session (librespot)│
                  │  5. spawn_refresher          │
+                 │  6. tear down old session    │
                  └──────────────┬───────────────┘
                                 ▼
                  ┌──────────────────────────────┐
@@ -125,9 +136,11 @@ librespot separately caches its own credentials and up to 2 GB of audio under
 | Stored token revoked | File deleted, login screen. Logged as a warning |
 | Free account | `PremiumRequired` with the plan name |
 | Refresh fails transiently | Retried; session continues |
+| **Rate limited on `/me`** | `RateLimited` with `Retry-After`; UI counts down and silently retries |
 | Logout | Spirc shut down, refresher aborted, token cleared, file deleted |
+| Re-login without logout | Old session shut down and its refresher aborted first |
 
 ## See also
 
-[[architecture]] · [[data-flow]] · [[state-and-events]] · [[auth.rs]] ·
-[[commands.rs]] · [[Login.svelte]] · [[error.rs]] · [[MOC]]
+[[architecture]] · [[data-flow]] · [[state-and-events]] · [[rate-limiting]] ·
+[[auth.rs]] · [[commands.rs]] · [[Login.svelte]] · [[error.rs]] · [[MOC]]

@@ -13,24 +13,43 @@ Premium-required case as an explanation rather than a generic failure.
 ## Key items
 
 ### State
-`busy`, `errKind`, `errMsg` — all local. This view deliberately does **not**
-use `store.error`.
+`busy`, `errKind`, `errMsg`, `cooldown`, plus a `timer` handle — all local.
+This view deliberately does **not** use `store.error`.
 
-### `async doLogin()`
-Sets `busy`, calls `api.login()`, and assigns the result to `store.auth`. On
-rejection it captures both `kind` and `message` from `asAppError(e)`.
+### `async doLogin(silent = false)`
+Sets `busy` and calls the backend. When `silent`, it first tries
+`api.restoreSession()` and returns early if that succeeds; otherwise it falls
+through to the interactive `api.login()`. On rejection it captures `kind` and
+`message` from `asAppError(e)`, and starts a cooldown when the error is
+`RateLimited` with a `retryAfter`.
 
 While `busy`, the button reads "Waiting for browser…" and a hint explains that
 the browser has opened and to return after approving.
 
+### `startCooldown(secs)` / `stopCooldown()`
+A 1 Hz interval counting down `cooldown`; on reaching zero it calls
+`doLogin(true)`. The button becomes `Retrying in {n}s…` and is disabled
+throughout. `onDestroy(stopCooldown)` clears the timer.
+
+Started with `retryAfter + 2` — retrying on the exact boundary tends to be
+refused again.
+
 ### Error rendering
-```svelte
-<div class="err" class:premium={errKind === "PremiumRequired"}>
-```
-`PremiumRequired` gets an amber treatment, a "Premium required" heading, and an
-extra paragraph stating that librespot cannot stream the free tier and that
-this is a limitation of the playback library rather than something the app can
-work around. Any other error gets a red "Login failed" block.
+Three presentations, keyed off `errKind`:
+
+| `kind` | Heading | Style |
+| --- | --- | --- |
+| `PremiumRequired` | "Premium required" | Amber |
+| `RateLimited` | "Rate limited by Spotify" | Amber |
+| anything else | "Login failed" | Red |
+
+`PremiumRequired` adds a paragraph explaining that librespot cannot stream the
+free tier and that this is a playback-library limitation, not something the app
+can work around.
+
+`RateLimited` adds a paragraph explaining that the shared librespot client ID's
+quota is consumed globally, so a fresh login can be refused through no fault of
+the user — and says whether it is waiting out the window automatically.
 
 ## Inputs / outputs / side effects
 
@@ -50,6 +69,18 @@ which causes [[App.svelte]] to swap in the main UI.
   reason for the custom `Serialize` impl in [[error.rs]].
 - **`busy` gates the button**, preventing a second OAuth attempt while one
   loopback listener is already bound to port 8898 — a second would fail to bind.
+
+> ### The auto-retry must be silent
+> The countdown calls `doLogin(true)`, which goes through `restoreSession()`.
+> Calling `login()` instead would **reopen the browser every 60 seconds** —
+> worse than the failure it is recovering from. This works only because
+> [[commands.rs]] persists the refresh token *before* the Premium gate. See
+> [[rate-limiting]].
+
+> ### `onclick={() => doLogin()}`, never `onclick={doLogin}`
+> The bare reference passes the `MouseEvent` as the `silent` argument, making
+> every manual click take the silent path. Caught by `svelte-check`, which is
+> why the wrapper arrow is required.
 - **Assigns `store.auth` directly** rather than waiting for the `auth:changed`
   event. The backend emits it too, so this is belt-and-braces; the direct
   assignment guarantees an immediate transition.
@@ -58,5 +89,6 @@ which causes [[App.svelte]] to swap in the main UI.
 
 ## See also
 
-[[auth-and-tokens]] · [[error.rs]] · [[auth.rs]] · [[App.svelte]] ·
-[[api.ts]] · [[frontend-views]] · [[MOC]]
+[[auth-and-tokens]] · [[rate-limiting]] · [[error.rs]] · [[auth.rs]] ·
+[[commands.rs]] · [[App.svelte]] · [[api.ts]] · [[types.ts]] ·
+[[frontend-views]] · [[MOC]]

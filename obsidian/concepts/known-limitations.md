@@ -48,6 +48,18 @@ context, so [[ArtistView.svelte]] plays them via `load_tracks` rather than
 so `imageUrl` is null on every row. [[AlbumView.svelte]] shows the art in the
 header instead.
 
+## Shared-quota rate limiting
+
+**Observed in practice, not theoretical.** librespot's built-in client ID is
+shared by every librespot-based client, and Spotify meters per client ID over a
+rolling 30-second window. A 429 can therefore arrive on a first request with no
+prior usage — including on the login screen's Premium check.
+
+The app now detects it, honours `Retry-After`, retries short windows on GETs,
+and counts longer ones down in the UI. It cannot be fixed outright from here;
+[[rate-limiting]] covers the full picture, including why registering your own
+client ID usually makes things worse.
+
 ## Implementation heuristics
 
 ### `is_active_device` is inferred
@@ -95,4 +107,5 @@ verifiable surface without a real account and a second device.
 ## See also
 
 [[architecture]] · [[playback-and-connect]] · [[auth-and-tokens]] ·
-[[state-and-events]] · [[external-dependencies]] · [[README.md]] · [[MOC]]
+[[rate-limiting]] · [[state-and-events]] · [[external-dependencies]] ·
+[[README.md]] · [[MOC]]

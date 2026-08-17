@@ -94,8 +94,29 @@ pub async fn refresh_login(client_id: &str, refresh_token: &str) -> AppResult<OA
         .map_err(|e| AppError::Auth(e.to_string()))
 }
 
+/// Environment variable overriding the OAuth client ID.
+pub const CLIENT_ID_ENV: &str = "SPOTIFY_RUST_CLIENT_ID";
+
+/// The OAuth client ID to use.
+///
+/// Defaults to librespot's built-in ID (Spotify's own desktop client). That ID
+/// is **shared by every librespot-based client in the world**, so its Web API
+/// quota is consumed globally — which is why a 429 can appear on a first
+/// request with no prior usage by this app.
+///
+/// Overriding with your own registered app gives a private quota, but is not a
+/// guaranteed win: newly registered apps start in Spotify's restricted
+/// *default* quota mode, and custom IDs frequently cannot obtain the
+/// `streaming` scope at all (403 from the token endpoint), which would break
+/// playback. Only worth trying if rate limiting is persistent.
 pub fn default_client_id() -> String {
-    SessionConfig::default().client_id
+    match std::env::var(CLIENT_ID_ENV) {
+        Ok(id) if !id.trim().is_empty() => {
+            log::info!("using client ID override from {CLIENT_ID_ENV}");
+            id.trim().to_string()
+        }
+        _ => SessionConfig::default().client_id,
+    }
 }
 
 /// Refresh this long before expiry, so a slow request cannot leave a window

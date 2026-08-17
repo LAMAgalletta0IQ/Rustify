@@ -28,14 +28,22 @@ this, so none can act on a dead session.
 name that appears in Spotify's device list.
 
 ### `async fn establish(app, state, api, tok) -> AuthState`
-Shared by `login` and `restore_session`. Order matters:
-1. **Premium check first** ([[auth.rs]]) — fail before starting audio.
-2. Resolve the app data dir.
-3. `tokens.set(access_token)` — publish *before* anything reads it.
-4. `player::start_session(...)`.
-5. Persist the refresh token.
+Shared by `login` and `restore_session`. **Order is load-bearing:**
+
+1. Resolve the app data dir.
+2. **Persist the refresh token** — before the Premium gate.
+3. **Premium check** ([[auth.rs]]) — fail before starting audio.
+4. `tokens.set(access_token)` — publish before anything reads it.
+5. `player::start_session(...)`.
 6. `spawn_refresher(...)`.
-7. Store `SpotifySession`, update `auth`, emit `auth:changed`.
+7. **Tear down any existing session**, then store the new `SpotifySession`,
+   update `auth`, emit `auth:changed`.
+
+> **Why the token is saved before the gate.** OAuth has already succeeded by
+> step 2. If the Premium check then fails transiently — a 429 on `/me` is the
+> realistic case — a retry can go through `restore_session` silently instead of
+> reopening the browser. Saving after the gate meant a rate-limited login left
+> nothing stored, so every retry reopened a browser tab. See [[rate-limiting]].
 
 ## Command groups
 
@@ -100,6 +108,12 @@ PlayingTrack}`, `librespot::core::authentication::Credentials`, `tauri`,
   race.
 - **`logout` aborts the refresh task.** Forgetting this would leak a task that
   keeps refreshing tokens for a session that no longer exists.
+- **`establish` tears the old session down too, for the same reason.**
+  **Dropping a tokio `JoinHandle` detaches the task rather than cancelling it**,
+  so replacing `state.spotify` without an explicit `abort()` left the previous
+  refresher running. Two refreshers then hit the token endpoint on independent
+  schedules — a way to rate-limit yourself. This was a real bug; see
+  [[rate-limiting]].
 - **A new `WebApi::new()` per command** builds a fresh `reqwest::Client` each
   call. Slightly wasteful — reqwest clients are designed to be reused for
   connection pooling — but keeps commands stateless. A reasonable future
@@ -108,4 +122,5 @@ PlayingTrack}`, `librespot::core::authentication::Credentials`, `tauri`,
 ## See also
 
 [[lib.rs]] · [[api.ts]] · [[state.rs]] · [[auth.rs]] · [[player.rs]] ·
-[[error.rs]] · [[data-flow]] · [[architecture]] · [[backend-rust]] · [[MOC]]
+[[error.rs]] · [[rate-limiting]] · [[data-flow]] · [[architecture]] ·
+[[backend-rust]] · [[MOC]]

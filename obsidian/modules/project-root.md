@@ -18,7 +18,8 @@ Frontend tooling config and project-level files. The Rust half lives under
 | [[svelte.config.js]] | Svelte preprocessor |
 | [[tsconfig.json]] | TypeScript strictness |
 | [[index.html]] | HTML entry for Vite |
-| [[.gitignore]] | Ignore rules (no repo initialised yet) |
+| [[.gitignore]] | Ignore rules |
+| [[.gitattributes]] | LF normalisation |
 | [[README.md]] | Human-facing docs, setup, test checklist, measurements |
 | [[app-icon.png]] | Source image for the generated [[icons]] |
 

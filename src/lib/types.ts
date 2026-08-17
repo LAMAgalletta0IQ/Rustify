@@ -8,8 +8,11 @@ export interface AppErrorPayload {
     | "Auth"
     | "Playback"
     | "WebApi"
+    | "RateLimited"
     | "Other";
   message: string;
+  /** Seconds to wait, from Spotify's `Retry-After`. Only set for RateLimited. */
+  retryAfter?: number | null;
 }
 
 export interface TrackInfo {

@@ -113,7 +113,7 @@ state:
 
 | Setting | Where | Value |
 | --- | --- | --- |
-| OAuth client ID | [[auth.rs]] | librespot's default (Spotify desktop) |
+| OAuth client ID | [[auth.rs]] | librespot's default (Spotify desktop), overridable via the `SPOTIFY_RUST_CLIENT_ID` env var — see [[rate-limiting]] before using it |
 | OAuth redirect | [[auth.rs]] | `http://127.0.0.1:8898/login` |
 | Scopes | [[auth.rs]] | `SCOPES` constant |
 | Connect device name | [[commands.rs]] | `<COMPUTERNAME> (spotify-rust)` |

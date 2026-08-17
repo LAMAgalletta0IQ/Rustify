@@ -23,17 +23,31 @@ a `User-Agent` of `spotify-rust/<version>` from `CARGO_PKG_VERSION`.
 ### `async fn send<T>(req, token) -> AppResult<T>`
 The core path used by every verb:
 1. Attach `bearer_auth(token)` and send.
-2. **If `204 No Content`, deserialise from the literal `"null"`** — player
+2. **If `429`, read the `Retry-After` header** and return
+   `AppError::RateLimited { retry_after }`, logging a warning. Handled before
+   anything else because it is recoverable by waiting — see [[rate-limiting]].
+3. **If `204 No Content`, deserialise from the literal `"null"`** — player
    PUT/POST endpoints answer with an empty body, which would otherwise fail
    JSON parsing.
-3. On non-success, try to extract `error.message` from Spotify's
-   `{"error":{"status","message"}}` envelope, falling back to the raw body.
-4. Otherwise deserialise into `T`.
+4. On non-success, extract `error.message` from Spotify's
+   `{"error":{"status","message"}}` envelope, falling back to the raw body, or
+   to `"no response body"` when the body is empty.
+5. Otherwise deserialise into `T`.
+
+### Retry constants
+```rust
+const MAX_AUTO_RETRY_SECS: u64 = 8;
+const MAX_RETRIES: u32 = 2;
+```
 
 ### Verb wrappers
-- `get<T>(token, path, query)` — query params appended only if non-empty.
-- `put(token, path, body)`, `post(token, path, body)`, `delete(token, path, body)`
-  — each `send::<Value>` and discard the result.
+- **`get<T>(token, path, query)`** — retries on 429. GETs are safe to repeat, so
+  a short window is absorbed here rather than surfaced: it waits the server's
+  `Retry-After` (or `1 << attempt` when absent), up to `MAX_AUTO_RETRY_SECS`
+  and `MAX_RETRIES`. Longer waits return `RateLimited` to the caller. The
+  request is rebuilt each attempt, since a `RequestBuilder` is consumed on send.
+- `put`, `post`, `delete` — **no retry**. Repeating a `POST /me/player/queue`
+  would double-queue a track.
 
 ## Inputs / outputs / side effects
 
@@ -60,10 +74,17 @@ The core path used by every verb:
   request volume; see that note for the possible optimisation.
 - **`reqwest` uses `native-tls`**, matching librespot's feature selection in
   [[Cargo.toml]] so only one TLS stack is compiled in.
-- No retry or rate-limit handling. Spotify's `429` would surface as a plain
-  `WebApi` error.
+- **An empty error body used to render as a bare `"429 Too Many Requests: "`.**
+  That is what a real rate-limit incident looked like before the `RateLimited`
+  variant existed — the header carrying the wait time was being discarded. The
+  empty-body fallback now says `"no response body"`.
+- **Only GETs retry**, and only through short windows. A minute-long
+  `Retry-After` is returned to the UI so the user is not left watching a frozen
+  view; [[Login.svelte]] runs a visible countdown instead.
+- Still no handling for `503` or generic transient failures — only 429.
 
 ## See also
 
-[[external-dependencies]] · [[commands.rs]] · [[library.rs]] · [[search.rs]] ·
-[[connect.rs]] · [[queue.rs]] · [[error.rs]] · [[backend-rust]] · [[MOC]]
+[[rate-limiting]] · [[external-dependencies]] · [[commands.rs]] ·
+[[library.rs]] · [[search.rs]] · [[connect.rs]] · [[queue.rs]] · [[error.rs]] ·
+[[backend-rust]] · [[MOC]]

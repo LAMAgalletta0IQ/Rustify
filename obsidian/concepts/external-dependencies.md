@@ -97,6 +97,9 @@ app touches:
 - **Simplified track objects** from `/albums/{id}/tracks` carry no nested
   album, so those rows have no cover art.
 - **Errors** are `{"error": {"status", "message"}}`, unwrapped in [[webapi.rs]].
+- **429 with `Retry-After`** — quota is metered per *client ID* over a rolling
+  30-second window, and ours is shared globally by all librespot clients.
+  Handled as its own error variant; see [[rate-limiting]].
 
 ## Platform dependencies
 

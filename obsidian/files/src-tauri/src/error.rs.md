@@ -22,6 +22,7 @@ machine-readable shape.
 | `Auth(String)` | OAuth flow or refresh failed |
 | `Playback(String)` | librespot error |
 | `WebApi(String)` | HTTP or Spotify API error |
+| `RateLimited { retry_after: Option<u64> }` | HTTP 429, carrying Spotify's `Retry-After` in seconds |
 | `Other(String)` | Everything else |
 
 Derives `thiserror::Error`, so each variant carries a `Display` message. The
@@ -31,11 +32,20 @@ free tier — see [[auth-and-tokens]].
 ### `fn kind(&self) -> &'static str`
 Returns a stable string tag per variant.
 
+`RateLimited`'s `Display` appends "— retry in about {n}s" when the header was
+present. Its doc comment records the cause: librespot's default client ID is
+shared by every librespot-based client, so the quota is consumed globally and a
+429 can appear on a first request. See [[rate-limiting]].
+
 ### `impl Serialize for AppError`
-Hand-written rather than derived, producing:
+Hand-written rather than derived, producing **three** fields:
 ```json
-{ "kind": "PremiumRequired", "message": "A Spotify Premium subscription is required..." }
+{ "kind": "RateLimited", "message": "Spotify is rate limiting this client — retry in about 58s.", "retryAfter": 58 }
 ```
+
+`retryAfter` is `null` for every other variant. It is exposed as its own field
+so [[Login.svelte]] can drive a countdown instead of parsing the number back out
+of the message text.
 
 > **Why hand-written.** A derived `Serialize` on an enum produces a tagged
 > union that is awkward to consume from TypeScript. This flat shape lets the
@@ -71,6 +81,9 @@ Pure. No I/O.
 - `kind` values are part of the frontend contract. [[types.ts]] mirrors them in
   `AppErrorPayload["kind"]`; renaming one silently breaks the branch in
   [[Login.svelte]].
+- **`RateLimited` is separate from `WebApi` on purpose.** It is recoverable by
+  waiting, so the UI treats it differently from a real failure — see
+  [[rate-limiting]].
 - Tauri requires command error types to implement `Serialize`; that requirement
   is the reason this type exists rather than `anyhow`.
 

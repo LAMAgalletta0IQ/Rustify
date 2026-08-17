@@ -26,7 +26,9 @@ in sync with `src-tauri/src/{state,library,search,connect,queue}.rs`.
 
 `AppErrorPayload["kind"]` is a **string-literal union** matching `AppError::kind`,
 so branching on it is exhaustively checked in TypeScript even though nothing
-verifies it against Rust.
+verifies it against Rust. It also carries
+`retryAfter?: number | null` — populated only for `RateLimited`, and used by
+[[Login.svelte]] to drive its countdown. See [[rate-limiting]].
 
 ## Helpers
 
