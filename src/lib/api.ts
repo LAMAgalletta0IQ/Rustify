@@ -1,0 +1,109 @@
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  AlbumSummary,
+  AppErrorPayload,
+  AuthState,
+  Device,
+  PlaybackState,
+  PlaylistSummary,
+  QueueView,
+  SearchResults,
+  TrackSummary,
+} from "./types";
+
+/** Tauri event names — must match `state::events` in Rust. */
+export const EVENT_PLAYBACK = "playback:changed";
+export const EVENT_AUTH = "auth:changed";
+
+/**
+ * Tauri rejects with the serialised `AppError`. Normalise it so callers always
+ * get a typed payload instead of a bare unknown.
+ */
+export function asAppError(e: unknown): AppErrorPayload {
+  if (
+    typeof e === "object" &&
+    e !== null &&
+    "kind" in e &&
+    "message" in e
+  ) {
+    return e as AppErrorPayload;
+  }
+  return { kind: "Other", message: String(e) };
+}
+
+// ---- auth ---------------------------------------------------------------
+export const getAuthState = () => invoke<AuthState>("get_auth_state");
+export const login = () => invoke<AuthState>("login");
+export const restoreSession = () => invoke<AuthState>("restore_session");
+export const logout = () => invoke<void>("logout");
+
+// ---- playback -----------------------------------------------------------
+export const getPlayback = () => invoke<PlaybackState>("get_playback");
+export const play = () => invoke<void>("play");
+export const pause = () => invoke<void>("pause");
+export const playPause = () => invoke<void>("play_pause");
+export const nextTrack = () => invoke<void>("next_track");
+export const previousTrack = () => invoke<void>("previous_track");
+export const seek = (positionMs: number) =>
+  invoke<void>("seek", { positionMs });
+export const setVolume = (percent: number) =>
+  invoke<void>("set_volume", { percent });
+export const setShuffle = (shuffle: boolean) =>
+  invoke<void>("set_shuffle", { shuffle });
+export const setRepeat = (context: boolean, track: boolean) =>
+  invoke<void>("set_repeat", { context, track });
+/**
+ * Play a context (playlist/album/artist/collection), optionally starting at a
+ * specific track so the rest of the context keeps playing after it.
+ */
+export const loadContext = (contextUri: string, trackUri?: string) =>
+  invoke<void>("load_context", { contextUri, trackUri });
+
+/** Play an explicit track list, for results that have no container context. */
+export const loadTracks = (uris: string[], startUri?: string) =>
+  invoke<void>("load_tracks", { uris, startUri });
+
+/** URI of the account's Liked Songs, which acts as a normal context. */
+export const likedSongsUri = (userId: string) =>
+  `spotify:user:${userId}:collection`;
+
+// ---- connect ------------------------------------------------------------
+export const listDevices = () => invoke<Device[]>("list_devices");
+export const transferPlayback = (deviceId: string, play: boolean) =>
+  invoke<void>("transfer_playback", { deviceId, play });
+export const activateThisDevice = () => invoke<void>("activate_this_device");
+
+// ---- library ------------------------------------------------------------
+export const getPlaylists = (limit?: number, offset?: number) =>
+  invoke<PlaylistSummary[]>("get_playlists", { limit, offset });
+export const getPlaylistTracks = (
+  playlistId: string,
+  limit?: number,
+  offset?: number,
+) =>
+  invoke<TrackSummary[]>("get_playlist_tracks", { playlistId, limit, offset });
+export const getSavedTracks = (limit?: number, offset?: number) =>
+  invoke<TrackSummary[]>("get_saved_tracks", { limit, offset });
+export const getSavedAlbums = (limit?: number, offset?: number) =>
+  invoke<AlbumSummary[]>("get_saved_albums", { limit, offset });
+export const getAlbumTracks = (albumId: string) =>
+  invoke<TrackSummary[]>("get_album_tracks", { albumId });
+export const setTracksSaved = (ids: string[], saved: boolean) =>
+  invoke<void>("set_tracks_saved", { ids, saved });
+export const setAlbumsSaved = (ids: string[], saved: boolean) =>
+  invoke<void>("set_albums_saved", { ids, saved });
+/** Returns one bool per id, in the order given. */
+export const getTracksSaved = (ids: string[]) =>
+  invoke<boolean[]>("get_tracks_saved", { ids });
+export const getArtistTopTracks = (artistId: string) =>
+  invoke<TrackSummary[]>("get_artist_top_tracks", { artistId });
+export const getArtistAlbums = (artistId: string) =>
+  invoke<AlbumSummary[]>("get_artist_albums", { artistId });
+
+// ---- search -------------------------------------------------------------
+export const searchSpotify = (query: string, limit?: number) =>
+  invoke<SearchResults>("search_spotify", { query, limit });
+
+// ---- queue --------------------------------------------------------------
+export const getQueue = () => invoke<QueueView>("get_queue");
+export const addToQueue = (uri: string) => invoke<void>("add_to_queue", { uri });

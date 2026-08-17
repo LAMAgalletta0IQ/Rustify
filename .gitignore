@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.vscode/
+*.log
+
+# Local Spotify credentials + audio cache written at runtime.
+src-tauri/.cache/

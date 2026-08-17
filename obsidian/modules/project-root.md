@@ -1,0 +1,59 @@
+---
+tags: [module, config]
+---
+# Module — Project root
+
+**Path:** repository root
+
+Frontend tooling config and project-level files. The Rust half lives under
+[[tauri-config]].
+
+## Files
+
+| File | Role |
+| --- | --- |
+| [[package.json]] | npm scripts, deps, `allowScripts` approval |
+| [[package-lock.json]] | Exact npm versions |
+| [[vite.config.ts]] | Dev server port, build target, watch exclusions |
+| [[svelte.config.js]] | Svelte preprocessor |
+| [[tsconfig.json]] | TypeScript strictness |
+| [[index.html]] | HTML entry for Vite |
+| [[.gitignore]] | Ignore rules (no repo initialised yet) |
+| [[README.md]] | Human-facing docs, setup, test checklist, measurements |
+| [[app-icon.png]] | Source image for the generated [[icons]] |
+
+## Directory layout
+
+```
+spotify-rust/
+├── index.html          ← Vite entry
+├── package.json        ← npm scripts
+├── vite.config.ts
+├── svelte.config.js
+├── tsconfig.json
+├── app-icon.png        ← icon source
+├── README.md
+├── src/                → [[frontend-svelte]]
+├── src-tauri/          → [[backend-rust]] + [[tauri-config]]
+├── obsidian/           ← this vault
+├── node_modules/       ← excluded
+└── dist/               ← excluded (build output)
+```
+
+Standard Tauri layout: frontend at the root, Rust in `src-tauri/`. Vite treats
+the root as its project root, which is why [[index.html]] sits beside
+[[package.json]] rather than under `src/`.
+
+## Scripts
+
+| Script | Runs |
+| --- | --- |
+| `dev` | `vite` |
+| `build` | `svelte-check` then `vite build` — type errors fail the build |
+| `check` | `svelte-check` alone |
+| `tauri` | The Tauri CLI (`tauri dev`, `tauri build`, `tauri icon`) |
+
+## See also
+
+[[build-and-config]] · [[frontend-svelte]] · [[tauri-config]] ·
+[[external-dependencies]] · [[MOC]]

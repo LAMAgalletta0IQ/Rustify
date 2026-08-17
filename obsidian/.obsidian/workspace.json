@@ -1,0 +1,224 @@
+{
+  "main": {
+    "id": "ffd3232264affc7c",
+    "type": "split",
+    "children": [
+      {
+        "id": "0bd06be2bed22310",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "f6e275d5243c4554",
+            "type": "leaf",
+            "state": {
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "baa4369e7aaf4aae",
+    "type": "split",
+    "children": [
+      {
+        "id": "b2a10871ae135ca7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "5884ff8cd8361c81",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "12abacef039f1632",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "a2b6e0563f5b1850",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "e57db97c03426cd5",
+    "type": "split",
+    "children": [
+      {
+        "id": "9f96493ec073fa3e",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d01f0e405a9cbfc6",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks"
+            }
+          },
+          {
+            "id": "94262b4751426870",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "dbe6e325f1524fbf",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "b6a626488bfe4da4",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "a70baeee95e9ddee",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "obsidian42-brat:BRAT": false,
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "f6e275d5243c4554",
+  "lastOpenFiles": [
+    "files/src/lib/components/DevicePicker.svelte.md",
+    "files/src/lib/components/DevicePicker.svelte.md.tmp.1652.7a10664f235f",
+    "files/src/lib/components/PlayerBar.svelte.md",
+    "files/src/lib/components/PlayerBar.svelte.md.tmp.1652.e834fad3deef",
+    "files/src/lib/components/TrackList.svelte.md",
+    "files/src/lib/components",
+    "files/src/lib/views/ArtistView.svelte.md",
+    "files/src/lib/views/ArtistView.svelte.md.tmp.1652.755c36a76270",
+    "files/src/lib/views/AlbumView.svelte.md",
+    "files/src/lib/views/AlbumView.svelte.md.tmp.1652.97beaa9afbfd",
+    "files/src/lib/views/NowPlaying.svelte.md",
+    "files/src/lib/views/NowPlaying.svelte.md.tmp.1652.ff43c3a06b94",
+    "files/src/lib/views/Search.svelte.md",
+    "files/src/lib/views/Search.svelte.md.tmp.1652.6f2c22b7c848",
+    "files/src/lib/views/Home.svelte.md",
+    "files/src/lib/views/Home.svelte.md.tmp.1652.228aaa6b7155",
+    "files/src/lib/views/Login.svelte.md",
+    "files/src/lib/views/Login.svelte.md.tmp.1652.bdac2212b74f",
+    "files/src/lib/views",
+    "files/src/lib/store.svelte.ts.md",
+    "files/src/lib/types.ts.md",
+    "files/src/lib/api.ts.md",
+    "files/src/App.svelte.md",
+    "files/src/main.ts.md",
+    "files/src-tauri/src/media_keys.rs.md",
+    "files/src-tauri/src/queue.rs.md",
+    "files/src-tauri/src/connect.rs.md",
+    "files/src-tauri/src/search.rs.md",
+    "files/src-tauri/src/library.rs.md",
+    "files/src-tauri/src/webapi.rs.md",
+    "files/src-tauri/src/commands.rs.md",
+    "files/src-tauri/src/player.rs.md",
+    "files/src-tauri/src/auth.rs.md",
+    "files/src-tauri/src/error.rs.md",
+    "files/src-tauri/src/state.rs.md",
+    "files/src-tauri/src/lib.rs.md"
+  ]
+}
