@@ -12,7 +12,8 @@ stays visible beneath all of them.
 
 | View | Shown when | Data source |
 | --- | --- | --- |
-| [[Login.svelte]] | `!store.auth.loggedIn` | `login` command |
+| [[Setup.svelte]] | `store.setupNeeded` (no Web API Client ID configured yet) | `get_login_info`, `set_client_id` |
+| [[Login.svelte]] | `!store.setupNeeded && !store.auth.loggedIn` | `login` command |
 | [[Home.svelte]] | `tab === "home"` | Playlists, saved albums, liked songs |
 | [[Search.svelte]] | `tab === "search"` | `search_spotify` |
 | [[NowPlaying.svelte]] | `nowPlayingOpen` (overlay) | Store + `get_queue` |
@@ -33,6 +34,7 @@ them. Artist → album re-parents by clearing `openArtist` and setting
 
 ```
 App.svelte
+├── Setup.svelte                    (no Client ID configured yet)
 ├── Login.svelte                    (logged out)
 └── logged in
     ├── Home.svelte ──► detail (inline, not a separate view)

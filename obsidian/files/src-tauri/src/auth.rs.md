@@ -27,9 +27,17 @@ overview in [[auth-and-tokens]].
 Always `SessionConfig::default().client_id`, Spotify's own desktop ID. **Not**
 configurable: it is the only one reliably granted the `streaming` scope.
 
-### `fn webapi_client_id() -> Option<String>`
-The user's own client ID, when set and non-blank. `None` means Web API traffic
-shares the streaming login and its globally pooled quota.
+### `fn webapi_client_id(data_dir: &Path) -> AppResult<String>`
+Resolves, in order: the `RUSTIFY_CLIENT_ID` env var (packager/dev override),
+then `settings.json` in `data_dir` (written by `set_client_id` in
+[[commands.rs]] via the Setup screen), then `Err`. There is no built-in
+fallback — see the gotcha below.
+
+### `struct Settings` / `load_settings` / `save_settings`
+The Client ID's persisted home: `settings.json` in the app data dir, read and
+written the same way as `tokens.json` but deliberately a separate file — it
+survives logout, since it belongs to the Spotify app the user registered, not
+to any one login session.
 
 ### Redirect helpers
 - `streaming_redirect_uri()` — prefers `STREAMING_PORT`, falls back to an
@@ -69,12 +77,13 @@ straight out would delete a perfectly good stored credential. Deliberate
 clearing goes through `clear_stored_tokens`, which removes the file outright,
 so preserving on `None` cannot strand a dead token.
 
-### `async fn interactive_login() -> SessionTokens`
-Opens the browser for the streaming authorization, then — when a private client
-ID is set — **again** for the Web API one. Without one, returns
-`SessionTokens::shared()` and logs a warning about the shared quota.
+### `async fn interactive_login(data_dir: &Path) -> SessionTokens`
+Opens the browser for the streaming authorization, then **again** for the Web
+API one under `webapi_client_id(data_dir)`. Propagates that call's `Err` if no
+Client ID is configured — in practice unreachable via the UI, since
+[[commands.rs]]'s `login` command runs after Setup has already gated on it.
 
-### `async fn restore_login(&StoredTokens) -> SessionTokens`
+### `async fn restore_login(&StoredTokens, data_dir: &Path) -> SessionTokens`
 Silent renewal of both tokens. If the Web API refresh fails it degrades to the
 shared token rather than erroring; see the gotcha below.
 
@@ -98,8 +107,8 @@ the first profile image as the avatar.
 ## Inputs / outputs / side effects
 
 - **Network:** Spotify OAuth endpoints (two client IDs); `GET /v1/me`.
-- **Filesystem:** reads/writes/deletes `tokens.json`.
-- **Environment:** reads `RUSTIFY_CLIENT_ID`.
+- **Filesystem:** reads/writes/deletes `tokens.json`; reads/writes `settings.json`.
+- **Environment:** reads `RUSTIFY_CLIENT_ID` (override only — see gotchas).
 - **Binds** loopback ports 8898 / 8899 during login.
 - **Spawns** a long-lived tokio task (the refresher).
 - **Opens the system browser** — twice when the split is active.
@@ -113,6 +122,12 @@ the first profile image as the avatar.
 
 ## Notable logic / gotchas
 
+- **There is no built-in Client ID fallback, on purpose.** Earlier versions
+  baked one in (`CLIENT_ID_FALLBACK`) so an unconfigured install still "just
+  worked" — but that meant sharing *the app author's* quota, which does not
+  scale past one install. `webapi_client_id` now errors when unconfigured, and
+  [[commands.rs]]/[[App.svelte]] turn that into the first-run Setup screen
+  rather than a degraded default. See [[auth-and-tokens]].
 - **A failed Web API refresh must not propagate.** By that point the streaming
   refresh has already succeeded, and Spotify rotates refresh tokens on use — so
   the stored streaming token is dead and its replacement lives only in memory.
@@ -161,4 +176,4 @@ the first profile image as the avatar.
 
 [[auth-and-tokens]] · [[rate-limiting]] · [[known-limitations]] ·
 [[commands.rs]] · [[lib.rs]] · [[state.rs]] · [[webapi.rs]] · [[error.rs]] ·
-[[player.rs]] · [[Login.svelte]] · [[backend-rust]] · [[MOC]]
+[[player.rs]] · [[Login.svelte]] · [[Setup.svelte]] · [[backend-rust]] · [[MOC]]

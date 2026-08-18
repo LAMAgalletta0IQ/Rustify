@@ -54,7 +54,7 @@ Feature modules: [[auth.rs]] · [[player.rs]] · [[commands.rs]] · [[connect.rs
 ### Frontend — Svelte (`src/`) `#frontend`
 Shell & bootstrap: [[main.ts]] · [[App.svelte]] · [[app.css]] · [[vite-env.d.ts]]
 Shared library: [[api.ts]] · [[types.ts]] · [[store.svelte.ts]]
-Views: [[Login.svelte]] · [[Home.svelte]] · [[Search.svelte]] · [[NowPlaying.svelte]] · [[AlbumView.svelte]] · [[ArtistView.svelte]]
+Views: [[Setup.svelte]] · [[Login.svelte]] · [[Home.svelte]] · [[Search.svelte]] · [[NowPlaying.svelte]] · [[AlbumView.svelte]] · [[ArtistView.svelte]]
 Components: [[PlayerBar.svelte]] · [[DevicePicker.svelte]] · [[TrackList.svelte]]
 
 ### Tauri configuration (`src-tauri/`) `#config`

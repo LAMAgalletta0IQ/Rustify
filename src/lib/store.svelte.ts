@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as api from "./api";
 import { EVENT_AUTH, EVENT_PLAYBACK } from "./api";
-import type { AuthState, PlaybackState } from "./types";
+import type { AuthState, LoginInfo, PlaybackState } from "./types";
 
 const emptyPlayback: PlaybackState = {
   isPlaying: false,
@@ -30,6 +30,8 @@ class AppStore {
   /** Non-fatal error banner text. */
   error = $state<string | null>(null);
   booting = $state(true);
+  /** True until a Web API client ID is configured; gates Login behind Setup. */
+  setupNeeded = $state(false);
 
   #unlisten: UnlistenFn[] = [];
   #ticker: number | null = null;
@@ -48,6 +50,18 @@ class AppStore {
     );
 
     try {
+      let info: LoginInfo | null = null;
+      try {
+        info = await api.getLoginInfo();
+      } catch (e) {
+        // Purely cosmetic below — a failure here must not block login.
+        console.warn("could not read login info", api.asAppError(e).message);
+      }
+      if (info && !info.privateClientId) {
+        this.setupNeeded = true;
+        return;
+      }
+
       this.auth = await api.restoreSession();
       if (this.auth.loggedIn) {
         this.playback = await api.getPlayback();
@@ -58,6 +72,17 @@ class AppStore {
       console.warn("session restore failed", api.asAppError(e).message);
     } finally {
       this.booting = false;
+    }
+  }
+
+  /** Called once Setup has saved a client ID, to move on to the Login screen. */
+  async finishSetup() {
+    try {
+      const info = await api.getLoginInfo();
+      this.setupNeeded = !info.privateClientId;
+    } catch (e) {
+      console.warn("could not confirm setup", api.asAppError(e).message);
+      this.setupNeeded = false;
     }
   }
 

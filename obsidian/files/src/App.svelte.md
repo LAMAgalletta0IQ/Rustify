@@ -3,13 +3,13 @@ tags: [file, frontend, ui, entrypoint]
 ---
 # `src/App.svelte`
 
-**Module:** [[frontend-svelte]] · **Language:** Svelte 5 · **126 lines**
+**Module:** [[frontend-svelte]] · **Language:** Svelte 5
 
 ## Purpose
 
-The application shell. Decides between three top-level states (booting, logged
-out, logged in), owns tab navigation, renders the error banner, and keeps
-[[PlayerBar.svelte]] permanently mounted.
+The application shell. Decides between four top-level states (booting, Setup
+needed, logged out, logged in), owns tab navigation, renders the error banner,
+and keeps [[PlayerBar.svelte]] permanently mounted.
 
 ## Key items
 
@@ -29,8 +29,9 @@ onDestroy(() => store.destroy());
 
 ### Render structure
 ```
-{#if store.booting}        → "Starting…"
-{:else if !loggedIn}       → Login.svelte
+{#if store.booting}          → "Starting…"
+{:else if setupNeeded
+       || !loggedIn}         → Setup.svelte | Login.svelte (drag strip + wctl)
 {:else}
   header  (tabs, avatar, display name, log out)
   banner  (store.error, dismissible)
@@ -38,6 +39,9 @@ onDestroy(() => store.destroy());
   PlayerBar.svelte
 {/if}
 ```
+Setup and Login share one branch (and one undecorated-window drag strip)
+because both are "the window before the main shell exists" — the inner
+`{#if store.setupNeeded}` picks between them.
 
 ### Layout
 `.shell` is a CSS grid with rows `auto auto 1fr auto` — header, banner, scrolling
@@ -47,14 +51,14 @@ scrolls as a whole.
 
 ## Inputs / outputs / side effects
 
-**Inputs:** `store.booting`, `store.auth`, `store.error`.
+**Inputs:** `store.booting`, `store.setupNeeded`, `store.auth`, `store.error`.
 **Side effects:** initialises and tears down the store; triggers `logout`.
 
 ## Dependencies
 
 **Imports:** `svelte` (`onMount`, `onDestroy`), [[api.ts]],
 [[store.svelte.ts]], [[PlayerBar.svelte]], [[Home.svelte]], [[Login.svelte]],
-[[NowPlaying.svelte]], [[Search.svelte]], and
+[[Setup.svelte]], [[NowPlaying.svelte]], [[Search.svelte]], and
 `../src-tauri/icons/64x64.png` — the **only** import that crosses out of `src/`
 into the Rust side of the tree
 **Imported by:** [[main.ts]]
@@ -70,6 +74,10 @@ into the Rust side of the tree
 - **The boot gate is the only guard against a flash of the login screen.**
   Without `store.booting`, a successful silent restore would still render
   [[Login.svelte]] for a frame.
+- **`setupNeeded` is checked before `loggedIn`, deliberately.** `store.init()`
+  fetches `getLoginInfo()` first and returns early (skipping `restoreSession`
+  entirely) when no Client ID is configured — there is nothing to restore
+  until one exists. See [[store.svelte.ts]].
 - `onOpenNowPlaying` **toggles** rather than sets, so the player bar acts as
   open/close.
 - The error banner is app-wide; views that need bespoke error UI (notably
@@ -129,4 +137,5 @@ into the Rust side of the tree
 ## See also
 
 [[main.ts]] · [[store.svelte.ts]] · [[PlayerBar.svelte]] · [[Login.svelte]] ·
-[[frontend-views]] · [[entry-points]] · [[frontend-svelte]] · [[MOC]]
+[[Setup.svelte]] · [[frontend-views]] · [[entry-points]] · [[frontend-svelte]] ·
+[[MOC]]

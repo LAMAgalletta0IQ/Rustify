@@ -3,7 +3,7 @@ tags: [file, frontend]
 ---
 # `src/lib/api.ts`
 
-**Module:** [[frontend-svelte]] · **Language:** TypeScript · **101 lines**
+**Module:** [[frontend-svelte]] · **Language:** TypeScript
 
 ## Purpose
 
@@ -30,7 +30,7 @@ block in the app goes through it.
 
 | Group | Functions |
 | --- | --- |
-| auth | `getAuthState`, `getLoginInfo`, `login`, `restoreSession`, `logout` |
+| auth | `getAuthState`, `getLoginInfo`, `setClientId`, `login`, `restoreSession`, `logout` |
 | playback | `getPlayback`, `play`, `pause`, `playPause`, `nextTrack`, `previousTrack`, `seek`, `setVolume`, `setShuffle`, `setRepeat`, `loadContext`, `loadTracks` |
 | connect | `listDevices`, `transferPlayback`, `activateThisDevice` |
 | library | `getPlaylists`, `getPlaylistTracks`, `getSavedTracks`, `getSavedAlbums`, `getAlbumTracks`, `setTracksSaved`, `setAlbumsSaved`, `getTracksSaved`, `getArtistTopTracks`, `getArtistAlbums` |
@@ -76,4 +76,5 @@ Every function performs IPC. All return promises that **reject with
 ## See also
 
 [[commands.rs]] · [[lib.rs]] · [[types.ts]] · [[store.svelte.ts]] ·
-[[error.rs]] · [[state.rs]] · [[architecture]] · [[frontend-svelte]] · [[MOC]]
+[[error.rs]] · [[state.rs]] · [[architecture]] · [[frontend-svelte]] ·
+[[Setup.svelte]] · [[MOC]]

@@ -2,18 +2,12 @@
   import * as api from "../api";
   import { store } from "../store.svelte";
 
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy } from "svelte";
 
-  /** Null until loaded; the copy below degrades gracefully while it is. */
-  let info = $state<import("../types").LoginInfo | null>(null);
-
-  onMount(async () => {
-    try {
-      info = await api.getLoginInfo();
-    } catch {
-      // Purely cosmetic — a failure here must not block logging in.
-    }
-  });
+  function useDifferentClientId() {
+    stopCooldown();
+    store.setupNeeded = true;
+  }
 
   let busy = $state(false);
   let errKind = $state<string | null>(null);
@@ -108,13 +102,9 @@
 
     {#if busy}
       <p class="muted small">
-        {#if info?.privateClientId}
-          Your browser has been opened. Approve access — then approve a
-          <strong>second</strong> time, in the tab that opens after it. One
-          login is for playback, the other for library and search.
-        {:else}
-          Your browser has been opened. Approve access, then return here.
-        {/if}
+        Your browser has been opened. Approve access — then approve a
+        <strong>second</strong> time, in the tab that opens after it. One
+        login is for playback, the other for library and search.
       </p>
     {/if}
 
@@ -134,31 +124,18 @@
         <span>{errMsg}</span>
         {#if errKind === "RateLimited"}
           <span class="small">
-            {#if info?.privateClientId}
-              Unusual with your own client ID configured — this quota is
-              private to your app, so it is most likely a short burst rather
-              than the shared-quota problem.
-            {:else}
-              This is not caused by anything you did. Without a client ID of
-              your own, library and search share librespot's built-in one with
-              every librespot-based app in the world, so its Spotify API quota
-              is used up globally and a fresh login can be refused.
-            {/if}
+            This is most likely a short burst against your app's own quota,
+            not the shared quota problem unregistered apps run into.
             {#if cooldown !== null}
               Waiting out Spotify's window and retrying automatically.
             {:else}
               Waiting a few minutes and trying again normally clears it.
             {/if}
           </span>
-          {#if info && !info.privateClientId}
-            <span class="small">
-              To fix it properly: create an app at
-              <code>developer.spotify.com/dashboard</code>, add
-              <code>{info.webapiRedirectUri}</code> as a redirect URI, and put
-              the Client ID in <code>.env</code> as
-              <code>{info.clientIdEnv}</code>.
-            </span>
-          {/if}
+          <span class="small">
+            If it keeps happening, the Client ID may be wrong or the app may
+            have been deleted from the dashboard.
+          </span>
         {/if}
         {#if errKind === "PremiumRequired"}
           <span class="small">
@@ -169,6 +146,10 @@
         {/if}
       </div>
     {/if}
+
+    <button class="linklike small" onclick={useDifferentClientId}>
+      Use a different Client ID
+    </button>
   </div>
 </div>
 
@@ -216,11 +197,12 @@
     background: rgba(190, 160, 50, 0.18);
     border-color: rgba(220, 190, 90, 0.3);
   }
-  code {
-    font-size: 11px;
-    padding: 1px 4px;
-    border-radius: 3px;
-    background: rgba(255, 241, 224, 0.08);
-    word-break: break-all;
+  .linklike {
+    color: var(--fg-dim);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .linklike:hover {
+    color: var(--fg);
   }
 </style>

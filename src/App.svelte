@@ -16,6 +16,7 @@
   import Login from "./lib/views/Login.svelte";
   import NowPlaying from "./lib/views/NowPlaying.svelte";
   import Search from "./lib/views/Search.svelte";
+  import Setup from "./lib/views/Setup.svelte";
 
   type Tab = "home" | "search" | "library";
 
@@ -44,9 +45,9 @@
 
   {#if store.booting}
     <div class="boot"><p class="muted">Starting…</p></div>
-  {:else if !store.auth.loggedIn}
-    <!-- The title bar is gone with decorations, so the login screen needs its
-         own drag strip or the window becomes unmovable before sign-in. -->
+  {:else if store.setupNeeded || !store.auth.loggedIn}
+    <!-- The title bar is gone with decorations, so Setup/Login need their own
+         drag strip or the window becomes unmovable before sign-in. -->
     <div class="predrag" data-tauri-drag-region>
       <div class="wctl">
         <button onclick={() => appWindow.minimize()} title="Minimize">&#9472;</button>
@@ -54,7 +55,11 @@
         <button class="x" onclick={() => appWindow.close()} title="Close">&#10005;</button>
       </div>
     </div>
-    <Login />
+    {#if store.setupNeeded}
+      <Setup onDone={() => store.finishSetup()} />
+    {:else}
+      <Login />
+    {/if}
   {:else}
     <div class="shell">
       <header class="titlebar" data-tauri-drag-region>

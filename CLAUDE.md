@@ -59,12 +59,25 @@ against **two client IDs** (`auth.rs`):
 - **Streaming** — Spotify's desktop client ID from `SessionConfig::default()`.
   Hardcoded, because self-registered apps are generally refused the `streaming`
   scope. Redirect `127.0.0.1:8898`, falling back to an ephemeral port.
-- **Web API** — `RUSTIFY_CLIENT_ID`. Redirect `127.0.0.1:8899`, **fixed**: a
-  self-registered app must declare its redirect URI exactly in Spotify's
+- **Web API** — the user's own Client ID. Redirect `127.0.0.1:8899`, **fixed**:
+  a self-registered app must declare its redirect URI exactly in Spotify's
   dashboard, so this one cannot vary.
 
-With both configured the browser opens **twice** on login. Without a private ID,
-`SessionTokens::shared()` points both roles at the streaming token.
+With both configured the browser opens **twice** on login.
+
+> Until 2026-08 an unconfigured Web API ID silently fell back to a client ID
+> baked into the binary, so the app "just worked" without setup. That meant
+> every user who skipped configuration shared *the developer's* quota — which
+> does not scale past one person running the app, and defeats the entire
+> point of splitting the two logins. There is no fallback now: on first
+> launch, before Login is even shown, the UI blocks on a Setup screen
+> (`Setup.svelte`) that walks the user through registering their own Spotify
+> app and saves the Client ID to `settings.json` in the app data dir via the
+> `set_client_id` command. `auth::webapi_client_id(data_dir)` resolves it from,
+> in order: the `RUSTIFY_CLIENT_ID` env var (a packager/dev override, not the
+> primary path anymore), then `settings.json`, then errors — which
+> `restore_session`/`get_login_info` interpret as "Setup still needed" rather
+> than a real failure.
 
 Consequences that bite:
 

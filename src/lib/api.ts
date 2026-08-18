@@ -36,6 +36,8 @@ export function asAppError(e: unknown): AppErrorPayload {
 // ---- auth ---------------------------------------------------------------
 export const getAuthState = () => invoke<AuthState>("get_auth_state");
 export const getLoginInfo = () => invoke<LoginInfo>("get_login_info");
+export const setClientId = (clientId: string) =>
+  invoke<void>("set_client_id", { clientId });
 export const login = () => invoke<AuthState>("login");
 export const restoreSession = () => invoke<AuthState>("restore_session");
 export const logout = () => invoke<void>("logout");

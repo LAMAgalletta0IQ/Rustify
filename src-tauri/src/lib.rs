@@ -61,7 +61,7 @@ pub fn run() {
         if std::env::var(auth::CLIENT_ID_ENV).is_ok_and(|s| !s.trim().is_empty()) {
             "private (from environment)"
         } else {
-            "private (built-in fallback) — set RUSTIFY_CLIENT_ID to use your own quota instead"
+            "not set via environment — reading settings.json, or prompting first-run Setup if absent"
         }
     );
 
@@ -93,6 +93,7 @@ pub fn run() {
             // auth
             commands::get_auth_state,
             commands::get_login_info,
+            commands::set_client_id,
             commands::login,
             commands::restore_session,
             commands::logout,

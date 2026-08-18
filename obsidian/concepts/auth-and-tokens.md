@@ -28,10 +28,20 @@ split for the same reason — see `SPOTIFY_CLIENT_ID` / `NCSPOT_CLIENT_ID` in it
 `authentication.rs`.
 
 **Cost:** the browser opens twice on an interactive login. [[Login.svelte]] says
-so explicitly when a private client ID is configured.
+so explicitly.
 
-**When no private client ID is set**, a single login serves both roles and the
-browser opens once — see *The shared fallback* below.
+**A Web API client ID is required before Login is even reachable.** On first
+launch, `get_login_info` reports whether one is configured; if not, the UI
+shows a Setup screen ([[Setup.svelte]]) instead of Login, which walks the user
+through registering their own Spotify app and saves the ID via `set_client_id`
+([[commands.rs]]). See *Configuring the Client ID* below.
+
+> Until 2026-08 an unconfigured ID fell back to a client ID baked into the
+> binary, so a single login served both roles and the browser opened once.
+> That meant every user who skipped configuration shared *the app author's*
+> quota — see *The shared fallback* below for what still uses this
+> single-login shape today (it is now reached only via a refresh failure, not
+> via missing configuration).
 
 ## Why the split
 
@@ -50,16 +60,31 @@ configurable.
 | Role | Client ID | Redirect | Configurable |
 | --- | --- | --- | --- |
 | Streaming | `SessionConfig::default().client_id` | `http://127.0.0.1:8898/login`, falling back to an ephemeral port if busy | No |
-| Web API | `RUSTIFY_CLIENT_ID` from `.env` | `http://127.0.0.1:8899/login`, fixed | Yes |
+| Web API | saved via Setup / `RUSTIFY_CLIENT_ID` override | `http://127.0.0.1:8899/login`, fixed | Yes — required |
 
 The asymmetry in the redirect ports is deliberate. The desktop ID accepts any
 loopback port, so a port held by a stale process is recoverable. A
 self-registered app must declare its redirect URI **exactly** in the Spotify
 dashboard, so that one cannot be chosen at random.
 
+### Configuring the Client ID
+
+Two sources, in priority order, read by `auth::webapi_client_id(data_dir)`:
+
+1. **`RUSTIFY_CLIENT_ID` env var** — a packager/dev override (see
+   `.env.example`), not the path normal users take.
+2. **`settings.json`** in the app data dir, written by the `set_client_id`
+   command when the user submits [[Setup.svelte]]'s form.
+
+If neither resolves, `webapi_client_id` returns `Err`, which
+`get_login_info`/`restore_session` in [[commands.rs]] interpret as "Setup
+still needed" rather than a hard failure — the UI simply shows Setup instead
+of Login.
+
 Registering the app: dashboard → Create app → add `http://127.0.0.1:8899/login`
-→ put the Client ID in `.env`. A Client ID is not a secret; this flow is PKCE
-and uses no client secret.
+→ paste the Client ID into the app's Setup screen (or `.env`, for the override
+path). A Client ID is not a secret; this flow is PKCE and uses no client
+secret.
 
 ## Scopes
 
@@ -88,9 +113,14 @@ currently unused), so adding those features later needs no re-consent.
 
 `SessionTokens::shared()` points both roles at the streaming token. Reached when:
 
-- no `RUSTIFY_CLIENT_ID` is configured — the normal single-login path; or
-- one is configured but no Web API refresh token is stored (logged at `warn`); or
+- a Client ID is configured but no Web API refresh token is stored yet for it
+  (e.g. it was just changed via Setup/"Use a different Client ID") — logged at
+  `warn`; or
 - the Web API refresh fails during a restore (logged at `warn`).
+
+A missing Client ID no longer reaches this path — it is caught earlier,
+before `restore_login`/`interactive_login` are even called (see *Configuring
+the Client ID* above).
 
 That third case must **not** propagate as an error. The streaming refresh has
 already succeeded by then, and Spotify rotates refresh tokens on use — so the
@@ -123,8 +153,8 @@ bypassed — it exists to produce a good error message, not to gate anything.
 ```
                  ┌──────────────────────────────┐
    first run ──► │ interactive_login()          │  browser opens ×2
-                 │  1. streaming (desktop ID)   │  (×1 if no private ID)
-                 │  2. web api  (private ID)    │
+                 │  1. streaming (desktop ID)   │  (only reachable once
+                 │  2. web api  (private ID)    │   Setup has saved an ID)
                  └──────────────┬───────────────┘
                                 ▼
                  ┌──────────────────────────────┐
@@ -198,7 +228,11 @@ outgoing token back over an empty response field before building
 API credential at all.
 
 librespot separately caches its own credentials and up to 2 GB of audio under
-`<app data>/cache`.
+`<app data>/cache`. The Web API Client ID itself lives in a sibling file,
+`settings.json` (`{ "webapi_client_id": "…" }`), written by `set_client_id` and
+read by `webapi_client_id`. It is deliberately separate from `tokens.json`:
+the Client ID belongs to the Spotify app the user registered and survives
+logout, whereas `tokens.json` is cleared on logout.
 
 > The Tauri `identifier` feeds the app data dir path, so changing it orphans
 > `tokens.json` and forces one fresh login. See [[build-and-config]].
@@ -238,4 +272,4 @@ no password path either. See [[known-limitations]].
 
 [[architecture]] · [[data-flow]] · [[state-and-events]] · [[rate-limiting]] ·
 [[known-limitations]] · [[auth.rs]] · [[commands.rs]] · [[lib.rs]] ·
-[[Login.svelte]] · [[error.rs]] · [[MOC]]
+[[Login.svelte]] · [[Setup.svelte]] · [[error.rs]] · [[MOC]]

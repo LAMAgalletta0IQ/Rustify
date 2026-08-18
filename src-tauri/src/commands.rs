@@ -47,13 +47,14 @@ pub async fn get_auth_state(state: State<'_, AppState>) -> AppResult<AuthState> 
 }
 
 /// Shape of the login flow, so the UI can describe it accurately instead of
-/// guessing. Read at render time, not cached, because `.env` is only loaded at
-/// startup but the value is cheap to recompute.
+/// guessing, and so it knows whether the first-run Setup screen is needed.
+/// Read at render time, not cached, since it reflects whatever was last saved
+/// through `set_client_id` (or the `.env` override).
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginInfo {
-    /// True when a private Web API client ID is configured, which means the
-    /// login opens the browser twice and rate limits are far less likely.
+    /// True once a Web API client ID is configured (env override, or saved via
+    /// `set_client_id`). False means Setup must run before Login can.
     pub private_client_id: bool,
     /// Name of the variable to set, so the UI never hardcodes it.
     pub client_id_env: &'static str,
@@ -62,15 +63,39 @@ pub struct LoginInfo {
 }
 
 #[tauri::command]
-pub fn get_login_info() -> LoginInfo {
-    LoginInfo {
-        // Always true: `webapi_client_id()` falls back to a built-in ID when
-        // the environment variable is unset, so Web API traffic is never on
-        // the shared desktop quota and login always runs two authorizations.
-        private_client_id: true,
+pub fn get_login_info(app: AppHandle) -> AppResult<LoginInfo> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    Ok(LoginInfo {
+        private_client_id: auth::webapi_client_id(&data_dir).is_ok(),
         client_id_env: auth::CLIENT_ID_ENV,
         webapi_redirect_uri: auth::webapi_redirect_uri(),
+    })
+}
+
+/// Saves the Web API client ID from the first-run Setup screen (or a later
+/// correction via "Use a different Client ID" on the Login screen).
+#[tauri::command]
+pub fn set_client_id(app: AppHandle, client_id: String) -> AppResult<()> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    let trimmed = client_id.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Other("Client ID cannot be empty.".to_string()));
     }
+
+    auth::save_settings(
+        &data_dir,
+        &auth::Settings {
+            webapi_client_id: Some(trimmed.to_string()),
+        },
+    )
 }
 
 /// Completes a login given an OAuth token: verifies Premium, starts librespot,
@@ -161,8 +186,13 @@ async fn establish(
 
 #[tauri::command]
 pub async fn login(app: AppHandle, state: State<'_, AppState>) -> AppResult<AuthState> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
     let api = WebApi::new();
-    let toks = auth::interactive_login().await?;
+    let toks = auth::interactive_login(&data_dir).await?;
     establish(&app, &state, &api, toks).await
 }
 
@@ -175,13 +205,19 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
         .app_data_dir()
         .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
 
+    // No point attempting a restore that cannot complete the Web API half —
+    // the UI shows the Setup screen instead until a client ID is saved.
+    if auth::webapi_client_id(&data_dir).is_err() {
+        return Ok(AuthState::default());
+    }
+
     let Some(stored) = auth::load_stored_tokens(&data_dir) else {
         return Ok(AuthState::default());
     };
 
     let api = WebApi::new();
 
-    match auth::restore_login(&stored).await {
+    match auth::restore_login(&stored, &data_dir).await {
         Ok(toks) => establish(&app, &state, &api, toks).await,
         Err(e) => {
             // Only discard the stored tokens when Spotify says the grant

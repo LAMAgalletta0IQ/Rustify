@@ -3,11 +3,11 @@ tags: [file, backend, rust]
 ---
 # `src-tauri/src/commands.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **428 lines**
+**Module:** [[backend-rust]] · **Language:** Rust
 
 ## Purpose
 
-The complete IPC surface — all 33 `#[tauri::command]` functions. This is the
+The complete IPC surface — every `#[tauri::command]` function. This is the
 *only* backend code the frontend can reach. It holds no domain logic: each
 command unwraps state, delegates to a feature module, and lets errors
 propagate.
@@ -27,11 +27,16 @@ this, so none can act on a dead session.
 `<COMPUTERNAME> (Rustify)`, falling back to `"Rustify"`. This is the
 name that appears in Spotify's device list.
 
-### `fn get_login_info() -> LoginInfo`
-Reports `privateClientId`, `clientIdEnv` and `webapiRedirectUri` so
-[[Login.svelte]] can describe the flow accurately — one browser tab or two —
-and print the dashboard steps without hardcoding values that live in
-[[auth.rs]].
+### `fn get_login_info(app) -> AppResult<LoginInfo>`
+Reports `privateClientId`, `clientIdEnv` and `webapiRedirectUri`. `privateClientId`
+now carries real meaning — whether `auth::webapi_client_id` actually resolves —
+rather than being hardcoded `true`; both [[Setup.svelte]] (to know when it can
+hand off to Login) and [[Login.svelte]] (for its copy) call this on mount.
+
+### `fn set_client_id(app, client_id) -> AppResult<()>`
+Trims and rejects an empty string, then writes it to `settings.json` via
+`auth::save_settings`. The only way a Client ID reaches disk outside the
+`RUSTIFY_CLIENT_ID` env override; called by [[Setup.svelte]]'s save button.
 
 ### `async fn establish(app, state, api, toks) -> AuthState`
 Shared by `login` and `restore_session`. Takes a `SessionTokens` (both logins).
@@ -63,9 +68,10 @@ library calls or a failure to stream.
 | Command | Notes |
 | --- | --- |
 | `get_auth_state` | Clone of current `AuthState` |
-| `get_login_info` | Shape of the login flow, for UI copy |
-| `login` | Interactive; opens the browser **twice** when a private client ID is set |
-| `restore_session` | Silent. **Returns a logged-out state rather than erroring** when nothing is stored or the grant is rejected — the UI just shows the login screen. Deletes `tokens.json` **only** on `auth::is_grant_rejected`; a transient failure keeps them |
+| `get_login_info` | Shape of the login flow, and whether Setup is still needed |
+| `set_client_id` | Saves the Web API Client ID from [[Setup.svelte]] to `settings.json` |
+| `login` | Interactive; opens the browser **twice**. Errors if no Client ID is configured, though the UI should never let this be reached |
+| `restore_session` | Silent. **Returns a logged-out state rather than erroring** when no Client ID is configured yet, nothing is stored, or the grant is rejected — the UI just shows Setup or Login. Deletes `tokens.json` **only** on `auth::is_grant_rejected`; a transient failure keeps them |
 | `logout` | Shuts down Spirc, **aborts both background tasks**, clears token and state, deletes `tokens.json`, emits `auth:changed` |
 
 ### Playback
@@ -156,4 +162,4 @@ PlayingTrack}`, `librespot::core::authentication::Credentials`, `tauri`,
 
 [[lib.rs]] · [[api.ts]] · [[state.rs]] · [[auth.rs]] · [[player.rs]] ·
 [[error.rs]] · [[rate-limiting]] · [[data-flow]] · [[architecture]] ·
-[[backend-rust]] · [[MOC]]
+[[Setup.svelte]] · [[backend-rust]] · [[MOC]]

@@ -3,7 +3,7 @@ tags: [file, frontend, ui, auth]
 ---
 # `src/lib/views/Login.svelte`
 
-**Module:** [[frontend-views]] · **Language:** Svelte 5 · **211 lines**
+**Module:** [[frontend-views]] · **Language:** Svelte 5
 
 ## Purpose
 
@@ -17,20 +17,18 @@ failures.
 `busy`, `errKind`, `errMsg`, `cooldown`, plus a `timer` handle — all local.
 This view deliberately does **not** use `store.error`.
 
-### `info: LoginInfo | null`
-Loaded in `onMount` from `api.getLoginInfo()`, inside a `try`/`catch` so a
-failure here can never block logging in. `null` until it resolves, and every
-use is written to degrade gracefully in that window.
+### `useDifferentClientId()`
+Sets `store.setupNeeded = true`, which sends [[App.svelte]] back to
+[[Setup.svelte]]. Exposed as a persistent footer link and again inline on a
+`RateLimited` error, for the case where a mistyped or since-deleted Client ID
+is the actual cause. No backend call — there is nothing to undo until the user
+saves a new ID through Setup.
 
-It drives two pieces of copy that would otherwise be wrong half the time:
-
-| `privateClientId` | Browser hint | Rate-limit hint |
-| --- | --- | --- |
-| `true` | Warns that **two** tabs open, one for playback and one for library/search | Notes the quota is private, so a 429 is likely a short burst |
-| `false` | Single tab | Explains the shared-quota cause **and** prints the fix: dashboard URL, `webapiRedirectUri`, `clientIdEnv` |
-
-Those values come from the backend rather than being hardcoded, so they cannot
-drift from [[auth.rs]].
+> Before the first-run Setup screen existed, this view fetched `getLoginInfo()`
+> itself and branched its copy on `privateClientId` (one browser tab vs. two,
+> and — when false — printed the `.env` fix inline). Now that Setup gates
+> Login entirely, a Client ID is guaranteed configured by the time this view
+> renders, so that branching was deleted along with the fetch.
 
 ### `async doLogin(silent = false)`
 Sets `busy` and calls the backend. When `silent`, it first tries
@@ -40,8 +38,8 @@ through to the interactive `api.login()`. On rejection it captures `kind` and
 `RateLimited` with a `retryAfter`.
 
 While `busy`, the button reads "Waiting for browser…" and a hint explains that
-the browser has opened and to return after approving — mentioning the **second**
-tab when the split is active, since users otherwise assume the app has hung.
+the browser has opened and to return after approving **twice**, since users
+otherwise assume the app has hung after the first tab closes.
 
 ### `startCooldown(secs)` / `stopCooldown()`
 A 1 Hz interval counting down `cooldown`; on reaching zero it calls
@@ -64,9 +62,11 @@ Three presentations, keyed off `errKind`:
 free tier and that this is a playback-library limitation, not something the app
 can work around.
 
-`RateLimited` adds a paragraph explaining that the shared librespot client ID's
-quota is consumed globally, so a fresh login can be refused through no fault of
-the user — and says whether it is waiting out the window automatically.
+`RateLimited` adds a paragraph noting this is most likely a short burst against
+the user's own private quota, not the shared-quota problem an unconfigured app
+would hit — plus a link to `useDifferentClientId()` for the case where the
+Client ID itself is the problem — and says whether it is waiting out the
+window automatically.
 
 ## Inputs / outputs / side effects
 
@@ -107,5 +107,5 @@ which causes [[App.svelte]] to swap in the main UI.
 ## See also
 
 [[auth-and-tokens]] · [[rate-limiting]] · [[error.rs]] · [[auth.rs]] ·
-[[commands.rs]] · [[App.svelte]] · [[api.ts]] · [[types.ts]] ·
+[[commands.rs]] · [[App.svelte]] · [[Setup.svelte]] · [[api.ts]] · [[types.ts]] ·
 [[frontend-views]] · [[MOC]]

@@ -34,6 +34,10 @@ npm run tauri build
 Icons are already generated from `app-icon.png` (a placeholder). To replace the
 artwork, drop in any square PNG and re-run `npm run tauri icon <file>.png`.
 
+On first launch the app itself will ask you to register a free Spotify
+Developer app and paste in its Client ID — see "Two logins, first-run Setup"
+below for why, and `.env.example` for the environment-variable alternative.
+
 ### Pinned dependency
 
 `Cargo.lock` pins **vergen 9.0.6**. vergen 9.1.0 (Jan 2026) ships a
@@ -79,17 +83,28 @@ Registered from Rust so they work when the window is unfocused. Registration is
 best-effort: media keys are globally exclusive, so if another player already
 holds them the app logs a warning and continues rather than failing to start.
 
-### One login, two consumers
+### Two logins, first-run Setup
 
-`librespot_oauth` performs a loopback-redirect OAuth flow
-(`http://127.0.0.1:8898/login`) against Spotify's own desktop client ID — the
-one carried by `SessionConfig::default()`. The resulting access token is used
-**both** as librespot's `Credentials::with_access_token(...)` and as the Web
-API bearer token, so there is a single credential and a single refresh path.
-The refresh token is persisted to the app data dir and reused on next launch.
+`librespot_oauth` performs **two** loopback-redirect OAuth flows on login, not
+one:
 
-If a scope is ever refused by that client ID, the fallback is to register your
-own Spotify Developer app and substitute its client ID in `auth.rs`.
+- **Streaming** (`http://127.0.0.1:8898/login`) against Spotify's own desktop
+  client ID — the one carried by `SessionConfig::default()`. Used only to
+  build librespot's `Credentials::with_access_token(...)`, since self-registered
+  apps are generally refused the `streaming` scope.
+- **Web API** (`http://127.0.0.1:8899/login`) against a Client ID the user
+  registers themselves at `developer.spotify.com/dashboard`. Used for every
+  library/search/Connect call, so that traffic draws on a private quota
+  instead of a quota shared with every other Rustify install.
+
+Because the Web API side needs a Client ID that only the user can supply,
+**Setup runs before Login on first launch**: the app checks
+`get_login_info` and, if no Client ID is configured yet, shows a guided form
+(`src/lib/views/Setup.svelte`) instead of the Login screen. Saving the ID
+(`set_client_id`) writes `settings.json` in the app data dir, next to
+`tokens.json`, and the app then proceeds straight to Login. A `RUSTIFY_CLIENT_ID`
+environment variable still overrides whatever is saved there, for
+developers/packagers who want to skip the screen — see `.env.example`.
 
 Access tokens expire in ~1 hour, so `auth::spawn_refresher` renews the Web API
 token in the background (5 minutes before expiry) and writes the value into the
@@ -156,7 +171,11 @@ memory work means shrinking or replacing the webview, not optimising Rust.
 
 ## Manual test checklist
 
-1. `npm run tauri dev` — window opens on the login screen.
+1. `npm run tauri dev` against a fresh app data dir (no `settings.json`) —
+   window opens on the **Setup** screen, not Login. The redirect URI shown
+   must be `http://127.0.0.1:8899/login`. Saving an empty ID must be blocked;
+   saving a real one must move straight to Login and survive a restart
+   (`settings.json` persists it, distinct from `tokens.json`).
 2. **Login** — browser opens, approval returns to the app; avatar and display
    name appear. A non-Premium account must show the "Premium required" message.
 3. **Playback** — open a playlist, click a track, confirm audio and that the

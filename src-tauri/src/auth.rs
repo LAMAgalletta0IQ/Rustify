@@ -72,17 +72,6 @@ pub const WEBAPI_SCOPES: &[&str] = &[
 /// `.env.example`.
 pub const CLIENT_ID_ENV: &str = "RUSTIFY_CLIENT_ID";
 
-/// Fallback Web API client ID baked into the binary, used when
-/// `RUSTIFY_CLIENT_ID` is not set in the environment. `.env` is not bundled
-/// into a release build, so without this a distributed `.exe` would silently
-/// fall back to the shared, globally-pooled librespot quota (see
-/// `rate-limiting` in the docs). A Client ID is not a secret: it travels in the clear
-/// in every OAuth redirect, and this flow is PKCE with no client secret, so
-/// baking it in carries none of the risk a client *secret* would. The
-/// environment variable still takes priority, so a packager who wants their
-/// own private quota can override this without a rebuild.
-const CLIENT_ID_FALLBACK: &str = "f0d03c5ba9204236873f6ff0ffb4a5e6";
-
 /// Client ID for the streaming session.
 ///
 /// Always Spotify's own desktop ID: it is the only one reliably granted the
@@ -93,19 +82,50 @@ pub fn streaming_client_id() -> String {
 }
 
 /// Client ID for Web API traffic: `RUSTIFY_CLIENT_ID` from the environment if
-/// set, else the built-in [`CLIENT_ID_FALLBACK`].
+/// set (a packager/dev override — see `.env.example`), else whatever the user
+/// saved through the first-run Setup screen, else an error.
 ///
-/// Always returns a private ID — Web API traffic never has to share the
-/// streaming login's globally-pooled quota purely for lack of configuration.
-/// Registering your own app at developer.spotify.com and setting the
-/// environment variable still overrides the built-in one, e.g. to use a
-/// different quota than whoever built this binary.
-pub fn webapi_client_id() -> String {
-    std::env::var(CLIENT_ID_ENV)
-        .ok()
+/// There is deliberately no built-in fallback. Baking one in meant every user
+/// who skipped configuration shared *the developer's* quota, which does not
+/// scale past one person running the app — see `set_client_id` in
+/// `commands.rs`, which the UI calls before any login is attempted.
+pub fn webapi_client_id(data_dir: &Path) -> AppResult<String> {
+    if let Ok(v) = std::env::var(CLIENT_ID_ENV) {
+        let v = v.trim();
+        if !v.is_empty() {
+            return Ok(v.to_string());
+        }
+    }
+    load_settings(data_dir)
+        .and_then(|s| s.webapi_client_id)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| CLIENT_ID_FALLBACK.to_string())
+        .ok_or_else(|| AppError::Other("no Spotify Client ID configured".to_string()))
+}
+
+/// Persisted app settings, distinct from `tokens.json`: this survives logout,
+/// since the Client ID belongs to the Spotify app the user registered, not to
+/// any one login session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Settings {
+    pub webapi_client_id: Option<String>,
+}
+
+fn settings_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("settings.json")
+}
+
+pub fn load_settings(data_dir: &Path) -> Option<Settings> {
+    let raw = std::fs::read_to_string(settings_path(data_dir)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+pub fn save_settings(data_dir: &Path, settings: &Settings) -> AppResult<()> {
+    std::fs::create_dir_all(data_dir)?;
+    let raw = serde_json::to_string(settings)
+        .map_err(|e| AppError::Other(format!("failed to serialise settings: {e}")))?;
+    std::fs::write(settings_path(data_dir), raw)?;
+    Ok(())
 }
 
 fn port_is_free(port: u16) -> bool {
@@ -279,8 +299,8 @@ async fn refresh(
 ///
 /// Runs **two** authorizations, the way ncspot does — one against Spotify's
 /// desktop ID for `streaming`, one against [`webapi_client_id`] (the
-/// environment override, or the built-in fallback) for Web API access.
-pub async fn interactive_login() -> AppResult<SessionTokens> {
+/// environment override, or the ID saved through Setup) for Web API access.
+pub async fn interactive_login(data_dir: &Path) -> AppResult<SessionTokens> {
     let streaming = authorize(
         &streaming_client_id(),
         &streaming_redirect_uri()?,
@@ -288,7 +308,7 @@ pub async fn interactive_login() -> AppResult<SessionTokens> {
     )
     .await?;
 
-    let id = webapi_client_id();
+    let id = webapi_client_id(data_dir)?;
     log::info!("second authorization for Web API access under a private client ID");
     let webapi = authorize(&id, &webapi_redirect_uri(), WEBAPI_SCOPES).await?;
 
@@ -302,7 +322,7 @@ pub async fn interactive_login() -> AppResult<SessionTokens> {
 
 /// Silent login from stored refresh tokens. The caller falls back to
 /// [`interactive_login`] if this fails (token revoked, scopes changed, etc.).
-pub async fn restore_login(stored: &StoredTokens) -> AppResult<SessionTokens> {
+pub async fn restore_login(stored: &StoredTokens, data_dir: &Path) -> AppResult<SessionTokens> {
     let streaming = refresh(
         &streaming_client_id(),
         &streaming_redirect_uri()?,
@@ -312,15 +332,16 @@ pub async fn restore_login(stored: &StoredTokens) -> AppResult<SessionTokens> {
     .await?;
 
     // A stored token for the current Web API client ID is required; if the ID
-    // changed since the last run (env var added/edited) there is nothing to
-    // refresh yet under it, so fall back to the shared token rather than
-    // failing the restore. `and_then(non_empty)` guards files written before
-    // the check above, which may hold `""` rather than a real token.
+    // changed since the last run (env var added/edited, or Setup re-run) there
+    // is nothing to refresh yet under it, so fall back to the shared token
+    // rather than failing the restore. `and_then(non_empty)` guards files
+    // written before the check above, which may hold `""` rather than a real
+    // token.
     let webapi_rt = stored
         .webapi_refresh_token
         .as_deref()
         .and_then(non_empty);
-    let id = webapi_client_id();
+    let id = webapi_client_id(data_dir)?;
 
     match webapi_rt.as_deref() {
         Some(rt) => {

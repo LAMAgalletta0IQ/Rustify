@@ -3,7 +3,7 @@ tags: [file, frontend, state]
 ---
 # `src/lib/store.svelte.ts`
 
-**Module:** [[frontend-svelte]] · **Language:** TypeScript (Svelte 5 runes) · **103 lines**
+**Module:** [[frontend-svelte]] · **Language:** TypeScript (Svelte 5 runes)
 
 ## Purpose
 
@@ -25,15 +25,23 @@ and provides shared error handling.
 | `auth` | `$state<AuthState>` | Profile / login status |
 | `error` | `$state<string \| null>` | Banner text |
 | `booting` | `$state(boolean)` | True until the restore attempt settles |
+| `setupNeeded` | `$state(boolean)` | True until a Web API Client ID is configured; gates [[Login.svelte]] behind [[Setup.svelte]] |
 | `#unlisten` | `UnlistenFn[]` | Event subscriptions |
 | `#ticker` | `number \| null` | Interval handle |
 
 ### `async init()`
 1. `listen(EVENT_PLAYBACK)` → replace `playback`, re-sync ticker.
 2. `listen(EVENT_AUTH)` → replace `auth`.
-3. `await api.restoreSession()`.
-4. If logged in, prime `playback` with `getPlayback()`.
-5. **`finally { this.booting = false }`**.
+3. `await api.getLoginInfo()`. If it reports no Client ID configured, set
+   `setupNeeded = true` and **return** — nothing to restore yet.
+4. Otherwise `await api.restoreSession()`.
+5. If logged in, prime `playback` with `getPlayback()`.
+6. **`finally { this.booting = false }`** — runs even on the early return.
+
+### `async finishSetup()`
+Re-fetches `getLoginInfo()` and clears `setupNeeded` once it reports a
+configured Client ID. Called by [[App.svelte]] after [[Setup.svelte]]'s
+`onDone` fires.
 
 ### `#syncTicker()`
 Starts a 1 Hz `setInterval` while playing; clears it when not. Each tick adds
@@ -64,7 +72,9 @@ A module-level singleton — the same instance everywhere it is imported.
 
 - **The `finally` block is load-bearing.** If `restoreSession()` rejects and
   `booting` never cleared, the app would hang on "Starting…" forever. A failed
-  restore is logged as a warning and falls through to the login screen.
+  restore is logged as a warning and falls through to the login screen. The
+  early return for `setupNeeded` relies on the same `finally` to clear
+  `booting`, since `return` inside `try` still runs it.
 - **1 Hz, not `requestAnimationFrame`.** A deliberate CPU trade-off for low-end
   hardware; the cost is up to a second of visual drift between backend
   corrections. See [[known-limitations]].
@@ -88,4 +98,4 @@ A module-level singleton — the same instance everywhere it is imported.
 ## See also
 
 [[state-and-events]] · [[api.ts]] · [[types.ts]] · [[App.svelte]] ·
-[[state.rs]] · [[data-flow]] · [[frontend-svelte]] · [[MOC]]
+[[Setup.svelte]] · [[state.rs]] · [[data-flow]] · [[frontend-svelte]] · [[MOC]]
