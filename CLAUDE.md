@@ -80,6 +80,18 @@ Consequences that bite:
   startup network blip.
 - An empty refresh token must be stored as **absent**, never `Some("")` —
   Spotify answers `invalid_request: refresh_token must be supplied`.
+- `save_stored_tokens` **merges**: a session with no Web API refresh token
+  keeps whatever is already on disk. Writing `None` through erased the private
+  credential after any degraded restore, and the next launch then fell to the
+  shared quota and 429'd again — a self-sustaining loop out of three
+  individually-correct behaviours. `clear_stored_tokens` deletes the file, so
+  intentional clearing still works.
+- Spotify returns `refresh_token` **only when it rotates one**; an omitted
+  field means "keep yours", but deserialises to `""`. `restore_login` writes
+  the old value back over an empty one.
+- `establish` logs `persisting tokens: streaming=…, web api=… (split=…)`.
+  Check it before theorising about quota — a token that never reaches disk is
+  otherwise invisible until the next launch.
 
 `establish()` in `commands.rs` is where the two tokens diverge: the Web API
 token goes to `/me` and `TokenStore`; the *streaming* token goes to librespot.
@@ -147,6 +159,13 @@ key rather than returning the page object at the top level. Everything else in
 carrying the next cursor, and callers must hand that back instead of counting
 items they already hold.
 
+**`/playlists/{id}/items` keys its rows `item`, not `track`**, so
+`PlaylistItem.track` needs `#[serde(alias = "item")]`. Because the field is
+`Option`, the wrong key is not a parse error — every row deserialises to `None`
+and `filter_map` drops it, so the playlist opens to "Nothing here." with a 200
+in the log and no warning anywhere. Confirm a wire shape with `fields=` before
+assuming the field name.
+
 `webapi.rs` logs method, URL, status and Spotify's own message on every failed
 request. Read that line before theorising; it is how the search cap was found.
 Note that Spotify answers a malformed `Authorization` header with **400**, not
@@ -166,8 +185,54 @@ blockquote with what changed — follow that pattern rather than deleting histor
 
 ### The window is undecorated
 
-`tauri.conf.json` sets `decorations: false` and `transparent: true` so the app
-can draw its own rounded, frosted shell. Consequences:
+`tauri.conf.json` sets `decorations: false`, `transparent: true` and
+`windowEffects: { effects: ["acrylic"] }` so the app can draw its own rounded,
+frosted shell over a Windows 11 Acrylic backdrop. Consequences:
+
+- **The three must move together.** DWM paints Acrylic *behind* the webview,
+  so the webview has to be see-through for any of it to reach the screen:
+  `body` is `background: transparent`, and one opaque paint anywhere in the
+  stack — `#0c0c10` on `body`, a solid base colour under `.ambient` — hides
+  the backdrop completely and the app is a flat dark rectangle again.
+
+  > Until 2026-08 the window was deliberately opaque (`transparent: false`,
+  > `body { background: #0c0c10 }`) on the grounds that rounding the content
+  > punched holes at the corners showing the desktop through. That reasoning
+  > still holds for *content* radius — Windows 11 rounds the frame itself, so
+  > the content must stay square — but it never required an opaque body.
+
+- **`backdrop-filter` cannot blur Acrylic.** It only blurs what the webview
+  painted, and the backdrop is composited outside it. Panels over bare Acrylic
+  read as tint plus edge, never as an extra blur, which is why `app.css`
+  carries an explicit three-step elevation scale (`--glass` → `--glass-raised`
+  → `--glass-strong`) and a lit top edge (`--edge`) instead of leaning on blur
+  radius for depth. Raising `--blur` to compensate does nothing.
+
+- `.ambient`/`.veil` in `App.svelte` sit *on top of* Acrylic rather than being
+  the background, so both are kept well under full opacity — lighter than they
+  were under Mica, since Acrylic already does some of the legibility work
+  itself. Every point of veil is a point of backdrop removed.
+
+  > Until 2026-08 this used `micaDark` instead. Mica only shows the
+  > **wallpaper**, never the windows behind, and reads as too subtle even at
+  > higher `.ambient`/`.veil` opacity. Switching to `acrylic` gives genuine
+  > see-through (real windows behind, not just wallpaper) but exposes a
+  > problem Mica never had: a solid, alpha-blended tint over arbitrarily
+  > saturated real content (not just a wallpaper you can co-design against)
+  > reads as a muddy clash rather than a tint. Fixed by lowering `.ambient`'s
+  > opacity, blurring its gradient edges (`filter: blur(70px)`) so there is no
+  > hard edge left to collide with, and desaturating it slightly
+  > (`saturate(0.85)`) — not by darkening the veil, which just hides the
+  > backdrop instead of fixing the collision.
+  >
+  > **`windowEffects.effects` is a priority list, not a stack** — Tauri
+  > silently applies only the first supported entry and drops the rest
+  > (`tauri-utils`: "Conflicting effects will apply the first one and ignore
+  > the rest"). `["micaDark", "acrylic"]` therefore renders as Mica alone;
+  > there is no way to layer both. Also note `windowEffects.color` (a tint for
+  > `Acrylic`/`Blur`) has no effect on Windows 11 regardless of value — only
+  > Windows 10 1903+ honours it — so Acrylic's own tint cannot be adjusted
+  > from config on this target and `.ambient`/`.veil` are the only knobs.
 
 - **The title bar in `App.svelte` is the only way to move the window.** Any
   region that should drag needs `data-tauri-drag-region`, and the login screen

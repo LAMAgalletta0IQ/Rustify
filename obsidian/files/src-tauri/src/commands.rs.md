@@ -134,6 +134,19 @@ PlayingTrack}`, `librespot::core::authentication::Credentials`, `tauri`,
   refresher running. Two refreshers then hit the token endpoint on independent
   schedules — a way to rate-limit yourself. This was a real bug; see
   [[rate-limiting]].
+- **`establish` logs which token halves actually persisted**, at info:
+  `persisting tokens: streaming=<bool>, web api=<bool> (split=<bool>)`, where
+  `split` is whether the Web API client ID differs from the streaming one.
+  Read this line first when diagnosing quota problems. Without it, a Web API
+  refresh token that never reaches disk is invisible until the *next* launch
+  silently falls back to the shared quota and starts collecting 429s — the
+  failure and its cause are separated by a restart. See [[auth.rs]].
+- **`probe_webapi` is gone.** It was a temporary diagnostic that took an
+  arbitrary path, `GET`-ed it and returned the first 300 characters, used to
+  map which endpoints Spotify was refusing. Removing a command means deleting
+  it from `generate_handler!` in [[lib.rs]] as well; leaving the registration
+  behind is a *compile* error, which is the one direction of this contract the
+  compiler does check.
 - **A new `WebApi::new()` per command** builds a fresh `reqwest::Client` each
   call. Slightly wasteful — reqwest clients are designed to be reused for
   connection pooling — but keeps commands stateless. A reasonable future

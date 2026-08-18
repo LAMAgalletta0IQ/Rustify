@@ -61,7 +61,7 @@ Grouped by comment in the source:
 | auth | `get_auth_state`, `get_login_info`, `login`, `restore_session`, `logout` |
 | playback | `get_playback`, `play`, `pause`, `play_pause`, `next_track`, `previous_track`, `seek`, `set_volume`, `set_shuffle`, `set_repeat`, `load_context`, `load_tracks` |
 | connect | `list_devices`, `transfer_playback`, `activate_this_device` |
-| library | `get_playlists`, `get_playlist_tracks`, `get_saved_tracks`, `get_saved_albums`, `get_album_tracks`, `set_tracks_saved`, `set_albums_saved`, `get_tracks_saved`, `get_artist_top_tracks`, `get_artist_albums` |
+| library | `get_playlists`, `get_playlist_tracks`, `get_saved_tracks`, `get_saved_albums`, `get_album_tracks`, `get_followed_artists`, `get_recently_played`, `set_tracks_saved`, `set_albums_saved`, `get_tracks_saved`, `get_artist_top_tracks`, `get_artist_albums` |
 | search | `search_spotify` |
 | queue | `get_queue`, `add_to_queue` |
 

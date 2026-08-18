@@ -140,9 +140,22 @@ Two changes address it:
 | Log warns `using the shared token` | Split configured but degraded — log out and back in |
 | Clears after one countdown | Normal transient pool contention |
 | Persists on a private client ID | Genuinely our own traffic. Check for a runaway poller |
+| `web api=false` in the persist log | The private refresh token is not reaching disk — the spiral below |
 
 Since 2026-08, [[webapi.rs]] logs method, URL, status and Spotify's own message
 for every failed request — start there rather than guessing.
+
+`establish` also logs, once per login, which halves were written:
+
+```
+[INFO rustify_lib::commands] persisting tokens: streaming=true, web api=true (split=true)
+```
+
+`split` is whether the Web API client ID differs from the streaming one. If
+`web api=false` while `split=true`, the private credential is being lost and
+the *next* launch will silently drop to the shared quota — the failure and its
+cause are a restart apart, which is precisely what made the spiral below so
+hard to see.
 
 ## Self-inflicted variants
 
@@ -155,6 +168,22 @@ Both were real bugs, both worth knowing:
 - A degraded restore fell back to the shared token and immediately hit
   `Retry-After: 34` — a private-quota app landing on the shared pool through a
   code path that should not have been reachable. See [[auth-and-tokens]].
+- **The 429 death spiral**, and the reason `save_stored_tokens` merges. One 429
+  on `/me` at startup made `restore_login` degrade to the shared token; the
+  save that followed wrote `webapi_refresh_token: None` and **erased the
+  private refresh token**; every later launch then had no private credential,
+  fell back to the globally-pooled quota, and collected more 429s — which
+  re-triggered the same erasure. A manual re-login fixed it only until the next
+  429.
+
+  What makes this one worth studying is that **no individual behaviour was
+  wrong**. Degrading rather than erroring on a failed Web API refresh is
+  correct (rotation would otherwise be lost). Persisting before the Premium
+  gate is correct (it lets a 429 retry silently). Storing an empty token as
+  absent is correct. Composed, they deleted a credential on a transient
+  network error. The fix was to make the write preserve what it cannot
+  replace; `establish` also now logs which halves reached disk, because the
+  cause and the symptom were separated by a restart.
 
 ## See also
 

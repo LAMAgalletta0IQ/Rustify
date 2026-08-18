@@ -123,8 +123,8 @@
     aspect-ratio: 1;
     border-radius: var(--r-md);
     object-fit: cover;
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    background: rgba(255, 241, 224, 0.06);
+    box-shadow: 0 24px 60px rgba(18, 11, 4, 0.5);
     margin-bottom: 16px;
   }
   .art h2 {

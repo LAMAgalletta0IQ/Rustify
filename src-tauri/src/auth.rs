@@ -72,6 +72,17 @@ pub const WEBAPI_SCOPES: &[&str] = &[
 /// `.env.example`.
 pub const CLIENT_ID_ENV: &str = "RUSTIFY_CLIENT_ID";
 
+/// Fallback Web API client ID baked into the binary, used when
+/// `RUSTIFY_CLIENT_ID` is not set in the environment. `.env` is not bundled
+/// into a release build, so without this a distributed `.exe` would silently
+/// fall back to the shared, globally-pooled librespot quota (see
+/// `rate-limiting` in the docs). A Client ID is not a secret: it travels in the clear
+/// in every OAuth redirect, and this flow is PKCE with no client secret, so
+/// baking it in carries none of the risk a client *secret* would. The
+/// environment variable still takes priority, so a packager who wants their
+/// own private quota can override this without a rebuild.
+const CLIENT_ID_FALLBACK: &str = "f0d03c5ba9204236873f6ff0ffb4a5e6";
+
 /// Client ID for the streaming session.
 ///
 /// Always Spotify's own desktop ID: it is the only one reliably granted the
@@ -81,19 +92,20 @@ pub fn streaming_client_id() -> String {
     SessionConfig::default().client_id
 }
 
-/// Client ID for Web API traffic, if the user registered their own app.
+/// Client ID for Web API traffic: `RUSTIFY_CLIENT_ID` from the environment if
+/// set, else the built-in [`CLIENT_ID_FALLBACK`].
 ///
-/// When unset, Web API calls fall back to sharing the streaming login. That
-/// works, but the desktop ID's Web API quota is pooled across every
-/// librespot-based client in the world, so 429s can appear on a first request
-/// with no prior usage by this app. Registering an app at
-/// developer.spotify.com and setting this variable moves that traffic onto a
-/// private quota.
-pub fn webapi_client_id() -> Option<String> {
+/// Always returns a private ID — Web API traffic never has to share the
+/// streaming login's globally-pooled quota purely for lack of configuration.
+/// Registering your own app at developer.spotify.com and setting the
+/// environment variable still overrides the built-in one, e.g. to use a
+/// different quota than whoever built this binary.
+pub fn webapi_client_id() -> String {
     std::env::var(CLIENT_ID_ENV)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| CLIENT_ID_FALLBACK.to_string())
 }
 
 fn port_is_free(port: u16) -> bool {
@@ -196,9 +208,32 @@ pub fn load_stored_tokens(data_dir: &Path) -> Option<StoredTokens> {
     serde_json::from_str(&raw).ok()
 }
 
+/// Writes the token file, **never erasing a Web API refresh token it does not
+/// have a replacement for**.
+///
+/// A session that fell back to the shared token carries
+/// `webapi_refresh_token: None`, and a plain write of that would delete a
+/// perfectly valid stored credential. That is exactly what happened in
+/// practice: one 429 on `/me` at startup made `restore_login` degrade to the
+/// shared token, the ensuing save wiped the private refresh token, and every
+/// later launch was stuck on librespot's globally-pooled quota — collecting
+/// more 429s, which kept the cycle going. The only way out was a manual
+/// re-login, and the next 429 undid it again.
+///
+/// Deliberate clearing goes through [`clear_stored_tokens`], which removes the
+/// file outright, so preserving on `None` here cannot strand a dead token.
 pub fn save_stored_tokens(data_dir: &Path, tokens: &StoredTokens) -> AppResult<()> {
     std::fs::create_dir_all(data_dir)?;
-    let raw = serde_json::to_string(tokens)
+
+    let mut tokens = tokens.clone();
+    if tokens.webapi_refresh_token.is_none() {
+        if let Some(prev) = load_stored_tokens(data_dir).and_then(|s| s.webapi_refresh_token) {
+            log::debug!("keeping the stored web api refresh token; this session has none");
+            tokens.webapi_refresh_token = Some(prev);
+        }
+    }
+
+    let raw = serde_json::to_string(&tokens)
         .map_err(|e| AppError::Other(format!("failed to serialise tokens: {e}")))?;
     std::fs::write(tokens_path(data_dir), raw)?;
     Ok(())
@@ -242,10 +277,9 @@ async fn refresh(
 /// Interactive login: opens the system browser and waits for the loopback
 /// redirect.
 ///
-/// With a private client ID configured this runs **two** authorizations, the
-/// way ncspot does — one against Spotify's desktop ID for `streaming`, one
-/// against the app's own ID for Web API access. Without one, a single login
-/// serves both.
+/// Runs **two** authorizations, the way ncspot does — one against Spotify's
+/// desktop ID for `streaming`, one against [`webapi_client_id`] (the
+/// environment override, or the built-in fallback) for Web API access.
 pub async fn interactive_login() -> AppResult<SessionTokens> {
     let streaming = authorize(
         &streaming_client_id(),
@@ -254,14 +288,7 @@ pub async fn interactive_login() -> AppResult<SessionTokens> {
     )
     .await?;
 
-    let Some(id) = webapi_client_id() else {
-        log::warn!(
-            "no {CLIENT_ID_ENV} set: Web API calls will share the global librespot quota \
-             and may be rate limited"
-        );
-        return Ok(SessionTokens::shared(streaming));
-    };
-
+    let id = webapi_client_id();
     log::info!("second authorization for Web API access under a private client ID");
     let webapi = authorize(&id, &webapi_redirect_uri(), WEBAPI_SCOPES).await?;
 
@@ -284,25 +311,36 @@ pub async fn restore_login(stored: &StoredTokens) -> AppResult<SessionTokens> {
     )
     .await?;
 
-    // Both a configured client ID and a stored token for it are required; if
-    // the ID was added since the last run there is nothing to refresh yet, so
-    // fall back to the shared token rather than failing the restore.
-    // `and_then(non_empty)` guards files written before the check above, which
-    // may hold `""` rather than a real token.
+    // A stored token for the current Web API client ID is required; if the ID
+    // changed since the last run (env var added/edited) there is nothing to
+    // refresh yet under it, so fall back to the shared token rather than
+    // failing the restore. `and_then(non_empty)` guards files written before
+    // the check above, which may hold `""` rather than a real token.
     let webapi_rt = stored
         .webapi_refresh_token
         .as_deref()
         .and_then(non_empty);
+    let id = webapi_client_id();
 
-    match (webapi_client_id(), webapi_rt.as_deref()) {
-        (Some(id), Some(rt)) => {
+    match webapi_rt.as_deref() {
+        Some(rt) => {
             match refresh(&id, &webapi_redirect_uri(), WEBAPI_SCOPES, rt).await {
-                Ok(webapi) => Ok(SessionTokens {
-                    streaming_access: streaming.access_token,
-                    streaming_refresh: streaming.refresh_token,
-                    webapi,
-                    webapi_client_id: id,
-                }),
+                Ok(mut webapi) => {
+                    // Spotify only returns `refresh_token` when it rotates one.
+                    // An omitted field means "keep using the one you have", not
+                    // "you no longer have one" — but the empty string reads as
+                    // the latter, which made `stored()` report the session as
+                    // having no Web API credential at all.
+                    if webapi.refresh_token.trim().is_empty() {
+                        webapi.refresh_token = rt.to_string();
+                    }
+                    Ok(SessionTokens {
+                        streaming_access: streaming.access_token,
+                        streaming_refresh: streaming.refresh_token,
+                        webapi,
+                        webapi_client_id: id,
+                    })
+                }
                 // Must NOT propagate: the streaming refresh above already
                 // succeeded, and Spotify rotates refresh tokens on use — so
                 // the stored streaming token is now dead and the replacement
@@ -315,14 +353,13 @@ pub async fn restore_login(stored: &StoredTokens) -> AppResult<SessionTokens> {
                 }
             }
         }
-        (Some(_), None) => {
+        None => {
             log::warn!(
-                "{CLIENT_ID_ENV} is set but no Web API token is stored; using the shared token \
+                "no Web API token stored for the current client ID; using the shared token \
                  for this session. Log out and back in to split the quota."
             );
             Ok(SessionTokens::shared(streaming))
         }
-        _ => Ok(SessionTokens::shared(streaming)),
     }
 }
 

@@ -61,6 +61,14 @@ credential. Applied both when storing and when reading.
 `tokens.json` in the Tauri app data dir. Loading returns `Option`, so a missing
 or corrupt file is simply "not logged in" rather than an error.
 
+**`save_stored_tokens` is a merge, not a plain write.** It reads the existing
+file first and, when the session being saved has `webapi_refresh_token: None`,
+keeps whatever was already on disk. A session that fell back to the shared
+token legitimately has no Web API refresh token, and writing that `None`
+straight out would delete a perfectly good stored credential. Deliberate
+clearing goes through `clear_stored_tokens`, which removes the file outright,
+so preserving on `None` cannot strand a dead token.
+
 ### `async fn interactive_login() -> SessionTokens`
 Opens the browser for the streaming authorization, then — when a private client
 ID is set — **again** for the Web API one. Without one, returns
@@ -116,6 +124,21 @@ the first profile image as the avatar.
 - **An empty refresh token must be stored as absent.** `Some("")` makes Spotify
   answer `invalid_request: refresh_token must be supplied`, failing every
   restore until the file is deleted by hand.
+- **Spotify only returns `refresh_token` when it actually rotates one.** An
+  omitted field means "keep using the one you have", **not** "you no longer
+  have one" — but it deserialises to the empty string, which reads as the
+  latter and made `stored()` report the session as having no Web API credential
+  at all. `restore_login` now copies the incoming token back over an empty
+  response field before building `SessionTokens`.
+- **Losing the Web API refresh token is self-perpetuating, which is why
+  `save_stored_tokens` preserves it.** The real failure ran: one 429 on `/me`
+  at startup → `restore_login` degrades to the shared token → the save that
+  follows writes `None` and wipes the private refresh token → every later
+  launch is stuck on librespot's globally-pooled quota → more 429s → repeat. A
+  manual re-login fixed it only until the next 429. Note how many of the
+  individually-correct behaviours above combined to produce it: degrading
+  rather than erroring, and persisting before the Premium gate. See
+  [[rate-limiting]].
 - **Only `invalid_grant` justifies deleting tokens.** Clearing on any failure
   meant a startup network blip logged the user out.
 - **Refresh-token rotation is handled** in both the refresher and the restore

@@ -64,6 +64,19 @@ by [[search.rs]] and [[queue.rs]]
 
 ## Notable logic / gotchas
 
+- **`PlaylistItem.track` carries `#[serde(alias = "item")]`, and playlists are
+  empty without it.** `/playlists/{id}/items` keys its rows `item`, not
+  `track`. Verified live 2026-08-17: `fields=items(track(name))` comes back
+  `{"items":[{}]}` while `fields=items(item(name))` returns the track.
+
+  > This is the worst-behaved failure in the file. `track` is `Option`, so the
+  > wrong key is not a deserialisation error — every row simply parsed to
+  > `None`, `filter_map` discarded all of them, and the playlist opened to
+  > "Nothing here." **Nothing was logged**, at any level: [[webapi.rs]] only
+  > reports failed *requests*, and this request succeeded with a 200. The two
+  > gotchas below interact to hide it — the `Option` exists for legitimately
+  > null tracks, and it silently absorbs a renamed key too.
+
 - **Playlist items can have a `null` track** (local files, unavailable
   content). `playlist_tracks` uses `filter_map(|i| i.track)` — without it,
   deserialisation would fail on ordinary playlists.

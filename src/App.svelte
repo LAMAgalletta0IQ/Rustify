@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  // The bundle icon itself, not a copy of it — one source of truth, so
+  // regenerating the icon set updates the titlebar mark too. `src-tauri/` is
+  // inside the Vite root so this resolves and gets emitted as a hashed asset
+  // (same-origin, which the CSP's `img-src 'self'` covers). It is excluded from
+  // the dev watcher in vite.config.ts, so changing the icon needs a restart
+  // rather than showing up on HMR.
+  import iconUrl from "../src-tauri/icons/64x64.png";
   import * as api from "./lib/api";
   import { store } from "./lib/store.svelte";
   import PlayerBar from "./lib/components/PlayerBar.svelte";
@@ -52,7 +59,8 @@
     <div class="shell">
       <header class="titlebar" data-tauri-drag-region>
         <div class="mark" data-tauri-drag-region>
-          <span class="dot"></span> Rustify
+          <img class="logo" src={iconUrl} alt="" width="20" height="20" draggable="false" />
+          Rustify
         </div>
 
         <nav class="tabs">
@@ -115,23 +123,38 @@
   .root {
     position: relative;
     height: 100%;
-    border-radius: var(--r-lg);
     overflow: hidden;
     isolation: isolate;
   }
 
   /* Three drifting blobs, deliberately slow: at 26s the movement is felt
-     rather than watched. */
+     rather than watched.
+     No opaque base colour and `opacity` well under 1: this layer sits on top
+     of the Acrylic backdrop, so anything solid here erases it. The blobs are
+     a tint over whatever is behind the window now, not a background of their
+     own.
+
+     Acrylic (unlike Mica) shows real content behind the window, which can be
+     arbitrarily saturated — a wallpaper, another app. A flat alpha-blended
+     patch of solid colour over that reads as a muddy, clashing smear rather
+     than a tint, because plain "over" compositing is a linear mix, not
+     anything perceptual. Lower opacity and a soft blur (no hard gradient
+     edges left to collide with what's behind) fix that; saturate(0.85) keeps
+     the blobs from being the most intense colour on screen even over a dim
+     backdrop. */
   .ambient {
     position: absolute;
     inset: -30%;
     z-index: -2;
+    opacity: 0.22;
     background:
-      radial-gradient(42% 46% at 20% 16%, #3d9265 0%, transparent 66%),
-      radial-gradient(38% 42% at 84% 24%, #4a51a0 0%, transparent 66%),
-      radial-gradient(50% 48% at 60% 90%, #8f3d6e 0%, transparent 64%),
-      #0c0c10;
-    filter: saturate(1.3);
+      radial-gradient(42% 46% at 20% 16%, #8c6239 0%, transparent 70%),
+      radial-gradient(38% 42% at 84% 24%, #6b4226 0%, transparent 70%),
+      radial-gradient(50% 48% at 60% 90%, #b08046 0%, transparent 68%);
+    /* Sepia: tobacco, deep umber, caramel. Three warm tones rather than one
+       flat brown — with a single hue the blobs stop reading as separate blobs
+       and the drift below becomes invisible. */
+    filter: saturate(0.85) blur(70px);
     animation: drift 26s ease-in-out infinite alternate;
   }
   @keyframes drift {
@@ -157,23 +180,27 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    /* Balancing act: dark enough that white text stays legible over the blobs,
-       light enough that the colour survives a screen full of blurred cards.
-       At .55/.78 the content views went flat black. */
-    background: linear-gradient(180deg, rgba(6, 6, 9, 0.34), rgba(6, 6, 9, 0.66));
+    /* Balancing act: dark enough that white text stays legible over the blobs
+       and over whatever is showing through Acrylic, light enough that both
+       survive. Every point added here is a point of Acrylic removed, so this
+       is deliberately barely-there — lighter still than the .04/.2 it used
+       under Mica, since Acrylic's own blur already does legibility work Mica
+       never did. */
+    background: linear-gradient(180deg, rgba(14, 9, 4, 0.02), rgba(14, 9, 4, 0.1));
   }
   .veil::after {
     content: "";
     position: absolute;
     inset: 0;
-    opacity: 0.16;
+    opacity: 0.1;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
   .boot {
+    position: absolute;
+    inset: 0;
     display: grid;
     place-items: center;
-    height: 100%;
   }
   .predrag {
     display: flex;
@@ -181,10 +208,21 @@
     height: 46px;
   }
 
+  /* Pinned to the root's edges rather than `height: 100%`. A percentage height
+     silently collapses to content height if any ancestor's height is not
+     definite, which left the player bar floating mid-window with dead space
+     below it whenever the view was short. `inset: 0` cannot fail that way. */
+  /* Flex, not `grid-template-rows: auto auto 1fr auto` — the error banner is
+     conditional, so with no banner there were only three children and the
+     `1fr` landed on the *player bar* instead of `main`. That collapsed the
+     content area to its own height and left the player floating mid-window
+     with dead space beneath it. Flex assigns the stretch by rule, not by
+     child position, so a missing banner cannot shift it. */
   .shell {
-    display: grid;
-    grid-template-rows: auto auto 1fr auto;
-    height: 100%;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .titlebar {
@@ -201,12 +239,20 @@
     font-weight: 600;
     letter-spacing: 0.2px;
   }
-  .mark .dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 12px var(--accent);
+  /* 20px, not the 9px the dot used: the icon is a llama inside a disc, and
+     below roughly 18px it stops resolving as anything and just reads as a
+     green blob — worse than the dot it replaced. The titlebar is 46px, so
+     20px sits comfortably without pushing the row taller.
+     `pointer-events: none` keeps it from swallowing drags: the mark is a
+     `data-tauri-drag-region`, and a child image would otherwise be a dead spot
+     in the strip you grab to move the window. */
+  .mark .logo {
+    width: 20px;
+    height: 20px;
+    flex: none;
+    pointer-events: none;
+    user-select: none;
+    filter: drop-shadow(0 1px 3px rgba(18, 11, 4, 0.55));
   }
 
   .tabs {
@@ -260,7 +306,7 @@
     border-radius: 50%;
     object-fit: cover;
     flex: none;
-    background: linear-gradient(135deg, #5c8dff, #b06ad9);
+    background: linear-gradient(135deg, #b08046, #6b4226);
   }
 
   .wctl {
@@ -275,7 +321,7 @@
     font-size: 11px;
   }
   .wctl button:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 241, 224, 0.08);
     color: var(--fg);
   }
   .wctl button.x:hover {
@@ -296,6 +342,7 @@
   }
 
   main {
+    flex: 1;
     overflow-y: auto;
     min-height: 0;
     padding: 0 30px 8px;

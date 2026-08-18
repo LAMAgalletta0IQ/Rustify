@@ -138,7 +138,7 @@
     aspect-ratio: 1;
     border-radius: 11px;
     object-fit: cover;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 241, 224, 0.06);
     margin-bottom: 11px;
   }
   .title {

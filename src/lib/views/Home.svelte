@@ -163,7 +163,7 @@
   }
   .pill:hover {
     background: var(--glass-hover);
-    border-color: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 241, 224, 0.16);
     transform: translateY(-2px);
   }
   .pill img,
@@ -173,7 +173,7 @@
     border-radius: 9px;
     object-fit: cover;
     flex: none;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 241, 224, 0.06);
   }
   /* min-width: 0 is what actually lets the label ellipsis — a flex child will
      not shrink below its content width without it, so long playlist names

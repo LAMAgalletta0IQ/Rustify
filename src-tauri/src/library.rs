@@ -125,6 +125,13 @@ struct SavedTrack {
 
 #[derive(Debug, Deserialize)]
 struct PlaylistItem {
+    /// Renamed alongside the endpoint: `/playlists/{id}/items` returns rows
+    /// keyed `item`, not `track`. Verified live 2026-08-17 —
+    /// `fields=items(track(name))` comes back `{"items":[{}]}` while
+    /// `fields=items(item(name))` returns the track. Missing the alias parsed
+    /// every row to `None`, so playlists opened to "Nothing here." with no
+    /// error logged anywhere.
+    #[serde(alias = "item")]
     track: Option<WireTrack>,
 }
 

@@ -4,17 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "efceaf9df75f2cbf",
+        "id": "900d8897c4923310",
         "type": "tabs",
         "children": [
           {
-            "id": "9796b900bd22943d",
+            "id": "8b3d202926310e34",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "files/src/lib/types.ts.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "types.ts"
             }
           }
         ]
@@ -182,22 +186,25 @@
       "obsidian42-brat:BRAT": false
     }
   },
-  "active": "9796b900bd22943d",
+  "active": "8b3d202926310e34",
   "lastOpenFiles": [
-    "concepts/rate-limiting.md.tmp.10208.d0104273fe73",
-    "00-index/MOC.md.tmp.10208.0dd13dff2bc4",
-    "00-index/MOC.md.tmp.10208.648626458d73",
-    "concepts/external-dependencies.md.tmp.10208.8c618367b47e",
-    "concepts/external-dependencies.md.tmp.10208.2fc565c4c84e",
-    "modules/project-root.md.tmp.10208.d6c0cab385dc",
-    "files/src-tauri/Cargo.toml.md.tmp.10208.6e0ea958ec10",
-    "files/src/lib/types.ts.md.tmp.10208.688693871dcf",
-    "files/src-tauri/src/webapi.rs.md.tmp.10208.9ec723c53982",
-    "files/src-tauri/src/commands.rs.md.tmp.10208.346a08482ebd",
+    "files/src-tauri/tauri.conf.json.md.tmp.16176.2ebeeac27936",
+    "files/src/app.css.md.tmp.16176.da2721b8c174",
+    "00-index/MOC.md",
+    "files/src/app.css.md",
+    "Untitled.canvas",
+    "concepts/rate-limiting.md.tmp.10208.2da75a01ab9d",
+    "concepts/rate-limiting.md.tmp.10208.f06f5b1e5938",
+    "files/src-tauri/src/commands.rs.md.tmp.10208.cf18b10f76e8",
+    "files/src-tauri/src/auth.rs.md.tmp.10208.2842d20d5fa1",
+    "files/src/App.svelte.md.tmp.10208.d209489f46ce",
+    "files/src/app.css.md.tmp.10208.9b95855a0c07",
+    "files/src/app.css.md.tmp.10208.94e7aae3fa68",
+    "files/src/app.css.md.tmp.10208.4c3ac63c4e1a",
+    "files/src-tauri/tauri.conf.json.md.tmp.10208.d682ac364d43",
     "modules/frontend-svelte.md",
     "modules/frontend-components.md",
     "files/vite.config.ts.md",
-    "00-index/MOC.md.tmp.1652.cde852177847",
     "concepts/rate-limiting.md",
     "files/app-icon.png.md",
     "files/README.md.md",
@@ -212,13 +219,11 @@
     "files/src-tauri/Cargo.lock.md",
     "files/src-tauri/Cargo.toml.md",
     "files/src/vite-env.d.ts.md",
-    "files/src/app.css.md",
     "files/src/lib/components/DevicePicker.svelte.md",
     "files/src/lib/components/PlayerBar.svelte.md",
     "files/src/lib/components/TrackList.svelte.md",
     "files/src/lib/views/ArtistView.svelte.md",
     "files/src/lib/views/AlbumView.svelte.md",
-    "files/src/lib/views/NowPlaying.svelte.md",
-    "files/src/lib/views/Search.svelte.md"
+    "files/src/lib/views/NowPlaying.svelte.md"
   ]
 }

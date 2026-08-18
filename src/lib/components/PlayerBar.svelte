@@ -101,7 +101,7 @@
 
       <div class="scrub">
         <span class="t muted">{formatMs(pb.positionMs)}</span>
-        <span class="rail" style="--pct: {pct}%">
+        <span class="rail" style="--frac: {pct / 100}">
           <input
             type="range"
             min="0"
@@ -122,7 +122,7 @@
       <svg class="vicon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 8a5 5 0 0 1 0 8" />
       </svg>
-      <span class="rail vol" style="--pct: {volumeToPercent(pb.volume)}%">
+      <span class="rail vol" style="--frac: {volumeToPercent(pb.volume) / 100}">
         <input
           type="range"
           min="0"
@@ -149,10 +149,10 @@
     gap: 22px;
     padding: 11px 18px;
     border-radius: var(--r-lg);
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--glass-raised);
+    border: 1px solid var(--hairline);
     backdrop-filter: blur(36px) saturate(1.6);
-    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
+    box-shadow: var(--shadow-raised), var(--edge);
   }
 
   .now {
@@ -170,7 +170,7 @@
     border-radius: 9px;
     object-fit: cover;
     flex: none;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 241, 224, 0.08);
   }
   .meta {
     display: flex;
@@ -223,11 +223,11 @@
     width: 38px;
     height: 38px;
     background: var(--fg);
-    color: #0b0b0d;
+    color: var(--ink);
   }
   .pp:hover {
     background: #fff;
-    color: #0b0b0d;
+    color: var(--ink);
     transform: scale(1.05);
   }
   .dots {
@@ -248,24 +248,32 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* The filled portion is painted on the wrapper from --pct, so the native
-     input can stay fully transparent and still handle the interaction. */
+  /* The filled portion is painted on the wrapper from --frac, so the native
+     input can stay fully transparent and still handle the interaction.
+     A native thumb never travels edge-to-edge: the browser keeps its center
+     between half its own width and (100% - half its width), so painting the
+     fill at a raw `--frac * 100%` put the fill boundary and the visible thumb
+     at two different points except exactly at 0% and 100%. `--fill` mirrors
+     the browser's own thumb-travel formula (using --thumb, kept equal to the
+     thumb's width/height below) so the two always coincide. */
   .rail {
+    --thumb: 11px;
+    --fill: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--frac));
     position: relative;
     flex: 1;
     height: 4px;
     border-radius: 2px;
     background: linear-gradient(
       to right,
-      var(--fg) 0 var(--pct),
-      rgba(255, 255, 255, 0.16) var(--pct) 100%
+      var(--fg) 0 var(--fill),
+      rgba(255, 241, 224, 0.16) var(--fill) 100%
     );
   }
   footer:hover .rail {
     background: linear-gradient(
       to right,
-      var(--accent) 0 var(--pct),
-      rgba(255, 255, 255, 0.16) var(--pct) 100%
+      var(--accent) 0 var(--fill),
+      rgba(255, 241, 224, 0.16) var(--fill) 100%
     );
   }
   .rail input[type="range"] {

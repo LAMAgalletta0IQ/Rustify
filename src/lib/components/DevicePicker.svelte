@@ -109,12 +109,15 @@
     width: 260px;
     padding: 8px;
     /* A popover needs its own darkening: pure --glass over the player bar's
-       glass would stack two translucent layers and read as unreadable haze. */
-    background: rgba(22, 22, 28, 0.82);
+       glass would stack two translucent layers and read as unreadable haze.
+       Kept opaque-ish rather than promoted to `.raised` for the same reason —
+       this is the one surface that lands on top of another glass panel, and
+       Acrylic cannot be relied on to darken what shows through it. */
+    background: rgba(30, 22, 14, 0.86);
     border: 1px solid var(--hairline);
     border-radius: var(--r-md);
     backdrop-filter: blur(var(--blur));
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 12px 32px rgba(18, 11, 4, 0.5), var(--edge);
   }
   header {
     display: flex;
@@ -147,7 +150,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #444;
+    background: #4a4038;
     flex: none;
   }
   .dot.on {

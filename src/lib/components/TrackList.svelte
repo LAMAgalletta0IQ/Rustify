@@ -146,7 +146,7 @@
     width: 36px;
     height: 36px;
     border-radius: 5px;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 241, 224, 0.06);
     object-fit: cover;
   }
   .idx {

@@ -21,7 +21,10 @@
         "resizable": true,
         "theme": "Dark",
         "decorations": false,
-        "transparent": true
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["acrylic"]
+        }
       }
     ],
     "security": {

@@ -183,6 +183,20 @@ still load. An empty string is stored as **absent**, never as `Some("")` —
 Spotify rejects a blank refresh token with `invalid_request: refresh_token must
 be supplied`, which would fail every restore until the file was deleted by hand.
 
+**Writing is a merge, not a replacement.** `save_stored_tokens` reads the
+existing file first and keeps the stored `webapi_refresh_token` whenever the
+session being saved has none. A session that fell back to the shared token
+legitimately carries `None`, and writing that through would delete a valid
+credential. Deliberate clearing goes through `clear_stored_tokens`, which
+deletes the file, so preserving on `None` cannot strand a dead token.
+
+**Spotify only sends `refresh_token` back when it rotates one.** An omitted
+field means "keep the one you have", not "you have none" — but it deserialises
+to the empty string, which reads as the latter. `restore_login` copies the
+outgoing token back over an empty response field before building
+`SessionTokens`; without that, `stored()` reported the session as having no Web
+API credential at all.
+
 librespot separately caches its own credentials and up to 2 GB of audio under
 `<app data>/cache`.
 

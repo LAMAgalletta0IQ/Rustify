@@ -64,7 +64,10 @@ pub struct LoginInfo {
 #[tauri::command]
 pub fn get_login_info() -> LoginInfo {
     LoginInfo {
-        private_client_id: auth::webapi_client_id().is_some(),
+        // Always true: `webapi_client_id()` falls back to a built-in ID when
+        // the environment variable is unset, so Web API traffic is never on
+        // the shared desktop quota and login always runs two authorizations.
+        private_client_id: true,
         client_id_env: auth::CLIENT_ID_ENV,
         webapi_redirect_uri: auth::webapi_redirect_uri(),
     }
@@ -88,6 +91,15 @@ async fn establish(
     // transient error (notably a 429 on /me), a retry can go through
     // `restore_session` silently instead of reopening the browser.
     let stored = toks.stored();
+    // Which halves actually made it to disk. Without this, a Web API refresh
+    // token that never persists is invisible until the *next* launch falls
+    // back to the shared quota and starts collecting 429s.
+    log::info!(
+        "persisting tokens: streaming={}, web api={} (split={})",
+        !stored.refresh_token.trim().is_empty(),
+        stored.webapi_refresh_token.is_some(),
+        toks.webapi_client_id != auth::streaming_client_id(),
+    );
     auth::save_stored_tokens(&data_dir, &stored)?;
 
     // Premium gate, so a free account gets a clear message rather than a
@@ -403,15 +415,6 @@ pub async fn get_saved_albums(
 ) -> AppResult<Vec<AlbumSummary>> {
     let t = token(&state).await?;
     library::saved_albums(&WebApi::new(), &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
-}
-
-/// TEMPORARY diagnostic: GET an arbitrary Web API path and report what comes
-/// back. Used to map which endpoints Spotify is currently refusing. Remove.
-#[tauri::command]
-pub async fn probe_webapi(state: State<'_, AppState>, path: String) -> AppResult<String> {
-    let t = token(&state).await?;
-    let v: serde_json::Value = WebApi::new().get(&t, &path, &[]).await?;
-    Ok(v.to_string().chars().take(300).collect())
 }
 
 /// `after` is the `next` cursor from the previous page, not an item count —

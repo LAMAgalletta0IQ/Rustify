@@ -220,7 +220,7 @@
     font-size: 11px;
     padding: 1px 4px;
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 241, 224, 0.08);
     word-break: break-all;
   }
 </style>

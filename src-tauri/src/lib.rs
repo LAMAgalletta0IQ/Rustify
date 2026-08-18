@@ -58,10 +58,10 @@ pub fn run() {
     }
     log::info!(
         "web api client id: {}",
-        if auth::webapi_client_id().is_some() {
+        if std::env::var(auth::CLIENT_ID_ENV).is_ok_and(|s| !s.trim().is_empty()) {
             "private (from environment)"
         } else {
-            "shared librespot default — see .env.example"
+            "private (built-in fallback) — set RUSTIFY_CLIENT_ID to use your own quota instead"
         }
     );
 
@@ -119,7 +119,6 @@ pub fn run() {
             commands::get_saved_tracks,
             commands::get_saved_albums,
             commands::get_album_tracks,
-            commands::probe_webapi,
             commands::get_followed_artists,
             commands::get_recently_played,
             commands::set_tracks_saved,

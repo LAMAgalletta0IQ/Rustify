@@ -55,6 +55,17 @@ Reads `store.playback`. Calls `seek`, `set_volume`, `set_shuffle`,
 - **Sliders use `onchange`, not `oninput`.** `oninput` would fire a command per
   pixel of drag; `onchange` fires once on release. A deliberate trade-off:
   the position does not update live while dragging.
+- **The `.rail` fill is painted from `--frac` (0–1), not a raw `--pct`
+  percentage.** A native `<input type="range">` thumb never travels
+  edge-to-edge — the browser keeps its centre between half the thumb's own
+  width and `100% − half`, so a fill boundary painted at a raw
+  `frac * 100%` diverges from the visible thumb everywhere except exactly 0%
+  and 100%. `--fill: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--frac))`
+  mirrors the browser's own thumb-travel formula (`--thumb: 11px`, kept equal
+  to the `::-webkit-slider-thumb` width/height), so the CSS gradient boundary
+  and the native thumb always coincide. Fixed 2026-08 — before this the thumb
+  visibly sat off the fill/track boundary, worse the shorter the rail (the
+  volume rail, at 74px, showed it more than the scrubber).
 - **The scrubber value comes from state, not local input state.** Because
   [[store.svelte.ts]] ticks position at 1 Hz, the thumb moves on its own — and
   a drag can be visually fought by a tick mid-gesture.
