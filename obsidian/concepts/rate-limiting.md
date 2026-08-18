@@ -64,7 +64,10 @@ Every request counts against the pool for its client ID. Current triggers:
 | `PUT /me/player` | [[connect.rs]] | User transfers playback |
 | `GET /me/player/queue` | [[queue.rs]] | Track change, while now-playing is open |
 | `GET /tracks/{id}` | [[player.rs]] | New track — cached per URI |
-| `GET /me/tracks/contains` | [[TrackList.svelte]] | Track list mounted |
+| `GET /me/library/contains` | [[TrackList.svelte]], [[AlbumView.svelte]] | Saved-state decoration; 40-URI chunks |
+| `PUT/DELETE /me/library` | save/remove actions | Non-idempotent UI action; never auto-retried |
+| `GET /me/top/{tracks|artists}` | Home/Profile | Personalized history shelves |
+| `GET /me/player/recently-played` | Home | Recent context shelf |
 | `GET /search` | [[search.rs]] | 300 ms after typing stops |
 | `GET /me/player/recently-played` | [[library.rs]] | Home mounted — once per visit |
 | `GET /me/following?type=artist` | [[library.rs]] | Library → Artists selected, and "Load more" |

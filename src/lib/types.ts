@@ -8,7 +8,11 @@ export interface AppErrorPayload {
     | "Auth"
     | "Playback"
     | "WebApi"
+    | "SessionExpired"
+    | "BadRequest"
     | "Forbidden"
+    | "Unavailable"
+    | "ServiceUnavailable"
     | "RateLimited"
     | "Other";
   message: string;
@@ -55,6 +59,12 @@ export interface LoginInfo {
   clientIdEnv: string;
   /** Redirect URI to register against a self-registered Spotify app. */
   webapiRedirectUri: string;
+}
+
+export interface AppSettings {
+  defaultVolumePercent: number;
+  reduceMotion: boolean;
+  cacheLimitMb: number;
 }
 
 export interface Device {
@@ -104,6 +114,36 @@ export interface ArtistSummary {
 export interface ArtistPage {
   items: ArtistSummary[];
   next: string | null;
+}
+
+export interface AlbumPage {
+  items: AlbumSummary[];
+  hasMore: boolean;
+}
+
+export type RecentActivityKind = "track" | "album" | "playlist" | "artist";
+
+export interface RecentActivityItem {
+  kind: RecentActivityKind;
+  uri: string;
+  id: string;
+  name: string;
+  subtitle: string;
+  imageUrl: string | null;
+  lastPlayedAt: string;
+  trackUri: string | null;
+}
+
+export interface LyricsLine {
+  startMs: number;
+  text: string;
+}
+
+export interface LyricsResult {
+  provider: "LRCLIB";
+  status: "available" | "instrumental" | "unavailable";
+  plain: string | null;
+  synced: LyricsLine[];
 }
 
 export interface PlaylistHit {

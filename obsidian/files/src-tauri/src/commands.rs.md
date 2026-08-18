@@ -70,8 +70,9 @@ library calls or a failure to stream.
 | `get_auth_state` | Clone of current `AuthState` |
 | `get_login_info` | Shape of the login flow, and whether Setup is still needed |
 | `set_client_id` | Saves the Web API Client ID from [[Setup.svelte]] to `settings.json` |
+| `get_settings`, `update_settings` | Validated, merged functional settings (volume, motion, cache) |
 | `login` | Interactive; opens the browser **twice**. Errors if no Client ID is configured, though the UI should never let this be reached |
-| `restore_session` | Silent. **Returns a logged-out state rather than erroring** when no Client ID is configured yet, nothing is stored, or the grant is rejected — the UI just shows Setup or Login. Deletes `tokens.json` **only** on `auth::is_grant_rejected`; a transient failure keeps them |
+| `restore_session` | Reuses a live Rust session after webview reload; otherwise silently restores stored credentials. Deletes `tokens.json` only on a rejected grant |
 | `logout` | Shuts down Spirc, **aborts both background tasks**, clears token and state, deletes `tokens.json`, emits `auth:changed` |
 
 ### Playback
@@ -101,8 +102,14 @@ library calls or a failure to stream.
 ### Library
 `get_playlists`, `get_playlist_tracks`, `get_saved_tracks`, `get_saved_albums`,
 `get_album_tracks`, `set_tracks_saved`, `set_albums_saved`, `get_tracks_saved`,
-`get_artist_top_tracks`, `get_artist_albums`. Paginated commands take
+`get_albums_saved`, `get_artist_top_tracks` (release-derived compatibility
+name), `get_artist_albums`, `get_artist`, `get_top_tracks`, `get_top_artists`,
+`get_recently_played`. Paginated commands take
 `Option<u32>` limit/offset with sane defaults.
+
+### Lyrics
+`get_lyrics` requires a live session and delegates read-only lookup/parsing to
+[[lyrics.rs]].
 
 ### Search / Queue
 `search_spotify`, `get_queue`, `add_to_queue`.

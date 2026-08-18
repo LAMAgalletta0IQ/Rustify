@@ -28,7 +28,7 @@ would call.
    logged-out state.
 4. **`manage(AppState::new())`** — installs shared state ([[state.rs]]).
    Everything is empty at this point.
-5. **`invoke_handler`** — registers all 33 commands from [[commands.rs]].
+5. **`invoke_handler`** — registers all 43 commands from [[commands.rs]].
 6. **`run(generate_context!())`** — reads [[tauri.conf.json]] at compile time,
    creates the window, and blocks.
 

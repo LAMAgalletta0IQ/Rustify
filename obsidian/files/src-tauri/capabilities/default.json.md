@@ -22,7 +22,8 @@ plugin APIs the **frontend** may invoke over IPC.
     "core:default",
     "core:event:default",
     "core:window:allow-start-dragging",
-    "opener:default"
+    "opener:default",
+    "mcp-bridge:default"
   ]
 }
 ```
@@ -35,6 +36,7 @@ plugin APIs the **frontend** may invoke over IPC.
 | `core:event:default` | `listen` / `emit` — required by [[store.svelte.ts]] |
 | `core:window:allow-start-dragging` | Dragging the window by a custom region |
 | `opener:default` | The opener plugin's frontend API |
+| `mcp-bridge:default` | Debug automation bridge; the plugin itself is release-gated in Rust |
 
 `"windows": ["main"]` targets the unlabelled window from
 [[tauri.conf.json]], which Tauri names `main` by default.
@@ -63,7 +65,7 @@ at runtime.
   reject, [[store.svelte.ts]] would never receive `playback:changed`, and the
   interface would simply stop updating — with no obvious error.
 - **`#[tauri::command]`s are not individually gated.** `core:default` covers
-  `invoke`; the app's own 33 commands need no per-command permission.
+  `invoke`; the app's own 43 commands need no per-command permission.
 - The permission set is intentionally minimal — no filesystem, shell, HTTP or
   dialog access is granted to the webview.
 

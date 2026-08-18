@@ -12,7 +12,7 @@
     try {
       devices = await api.listDevices();
     } catch (e) {
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
     } finally {
       loading = false;
     }

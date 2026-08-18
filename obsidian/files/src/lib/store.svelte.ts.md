@@ -26,6 +26,7 @@ and provides shared error handling.
 | `error` | `$state<string \| null>` | Banner text |
 | `booting` | `$state(boolean)` | True until the restore attempt settles |
 | `setupNeeded` | `$state(boolean)` | True until a Web API Client ID is configured; gates [[Login.svelte]] behind [[Setup.svelte]] |
+| `settings` | `$state<AppSettings>` | Persisted default volume, cache cap, and reduced motion |
 | `#unlisten` | `UnlistenFn[]` | Event subscriptions |
 | `#ticker` | `number \| null` | Interval handle |
 
@@ -34,7 +35,9 @@ and provides shared error handling.
 2. `listen(EVENT_AUTH)` → replace `auth`.
 3. `await api.getLoginInfo()`. If it reports no Client ID configured, set
    `setupNeeded = true` and **return** — nothing to restore yet.
-4. Otherwise `await api.restoreSession()`.
+4. Otherwise call `getAuthState()` first. A webview reload keeps the Rust
+   process alive, so a live backend session is reused without rotating refresh
+   tokens. Only a logged-out backend calls `restoreSession()`.
 5. If logged in, prime `playback` with `getPlayback()`.
 6. **`finally { this.booting = false }`** — runs even on the early return.
 
@@ -42,6 +45,11 @@ and provides shared error handling.
 Re-fetches `getLoginInfo()` and clears `setupNeeded` once it reports a
 configured Client ID. Called by [[App.svelte]] after [[Setup.svelte]]'s
 `onDone` fires.
+
+### Settings and logout
+`saveSettings` persists typed preferences and replaces the reactive snapshot.
+`logout` marks the transition intentional, calls the backend, and resets local
+auth/playback without showing the session-expired banner.
 
 ### `#syncTicker()`
 Starts a 1 Hz `setInterval` while playing; clears it when not. Each tick adds
@@ -52,7 +60,14 @@ Calls every unlisten function and clears the ticker.
 
 ### `async run(fn)`
 Clears `error`, awaits `fn()`, and on rejection sets
-`error = asAppError(e).message`. The standard way components fire commands.
+`error = handleError(e).message`. The standard way components fire commands.
+
+### `handleError(error, showBanner)`
+Normalises rejected Tauri commands in one place. It optionally updates the
+global banner and always moves the frontend to the login screen for
+`SessionExpired`/`NotLoggedIn`. Section loaders use this helper with
+`showBanner = false`, so Home, artist, profile, and lyrics errors can remain
+local without leaving an invalid session displayed as authenticated.
 
 ### `export const store = new AppStore()`
 A module-level singleton — the same instance everywhere it is imported.

@@ -9,6 +9,7 @@
   let tracks = $state<TrackSummary[]>([]);
   let loading = $state(true);
   let saved = $state<boolean | null>(null);
+  let saving = $state(false);
 
   $effect(() => {
     const id = album.id;
@@ -16,10 +17,16 @@
     loading = true;
     (async () => {
       try {
-        const t = await api.getAlbumTracks(id);
-        if (!cancelled) tracks = t;
+        const [tracksResult, savedResult] = await Promise.allSettled([
+          api.getAlbumTracks(id),
+          api.getAlbumsSaved([id]),
+        ]);
+        if (cancelled) return;
+        if (tracksResult.status === "fulfilled") tracks = tracksResult.value;
+        else throw tracksResult.reason;
+        if (savedResult.status === "fulfilled") saved = savedResult.value[0] ?? false;
       } catch (e) {
-        if (!cancelled) store.error = api.asAppError(e).message;
+        if (!cancelled) store.handleError(e);
       } finally {
         if (!cancelled) loading = false;
       }
@@ -30,13 +37,17 @@
   });
 
   async function toggleSaved() {
+    if (saving) return;
     const next = !saved;
     saved = next;
+    saving = true;
     try {
       await api.setAlbumsSaved([album.id], next);
     } catch (e) {
       saved = !next;
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
+    } finally {
+      saving = false;
     }
   }
 </script>
@@ -55,7 +66,14 @@
       class="btn-primary"
       onclick={() => store.run(() => api.loadContext(album.uri))}>Play</button
     >
-    <button class="heart" class:on={saved} onclick={toggleSaved} title="Save album">
+    <button
+      class="heart"
+      class:on={saved}
+      onclick={toggleSaved}
+      disabled={saving || saved === null}
+      aria-pressed={saved ?? false}
+      title={saved ? "Remove album from library" : "Save album to library"}
+    >
       {saved ? "♥" : "♡"}
     </button>
   </div>

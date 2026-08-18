@@ -29,7 +29,7 @@
           exhausted = t.length < PAGE;
         }
       } catch (e) {
-        if (!cancelled) store.error = api.asAppError(e).message;
+        if (!cancelled) store.handleError(e);
       } finally {
         if (!cancelled) loading = false;
       }
@@ -47,7 +47,7 @@
       tracks = [...tracks, ...next];
       exhausted = next.length < PAGE;
     } catch (e) {
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
     } finally {
       loadingMore = false;
     }

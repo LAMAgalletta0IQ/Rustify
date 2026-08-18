@@ -30,8 +30,11 @@ playlist list and plays like any other. **Creating** a Blend or inviting a
 participant uses a private, undocumented endpoint and is not implemented.
 
 ### Lyrics
-No public Web API endpoint. [[NowPlaying.svelte]] deliberately leaves layout
-space for a future provider, with a comment marking the spot.
+Spotify has no public lyrics endpoint, and librespot 0.8 has no supported
+lyrics API. Rustify therefore uses the separate documented LRCLIB API through
+[[lyrics.rs]]. Synchronized LRC is preferred and plain text is the fallback.
+Coverage and timing accuracy depend on LRCLIB; missing entries are reported as
+unavailable and never fabricated. See [[2026-08-capability-audit]].
 
 ### Free-tier playback
 librespot cannot play the ad-supported tier. Enforced early with a clear
@@ -54,10 +57,18 @@ implemented as replaying it as an explicit track list from the chosen entry.
 `GET /me/player/queue` returns the **active** device's queue, which may be
 another device's after a transfer.
 
-### Artist top tracks have no context
-`/artists/{id}/top-tracks` returns a synthesised list, not a browsable Spotify
-context, so [[ArtistView.svelte]] plays them via `load_tracks` rather than
-`load_context`.
+### Artist popularity rankings
+Spotify removed `/artists/{id}/top-tracks` for Development Mode apps in
+February 2026. [[ArtistView.svelte]] instead labels and renders a deterministic
+playable sample from the artist's recent releases. It does not call that sample
+"Popular" or imply Spotify ranking.
+
+### Algorithmic mixes and recommendations
+Spotify's Recommendations endpoint and access to Spotify-owned algorithmic or
+editorial playlists are not available to this Development Mode integration.
+Home provides two truthful alternatives: a mix built from `/me/top/tracks`,
+and recent releases from `/me/top/artists`. Neither is presented as a
+Spotify-authored Daily Mix or recommendation shelf.
 
 ### Album rows have no cover art
 `/albums/{id}/tracks` returns *simplified* track objects with no nested album,
@@ -114,32 +125,26 @@ No cross-platform abstractions. The build targets `x86_64-pc-windows-msvc`;
 `bundle.targets` is `nsis`. Icon generation produced iOS/Android assets as a
 side effect of `tauri icon` — they are unused. See [[icons]].
 
-### No pagination beyond "Load more"
-[[Home.svelte]] appends pages on demand. No virtual scrolling, so very large
-libraries will accumulate DOM nodes.
+### No virtual scrolling
+Library and artist releases append pages on demand. Very large libraries can
+therefore accumulate DOM nodes.
 
 ### Search results are not paginated
 [[Search.svelte]] requests a single page (10 per type, the API maximum).
 
 ### No offline mode
-librespot caches audio (2 GB cap) but there is no offline UI; all metadata
-requires network.
+librespot caches audio (a configurable 128–8192 MB cap, 2 GB by default), but
+there is no offline UI; Spotify metadata and LRCLIB lyrics require network.
 
 ## Verification status
 
-Exercised against a live Premium account: **login (both authorizations),
-playback, search, and the device registration**. The startup log confirms `.env`
-pickup and which client ID mode is active.
-
-Not yet confirmed by the author at the time of writing:
-
-- Passive device behaviour — opening the app while music plays elsewhere should
-  now show that track rather than "Nothing playing".
-- Transfer between devices via the picker.
-- Restore-after-restart with the corrected token persistence.
-
-Highest residual risk remains Connect/`Spirc` behaviour, the piece with the
-least verifiable surface without a real account and a second device.
+Exercised on 2026-08-18 against a live Premium account: two-role OAuth restore,
+passive remote playback state, search, Home history/top-items/release shelves,
+artist identity/tracks/releases/pagination, LRCLIB synchronized lyrics, track
+and album save/un-save with server verification and restoration, profile,
+settings persistence, and responsive setup/player geometry. Device transfer
+was not performed because it would interrupt the user's active remote session.
+See [[2026-08-capability-audit]] for commands and exact external constraints.
 
 ## See also
 

@@ -3,84 +3,23 @@ tags: [file, frontend, ui, playback]
 ---
 # `src/lib/components/PlayerBar.svelte`
 
-**Module:** [[frontend-components]] · **Language:** Svelte 5 · **205 lines**
+Persistent four-part playback surface: current track opens Now Playing, center
+transport/repeat/shuffle, progress scrubber, and device/volume controls.
 
-## Purpose
+`cycleRepeat` maps off → context → track → off. Seek converts percentage to
+milliseconds; volume passes 0–100 to Rust for librespot-scale conversion.
+Both sliders keep native keyboard/assistive behavior and use local draft values
+during drag before committing on change.
 
-The persistent transport bar at the bottom of the window. Rendered once by
-[[App.svelte]] and never unmounted, so controls survive navigation.
-
-## Key items
-
-### Props
-`onOpenNowPlaying: () => void` — toggles the overlay.
-
-### Derived
-- `pb = $derived(store.playback)`
-- `pct = $derived(pb.durationMs > 0 ? (pb.positionMs / pb.durationMs) * 100 : 0)`
-  — the guard prevents a division by zero before a track loads.
-
-### Layout
-A three-column grid: now-playing summary, centre controls, right-hand
-device/volume cluster.
-
-**Left** — artwork, title and artists; the whole block is a button opening the
-now-playing view. Shows "Nothing playing" when `pb.track` is null.
-
-**Centre** — shuffle, previous, play/pause, next, repeat, above a scrubber with
-elapsed/total times from `formatMs`.
-
-**Right** — [[DevicePicker.svelte]] and a volume slider.
-
-### Handlers
-- `onSeek` — converts slider percentage back to milliseconds.
-- `onVolume` — passes `0..100`; the backend converts to librespot's scale.
-- `cycleRepeat()` — **off → context → track → off**, mapped to the two
-  independent booleans `set_repeat(context, track)` expects.
-
-## Inputs / outputs / side effects
-
-Reads `store.playback`. Calls `seek`, `set_volume`, `set_shuffle`,
-`set_repeat`, `play_pause`, `next_track`, `previous_track` — all via
-`store.run()`.
-
-## Dependencies
-
-**Imports:** [[api.ts]], [[store.svelte.ts]], [[types.ts]],
-[[DevicePicker.svelte]]
-**Imported by:** [[App.svelte]]
-
-## Notable logic / gotchas
-
-- **Sliders use `onchange`, not `oninput`.** `oninput` would fire a command per
-  pixel of drag; `onchange` fires once on release. A deliberate trade-off:
-  the position does not update live while dragging.
-- **The `.rail` fill is painted from `--frac` (0–1), not a raw `--pct`
-  percentage.** A native `<input type="range">` thumb never travels
-  edge-to-edge — the browser keeps its centre between half the thumb's own
-  width and `100% − half`, so a fill boundary painted at a raw
-  `frac * 100%` diverges from the visible thumb everywhere except exactly 0%
-  and 100%. `--fill: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--frac))`
-  mirrors the browser's own thumb-travel formula (`--thumb: 11px`, kept equal
-  to the `::-webkit-slider-thumb` width/height), so the CSS gradient boundary
-  and the native thumb always coincide. Fixed 2026-08 — before this the thumb
-  visibly sat off the fill/track boundary, worse the shorter the rail (the
-  volume rail, at 74px, showed it more than the scrubber).
-- **The scrubber value comes from state, not local input state.** Because
-  [[store.svelte.ts]] ticks position at 1 Hz, the thumb moves on its own — and
-  a drag can be visually fought by a tick mid-gesture.
-- **Repeat is two booleans, not an enum.** librespot models context-repeat and
-  track-repeat separately, so `cycleRepeat` synthesises a three-state cycle
-  from them. [[commands.rs]] issues two Spirc calls.
-- **Nothing is disabled while logged out** — the bar only renders inside
-  [[App.svelte]]'s logged-in branch, so the situation cannot arise.
-- **Buttons show no optimistic state.** Play/pause reflects `pb.isPlaying`,
-  which only changes when the backend event arrives — correct, because a phone
-  can pause too. See [[data-flow]].
-- `pb.isLoading` renders "…" in place of the play/pause glyph.
+The range wrapper paints the fill with the browser's thumb-travel formula.
+The input explicitly has zero margin and a centered 16 px hit area, its WebKit
+track is transparent and 4 px tall, and the 11 px thumb uses the matching
+negative half-difference margin. Hover, active, and focus-visible reveal the
+thumb; focus adds a visible ring. Disabled seek is dimmed/non-interactive.
+Live computed geometry at 1100×720 placed both volume input and rail centers at
+y=663, correcting the previous 2 px user-agent-margin offset.
 
 ## See also
 
-[[DevicePicker.svelte]] · [[App.svelte]] · [[store.svelte.ts]] ·
-[[NowPlaying.svelte]] · [[playback-and-connect]] · [[data-flow]] ·
-[[frontend-components]] · [[MOC]]
+[[player.rs]] · [[NowPlaying.svelte]] · [[DevicePicker.svelte]] ·
+[[playback-and-connect]] · [[2026-08-capability-audit]] · [[MOC]]

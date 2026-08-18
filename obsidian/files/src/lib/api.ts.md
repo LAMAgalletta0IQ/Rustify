@@ -30,10 +30,11 @@ block in the app goes through it.
 
 | Group | Functions |
 | --- | --- |
-| auth | `getAuthState`, `getLoginInfo`, `setClientId`, `login`, `restoreSession`, `logout` |
+| auth/settings | `getAuthState`, `getLoginInfo`, `setClientId`, `login`, `restoreSession`, `logout`, `getSettings`, `updateSettings` |
 | playback | `getPlayback`, `play`, `pause`, `playPause`, `nextTrack`, `previousTrack`, `seek`, `setVolume`, `setShuffle`, `setRepeat`, `loadContext`, `loadTracks` |
 | connect | `listDevices`, `transferPlayback`, `activateThisDevice` |
-| library | `getPlaylists`, `getPlaylistTracks`, `getSavedTracks`, `getSavedAlbums`, `getAlbumTracks`, `setTracksSaved`, `setAlbumsSaved`, `getTracksSaved`, `getArtistTopTracks`, `getArtistAlbums` |
+| library/home/artist | collection reads, generic track/album saved state/mutations, recent activity, artist identity/release pages, top tracks/artists |
+| lyrics | `getLyrics` |
 | search | `searchSpotify` |
 | queue | `getQueue`, `addToQueue` |
 

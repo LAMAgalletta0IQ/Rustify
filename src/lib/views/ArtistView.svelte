@@ -14,134 +14,136 @@
     onOpenAlbum: (a: AlbumSummary) => void;
   } = $props();
 
-  let top = $state<TrackSummary[]>([]);
+  let loadedDetails = $state<ArtistSummary | null>(null);
+  const details = $derived(loadedDetails ?? artist);
+  let tracks = $state<TrackSummary[]>([]);
   let albums = $state<AlbumSummary[]>([]);
-  let loading = $state(true);
+  let loadingTracks = $state(true);
+  let loadingAlbums = $state(true);
+  let loadingMore = $state(false);
+  let tracksError = $state<string | null>(null);
+  let albumsError = $state<string | null>(null);
+  let hasMore = $state(false);
+  let reloadKey = $state(0);
 
   $effect(() => {
     const id = artist.id;
+    reloadKey;
     let cancelled = false;
-    loading = true;
-    (async () => {
-      try {
-        const [t, a] = await Promise.all([
-          api.getArtistTopTracks(id),
-          api.getArtistAlbums(id),
-        ]);
-        if (cancelled) return;
-        top = t;
-        albums = a;
-      } catch (e) {
-        if (!cancelled) store.error = api.asAppError(e).message;
-      } finally {
-        if (!cancelled) loading = false;
-      }
-    })();
+    loadingTracks = loadingAlbums = true;
+    tracksError = albumsError = null;
+
+    void Promise.allSettled([
+      api.getArtist(id).then((value) => {
+        if (!cancelled) loadedDetails = value;
+      }),
+      api
+        .getArtistTopTracks(id)
+        .then((value) => {
+          if (!cancelled) tracks = value;
+        })
+        .catch((e) => {
+          if (!cancelled) tracksError = store.handleError(e, false).message;
+        })
+        .finally(() => {
+          if (!cancelled) loadingTracks = false;
+        }),
+      api
+        .getArtistAlbums(id, 10, 0)
+        .then((page) => {
+          if (!cancelled) {
+            albums = page.items;
+            hasMore = page.hasMore;
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) albumsError = store.handleError(e, false).message;
+        })
+        .finally(() => {
+          if (!cancelled) loadingAlbums = false;
+        }),
+    ]);
     return () => {
       cancelled = true;
     };
   });
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    loadingMore = true;
+    albumsError = null;
+    try {
+      const page = await api.getArtistAlbums(artist.id, 10, albums.length);
+      const seen = new Set(albums.map((album) => album.uri));
+      albums = [...albums, ...page.items.filter((album) => !seen.has(album.uri))];
+      hasMore = page.hasMore;
+    } catch (e) {
+      albumsError = store.handleError(e, false).message;
+    } finally {
+      loadingMore = false;
+    }
+  }
 </script>
 
 <div class="artist">
   <div class="head">
     <button class="back" onclick={onBack}>← Back</button>
-    {#if artist.imageUrl}
-      <img class="avatar" src={artist.imageUrl} alt="" />
-    {/if}
-    <h2 class="truncate">{artist.name}</h2>
-    <button
-      class="btn-primary"
-      onclick={() => store.run(() => api.loadContext(artist.uri))}>Play</button
-    >
+    {#if details.imageUrl}<img class="avatar" src={details.imageUrl} alt="" />{:else}<span class="avatar ph"></span>{/if}
+    <span class="identity"><span class="muted kind">Artist</span><h2 class="truncate">{details.name}</h2></span>
+    <button class="btn-primary" onclick={() => store.run(() => api.loadContext(details.uri))}>Play</button>
   </div>
 
-  {#if loading}
-    <p class="muted">Loading…</p>
-  {:else}
-    {#if top.length}
-      <h3>Popular</h3>
-      <!-- No container context: top tracks are a synthesised list. -->
-      <TrackList tracks={top} />
+  <section aria-labelledby="tracks-heading">
+    <h3 id="tracks-heading">Tracks from recent releases</h3>
+    <p class="note">Spotify no longer exposes artist popularity rankings to this integration.</p>
+    {#if loadingTracks}
+      <p class="muted">Loading tracks…</p>
+    {:else if tracksError}
+      <div class="state"><span>{tracksError}</span><button onclick={() => reloadKey++}>Retry</button></div>
+    {:else if tracks.length}
+      <TrackList {tracks} />
+    {:else}
+      <p class="muted">No playable tracks were found in this artist’s recent releases.</p>
     {/if}
+  </section>
 
-    {#if albums.length}
-      <h3>Albums &amp; singles</h3>
+  <section aria-labelledby="releases-heading">
+    <h3 id="releases-heading">Albums &amp; singles</h3>
+    {#if loadingAlbums}
+      <p class="muted">Loading releases…</p>
+    {:else if albums.length}
       <div class="grid">
-        {#each albums as a (a.id)}
-          <button class="card" onclick={() => onOpenAlbum(a)}>
-            {#if a.imageUrl}
-              <img src={a.imageUrl} alt="" loading="lazy" />
-            {:else}
-              <span class="ph"></span>
-            {/if}
-            <span class="truncate title">{a.name}</span>
+        {#each albums as album (album.uri)}
+          <button class="card" onclick={() => onOpenAlbum(album)}>
+            {#if album.imageUrl}<img src={album.imageUrl} alt="" loading="lazy" />{:else}<span class="ph cover"></span>{/if}
+            <span class="truncate title">{album.name}</span>
+            <span class="truncate sub">{album.artists.join(", ")}</span>
           </button>
         {/each}
       </div>
+      {#if hasMore}<button class="more" disabled={loadingMore} onclick={loadMore}>{loadingMore ? "Loading…" : "Load more"}</button>{/if}
+    {:else if !albumsError}
+      <p class="muted">No albums or singles are available.</p>
     {/if}
-  {/if}
+    {#if albumsError}<div class="state"><span>{albumsError}</span><button onclick={() => reloadKey++}>Retry</button></div>{/if}
+  </section>
 </div>
 
 <style>
-  .artist {
-    padding: 20px 24px 8px;
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 16px;
-  }
-  .head h2 {
-    margin: 0;
-    flex: 1;
-    font-size: 22px;
-  }
-  .avatar {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    object-fit: cover;
-  }
-  .back {
-    color: var(--fg-dim);
-  }
-  h3 {
-    margin: 20px 0 8px;
-    font-size: 15px;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 14px;
-  }
-  .card {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 12px;
-    border-radius: var(--r-md);
-    background: var(--glass);
-    border: 1px solid var(--hairline);
-    backdrop-filter: blur(var(--blur));
-    text-align: left;
-    transition: background 0.18s, transform 0.18s;
-  }
-  .card:hover {
-    background: var(--glass-hover);
-    transform: translateY(-3px);
-  }
-  .card img,
-  .ph {
-    width: 100%;
-    aspect-ratio: 1;
-    border-radius: 11px;
-    object-fit: cover;
-    background: rgba(255, 241, 224, 0.06);
-    margin-bottom: 11px;
-  }
-  .title {
-    font-weight: 600;
-  }
+  .artist { padding: 20px 24px 8px; }
+  .head { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
+  .identity { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .head h2 { margin: 0; font-size: 24px; }
+  .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; flex: none; }
+  .ph { background: rgba(255,241,224,.06); }
+  .back { color: var(--fg-dim); }
+  section { margin-top: 24px; }
+  h3 { margin: 0 0 5px; font-size: 16px; }
+  .note { margin: 0 0 10px; color: var(--fg-dim); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap: 14px; }
+  .cover { display: block; width: 100%; aspect-ratio: 1; border-radius: 11px; margin-bottom: 11px; }
+  .state { display: flex; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--hairline); background: var(--glass); border-radius: var(--r-md); color: var(--fg-dim); }
+  .state button, .more { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+  .more { display: block; margin: 18px auto 0; padding: 8px 14px; }
 </style>

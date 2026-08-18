@@ -90,7 +90,7 @@
         exhausted.liked = liked.length < PAGE;
       }
     } catch (e) {
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
     } finally {
       loading = false;
     }
@@ -120,7 +120,7 @@
         exhausted.liked = next.length < PAGE;
       }
     } catch (e) {
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
     } finally {
       loadingMore = false;
     }

@@ -65,12 +65,6 @@ impl WebApi {
             return Err(AppError::RateLimited { retry_after });
         }
 
-        if status == reqwest::StatusCode::NO_CONTENT {
-            // PUT/POST player endpoints answer 204 with an empty body.
-            return serde_json::from_str::<T>("null")
-                .map_err(|e| AppError::WebApi(format!("unexpected empty response: {e}")));
-        }
-
         let body = resp.text().await?;
         if !status.is_success() {
             // Spotify errors are {"error":{"status":..,"message":".."}}
@@ -86,10 +80,21 @@ impl WebApi {
                     }
                 });
             log::warn!("{method} {url} -> {status}: {msg}");
-            if status == reqwest::StatusCode::FORBIDDEN {
-                return Err(AppError::Forbidden(msg));
-            }
-            return Err(AppError::WebApi(format!("{status}: {msg}")));
+            return Err(match status {
+                reqwest::StatusCode::BAD_REQUEST => AppError::BadRequest(msg),
+                reqwest::StatusCode::UNAUTHORIZED => AppError::SessionExpired,
+                reqwest::StatusCode::FORBIDDEN => AppError::Forbidden(msg),
+                reqwest::StatusCode::NOT_FOUND => AppError::Unavailable(msg),
+                s if s.is_server_error() => AppError::ServiceUnavailable { status: s.as_u16() },
+                _ => AppError::WebApi(format!("{status}: {msg}")),
+            });
+        }
+
+        // Several write endpoints return an empty 200 as well as 204. Parsing
+        // that as JSON used to turn a successful library save into a failure.
+        if body.trim().is_empty() {
+            return serde_json::from_str::<T>("null")
+                .map_err(|e| AppError::WebApi(format!("unexpected empty response: {e}")));
         }
 
         serde_json::from_str::<T>(&body)
@@ -139,13 +144,40 @@ impl WebApi {
         self.send::<Value>(req, token).await.map(|_| ())
     }
 
+    pub async fn put_query(
+        &self,
+        token: &str,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> AppResult<()> {
+        // Spotify's edge requires an explicit zero-length entity for these
+        // query-only mutations; a bodyless request is rejected with 411.
+        let req = self
+            .http
+            .put(format!("{BASE}{path}"))
+            .query(query)
+            .header(reqwest::header::CONTENT_LENGTH, "0")
+            .body("");
+        self.send::<Value>(req, token).await.map(|_| ())
+    }
+
     pub async fn post(&self, token: &str, path: &str, body: Value) -> AppResult<()> {
         let req = self.http.post(format!("{BASE}{path}")).json(&body);
         self.send::<Value>(req, token).await.map(|_| ())
     }
 
-    pub async fn delete(&self, token: &str, path: &str, body: Value) -> AppResult<()> {
-        let req = self.http.delete(format!("{BASE}{path}")).json(&body);
+    pub async fn delete_query(
+        &self,
+        token: &str,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> AppResult<()> {
+        let req = self
+            .http
+            .delete(format!("{BASE}{path}"))
+            .query(query)
+            .header(reqwest::header::CONTENT_LENGTH, "0")
+            .body("");
         self.send::<Value>(req, token).await.map(|_| ())
     }
 }

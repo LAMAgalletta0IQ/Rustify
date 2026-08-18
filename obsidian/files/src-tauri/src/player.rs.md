@@ -21,8 +21,9 @@ Builds and starts everything. Order is significant:
 
 1. Configs: `SessionConfig`, `PlayerConfig`, `AudioFormat`, `MixerConfig`.
 2. `ConnectConfig` — device name, `DeviceType::Computer`,
-   `initial_volume: percent_to_volume(50)`.
-3. `Cache::new(...)` — credentials + audio, capped at **2 GB**.
+   `initial_volume: percent_to_volume(settings.default_volume_percent)`.
+3. `Cache::new(...)` — credentials + audio, capped by
+   `settings.cache_limit_mb` (2 GB default, 128–8192 MB validated range).
 4. `audio_backend::find(None)` → rodio → WASAPI on Windows.
 5. `mixer::find(None)` → softvol mixer.
 6. `Session::new`, then `Player::new`.
@@ -130,7 +131,8 @@ not report the position from the last event.
   *not* being the active device. See [[rate-limiting]] before adding another.
 - **`spirc_task` must keep running.** Drop it and the device disappears from
   Spotify Connect.
-- **The 2 GB cache cap** is explicit; librespot would otherwise grow unbounded.
+- **The cache cap is explicit and persisted**; librespot would otherwise grow
+  unbounded. Changes apply when the next session constructs its cache.
 - The `_ =>` arm `drop(pb)`s the write guard before `continue`, so no snapshot
   is emitted for events the UI does not render.
 

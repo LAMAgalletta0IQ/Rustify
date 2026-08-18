@@ -3,6 +3,7 @@ mod commands;
 mod connect;
 mod error;
 mod library;
+mod lyrics;
 mod media_keys;
 mod player;
 mod queue;
@@ -94,6 +95,8 @@ pub fn run() {
             commands::get_auth_state,
             commands::get_login_info,
             commands::set_client_id,
+            commands::get_settings,
+            commands::update_settings,
             commands::login,
             commands::restore_session,
             commands::logout,
@@ -125,8 +128,13 @@ pub fn run() {
             commands::set_tracks_saved,
             commands::set_albums_saved,
             commands::get_tracks_saved,
+            commands::get_albums_saved,
             commands::get_artist_top_tracks,
             commands::get_artist_albums,
+            commands::get_artist,
+            commands::get_top_tracks,
+            commands::get_top_artists,
+            commands::get_lyrics,
             // search
             commands::search_spotify,
             // queue

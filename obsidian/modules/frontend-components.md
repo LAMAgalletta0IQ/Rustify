@@ -23,7 +23,7 @@ important rule:
 | `contextUri` | Behaviour | Callers |
 | --- | --- | --- |
 | Provided | `loadContext(contextUri, track.uri)` — plays the container starting at the clicked track | Playlist, album, liked songs |
-| `null` | `loadTracks(allUris, track.uri)` — ad-hoc list | Search results, artist top tracks |
+| `null` | `loadTracks(allUris, track.uri)` — ad-hoc list | Search results, release-derived artist track sample |
 
 Getting this wrong means playback stops after one song. See
 [[playback-and-connect]].

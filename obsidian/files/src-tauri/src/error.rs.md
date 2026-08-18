@@ -22,6 +22,11 @@ machine-readable shape.
 | `Auth(String)` | OAuth flow or refresh failed |
 | `Playback(String)` | librespot error |
 | `WebApi(String)` | HTTP or Spotify API error |
+| `SessionExpired` | HTTP 401; requires sign-in |
+| `BadRequest(String)` | HTTP 400 with Spotify's message |
+| `Forbidden(String)` | HTTP 403; scope/access-mode/endpoint refusal |
+| `Unavailable(String)` | HTTP 404 item or endpoint unavailable |
+| `ServiceUnavailable { status }` | Spotify/provider HTTP 5xx |
 | `RateLimited { retry_after: Option<u64> }` | HTTP 429, carrying Spotify's `Retry-After` in seconds |
 | `Other(String)` | Everything else |
 

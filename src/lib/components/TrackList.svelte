@@ -12,9 +12,10 @@
 
   /** id -> saved. Populated lazily; absent means "not yet known". */
   let saved = $state<Record<string, boolean>>({});
+  let pending = $state<Record<string, boolean>>({});
 
   // Look up saved state for the visible rows whenever the list changes.
-  // Spotify caps /me/tracks/contains at 50 ids, so chunk the request.
+  // Spotify caps the generic library endpoint at 40 URIs per request.
   $effect(() => {
     const ids = tracks.map((t) => t.id).filter(Boolean);
     if (ids.length === 0) return;
@@ -22,8 +23,8 @@
     let cancelled = false;
     (async () => {
       try {
-        for (let i = 0; i < ids.length; i += 50) {
-          const chunk = ids.slice(i, i + 50);
+        for (let i = 0; i < ids.length; i += 40) {
+          const chunk = ids.slice(i, i + 40);
           const flags = await api.getTracksSaved(chunk);
           if (cancelled) return;
           const next = { ...saved };
@@ -42,14 +43,17 @@
   });
 
   async function toggleSaved(t: TrackSummary) {
-    if (!t.id) return;
+    if (!t.id || pending[t.id]) return;
     const next = !saved[t.id];
     saved = { ...saved, [t.id]: next }; // optimistic
+    pending = { ...pending, [t.id]: true };
     try {
       await api.setTracksSaved([t.id], next);
     } catch (e) {
       saved = { ...saved, [t.id]: !next }; // roll back
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
+    } finally {
+      pending = { ...pending, [t.id]: false };
     }
   }
 
@@ -98,6 +102,8 @@
       <button
         class="heart"
         class:on={saved[t.id]}
+        disabled={!t.id || pending[t.id]}
+        aria-pressed={saved[t.id] ?? false}
         title={saved[t.id] ? "Remove from Liked Songs" : "Save to Liked Songs"}
         onclick={() => toggleSaved(t)}>{saved[t.id] ? "♥" : "♡"}</button
       >
@@ -175,7 +181,9 @@
   }
   .row:hover .queue,
   .row:hover .heart,
-  .heart.on {
+  .heart.on,
+  .heart:focus-visible,
+  .queue:focus-visible {
     opacity: 1;
   }
   .heart.on {

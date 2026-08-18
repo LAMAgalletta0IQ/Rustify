@@ -3,7 +3,7 @@ tags: [module, backend]
 ---
 # Module — Backend (Rust)
 
-**Path:** `src-tauri/src/` · **13 files, ~1,900 lines**
+**Path:** `src-tauri/src/` · **14 files**
 
 The entire backend: audio, authentication, HTTP, state, and the command surface
 exposed to the webview.
@@ -14,7 +14,7 @@ exposed to the webview.
 | File | Role |
 | --- | --- |
 | [[main.rs]] | OS entry point. 6 lines |
-| [[lib.rs]] | Declares modules, builds the Tauri app, registers 33 commands |
+| [[lib.rs]] | Declares modules, builds the Tauri app, registers 43 commands |
 | [[state.rs]] | `AppState`, `PlaybackState`, `AuthState`, `TokenStore`, event names |
 | [[error.rs]] | `AppError` — the one error type crossing the IPC boundary |
 
@@ -25,6 +25,7 @@ exposed to the webview.
 | [[player.rs]] | librespot session, `Spirc`, event pump | librespot |
 | [[connect.rs]] | Device list, transfer | Web API |
 | [[library.rs]] | Playlists, albums, liked songs, save/unsave, artist | Web API |
+| [[lyrics.rs]] | Documented lyrics lookup and synchronized LRC parsing | LRCLIB |
 | [[search.rs]] | Multi-type search | Web API |
 | [[queue.rs]] | Queue read/append | Web API |
 | [[media_keys.rs]] | Global media-key shortcuts | Tauri plugin |
@@ -33,7 +34,7 @@ exposed to the webview.
 | File | Role |
 | --- | --- |
 | [[commands.rs]] | Every `#[tauri::command]`; the frontend's whole surface |
-| [[webapi.rs]] | Thin HTTP client: auth header, errors, 204 handling |
+| [[webapi.rs]] | Thin Spotify HTTP client: auth header, typed statuses, empty success |
 
 ## Internal dependency graph
 
@@ -44,7 +45,7 @@ exposed to the webview.
            │                        │
       commands.rs ◄─────────────────┘
      ╱  │  │  │  ╲  ╲
-auth  player connect library search queue
+auth  player connect library lyrics search queue
   │      │      ╲    │    ╱      ╱
   │      │       webapi.rs ◄────┘
   │      │           │

@@ -5,9 +5,13 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::auth;
 use crate::connect::{self, Device};
 use crate::error::{AppError, AppResult};
-use crate::library::{self, AlbumSummary, ArtistPage, PlaylistSummary, TrackSummary};
+use crate::library::{
+    self, AlbumPage, AlbumSummary, ArtistPage, PlaylistSummary, RecentActivityItem, TrackSummary,
+};
+use crate::lyrics::LyricsResult;
 use crate::player;
 use crate::queue::{self, QueueView};
+use crate::search::ArtistSummary;
 use crate::search::{self, SearchResults};
 use crate::state::{events, AppState, AuthState, PlaybackState, SpotifySession};
 use crate::webapi::WebApi;
@@ -18,7 +22,11 @@ async fn token(state: &AppState) -> AppResult<String> {
     if state.spotify.read().await.is_none() {
         return Err(AppError::NotLoggedIn);
     }
-    Ok(state.tokens.get().await)
+    let token = state.tokens.get().await;
+    if token.is_empty() {
+        return Err(AppError::SessionExpired);
+    }
+    Ok(token)
 }
 
 /// Runs `f` against the live Spirc handle.
@@ -62,6 +70,24 @@ pub struct LoginInfo {
     pub webapi_redirect_uri: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    pub default_volume_percent: u8,
+    pub reduce_motion: bool,
+    pub cache_limit_mb: u32,
+}
+
+impl From<auth::Settings> for AppSettings {
+    fn from(value: auth::Settings) -> Self {
+        Self {
+            default_volume_percent: value.default_volume_percent,
+            reduce_motion: value.reduce_motion,
+            cache_limit_mb: value.cache_limit_mb,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn get_login_info(app: AppHandle) -> AppResult<LoginInfo> {
     let data_dir = app
@@ -90,12 +116,44 @@ pub fn set_client_id(app: AppHandle, client_id: String) -> AppResult<()> {
         return Err(AppError::Other("Client ID cannot be empty.".to_string()));
     }
 
-    auth::save_settings(
-        &data_dir,
-        &auth::Settings {
-            webapi_client_id: Some(trimmed.to_string()),
-        },
-    )
+    let mut settings = auth::settings_or_default(&data_dir);
+    settings.webapi_client_id = Some(trimmed.to_string());
+    auth::save_settings(&data_dir, &settings)
+}
+
+#[tauri::command]
+pub fn get_settings(app: AppHandle) -> AppResult<AppSettings> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+    Ok(auth::settings_or_default(&data_dir).into())
+}
+
+#[tauri::command]
+pub fn update_settings(app: AppHandle, settings: AppSettings) -> AppResult<AppSettings> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    if settings.default_volume_percent > 100 {
+        return Err(AppError::BadRequest(
+            "Default volume must be between 0 and 100.".into(),
+        ));
+    }
+    if !(128..=8192).contains(&settings.cache_limit_mb) {
+        return Err(AppError::BadRequest(
+            "Cache size must be between 128 MB and 8192 MB.".into(),
+        ));
+    }
+
+    let mut persisted = auth::settings_or_default(&data_dir);
+    persisted.default_volume_percent = settings.default_volume_percent;
+    persisted.reduce_motion = settings.reduce_motion;
+    persisted.cache_limit_mb = settings.cache_limit_mb;
+    auth::save_settings(&data_dir, &persisted)?;
+    Ok(persisted.into())
 }
 
 /// Completes a login given an OAuth token: verifies Premium, starts librespot,
@@ -127,6 +185,8 @@ async fn establish(
     );
     auth::save_stored_tokens(&data_dir, &stored)?;
 
+    let settings = auth::settings_or_default(&data_dir);
+
     // Premium gate, so a free account gets a clear message rather than a
     // silent playback failure later. Uses the Web API token, which is the one
     // authorised for `/me`.
@@ -143,12 +203,15 @@ async fn establish(
         state.tokens.clone(),
         device_name(),
         data_dir.join("cache"),
+        settings.default_volume_percent,
+        settings.cache_limit_mb,
     )
     .await?;
 
     // Access tokens last ~1h; without this every Web API call would start
     // failing mid-session.
     let refresh_task = auth::spawn_refresher(
+        app.clone(),
         toks.webapi_client_id.clone(),
         stored,
         state.tokens.clone(),
@@ -200,6 +263,16 @@ pub async fn login(app: AppHandle, state: State<'_, AppState>) -> AppResult<Auth
 /// when there is nothing stored, so the UI can just show the login screen.
 #[tauri::command]
 pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<AuthState> {
+    // The webview can reload while the Rust process and librespot session stay
+    // alive. Reusing it avoids concurrent refresh-token rotations and the
+    // resulting invalid-grant/login loop.
+    if state.spotify.read().await.is_some() {
+        let current = state.auth.read().await.clone();
+        if current.logged_in {
+            return Ok(current);
+        }
+    }
+
     let data_dir = app
         .path()
         .app_data_dir()
@@ -305,11 +378,7 @@ pub async fn set_shuffle(state: State<'_, AppState>, shuffle: bool) -> AppResult
 }
 
 #[tauri::command]
-pub async fn set_repeat(
-    state: State<'_, AppState>,
-    context: bool,
-    track: bool,
-) -> AppResult<()> {
+pub async fn set_repeat(state: State<'_, AppState>, context: bool, track: bool) -> AppResult<()> {
     with_spirc(&state, |s| s.repeat(context)).await?;
     with_spirc(&state, |s| s.repeat_track(track)).await
 }
@@ -469,7 +538,7 @@ pub async fn get_followed_artists(
 pub async fn get_recently_played(
     state: State<'_, AppState>,
     limit: Option<u32>,
-) -> AppResult<Vec<TrackSummary>> {
+) -> AppResult<Vec<RecentActivityItem>> {
     let t = token(&state).await?;
     library::recently_played(&WebApi::new(), &t, limit.unwrap_or(50)).await
 }
@@ -513,21 +582,80 @@ pub async fn get_tracks_saved(
 }
 
 #[tauri::command]
+pub async fn get_albums_saved(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> AppResult<Vec<bool>> {
+    let t = token(&state).await?;
+    library::albums_saved(&WebApi::new(), &t, &ids).await
+}
+
+#[tauri::command]
 pub async fn get_artist_top_tracks(
     state: State<'_, AppState>,
     artist_id: String,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::artist_top_tracks(&WebApi::new(), &t, &artist_id).await
+    library::artist_tracks(&WebApi::new(), &t, &artist_id).await
 }
 
 #[tauri::command]
 pub async fn get_artist_albums(
     state: State<'_, AppState>,
     artist_id: String,
-) -> AppResult<Vec<AlbumSummary>> {
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> AppResult<AlbumPage> {
     let t = token(&state).await?;
-    library::artist_albums(&WebApi::new(), &t, &artist_id).await
+    library::artist_albums(
+        &WebApi::new(),
+        &t,
+        &artist_id,
+        limit.unwrap_or(10),
+        offset.unwrap_or(0),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_artist(state: State<'_, AppState>, artist_id: String) -> AppResult<ArtistSummary> {
+    let t = token(&state).await?;
+    library::artist(&WebApi::new(), &t, &artist_id).await
+}
+
+#[tauri::command]
+pub async fn get_top_tracks(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> AppResult<Vec<TrackSummary>> {
+    let t = token(&state).await?;
+    library::top_tracks(&WebApi::new(), &t, limit.unwrap_or(20)).await
+}
+
+#[tauri::command]
+pub async fn get_top_artists(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> AppResult<Vec<ArtistSummary>> {
+    let t = token(&state).await?;
+    library::top_artists(&WebApi::new(), &t, limit.unwrap_or(10)).await
+}
+
+#[tauri::command]
+pub async fn get_lyrics(
+    state: State<'_, AppState>,
+    track_name: String,
+    artist_name: String,
+    album_name: String,
+    duration_ms: u32,
+) -> AppResult<LyricsResult> {
+    // Lyrics are a separate, read-only integration. Requiring an active
+    // session prevents stale track details from making background requests
+    // after logout.
+    if state.spotify.read().await.is_none() {
+        return Err(AppError::NotLoggedIn);
+    }
+    crate::lyrics::fetch(&track_name, &artist_name, &album_name, duration_ms).await
 }
 
 // ---- search -------------------------------------------------------------

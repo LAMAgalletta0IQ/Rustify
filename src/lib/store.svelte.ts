@@ -1,7 +1,13 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as api from "./api";
 import { EVENT_AUTH, EVENT_PLAYBACK } from "./api";
-import type { AuthState, LoginInfo, PlaybackState } from "./types";
+import type {
+  AppErrorPayload,
+  AppSettings,
+  AuthState,
+  LoginInfo,
+  PlaybackState,
+} from "./types";
 
 const emptyPlayback: PlaybackState = {
   isPlaying: false,
@@ -24,6 +30,12 @@ const emptyAuth: AuthState = {
   avatarUrl: null,
 };
 
+const defaultSettings: AppSettings = {
+  defaultVolumePercent: 50,
+  reduceMotion: false,
+  cacheLimitMb: 2048,
+};
+
 class AppStore {
   playback = $state<PlaybackState>({ ...emptyPlayback });
   auth = $state<AuthState>({ ...emptyAuth });
@@ -32,9 +44,11 @@ class AppStore {
   booting = $state(true);
   /** True until a Web API client ID is configured; gates Login behind Setup. */
   setupNeeded = $state(false);
+  settings = $state<AppSettings>({ ...defaultSettings });
 
   #unlisten: UnlistenFn[] = [];
   #ticker: number | null = null;
+  #intentionalLogout = false;
 
   async init() {
     this.#unlisten.push(
@@ -45,11 +59,20 @@ class AppStore {
     );
     this.#unlisten.push(
       await listen<AuthState>(EVENT_AUTH, (e) => {
+        const expired = this.auth.loggedIn && !e.payload.loggedIn;
         this.auth = e.payload;
+        if (expired && !this.#intentionalLogout) {
+          this.error = "Your Spotify session expired. Sign in again to continue.";
+        }
       }),
     );
 
     try {
+      try {
+        this.settings = await api.getSettings();
+      } catch (e) {
+        console.warn("could not read settings", api.asAppError(e).message);
+      }
       let info: LoginInfo | null = null;
       try {
         info = await api.getLoginInfo();
@@ -62,7 +85,10 @@ class AppStore {
         return;
       }
 
-      this.auth = await api.restoreSession();
+      // A webview reload (including development HMR) does not restart Rust.
+      // Reuse that live session instead of consuming refresh tokens again.
+      const liveAuth = await api.getAuthState();
+      this.auth = liveAuth.loggedIn ? liveAuth : await api.restoreSession();
       if (this.auth.loggedIn) {
         this.playback = await api.getPlayback();
         this.#syncTicker();
@@ -72,6 +98,21 @@ class AppStore {
       console.warn("session restore failed", api.asAppError(e).message);
     } finally {
       this.booting = false;
+    }
+  }
+
+  async saveSettings(settings: AppSettings) {
+    this.settings = await api.updateSettings(settings);
+  }
+
+  async logout() {
+    this.#intentionalLogout = true;
+    try {
+      await api.logout();
+      this.auth = { ...emptyAuth };
+      this.playback = { ...emptyPlayback };
+    } finally {
+      this.#intentionalLogout = false;
     }
   }
 
@@ -120,8 +161,18 @@ class AppStore {
       this.error = null;
       await fn();
     } catch (e) {
-      this.error = api.asAppError(e).message;
+      this.handleError(e);
     }
+  }
+
+  /** Normalises a command failure and consistently expires invalid sessions. */
+  handleError(e: unknown, showBanner = true): AppErrorPayload {
+    const error = api.asAppError(e);
+    if (showBanner) this.error = error.message;
+    if (error.kind === "SessionExpired" || error.kind === "NotLoggedIn") {
+      this.auth = { ...emptyAuth };
+    }
+    return error;
   }
 }
 

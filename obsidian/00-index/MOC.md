@@ -30,14 +30,15 @@ from the official Spotify Web API.
 | [[external-dependencies]] | librespot, Tauri, Svelte, reqwest, the Web API |
 | [[build-and-config]] | Toolchain, build commands, and `.env` configuration |
 | [[known-limitations]] | Password login, Jams, Blends, lyrics, queue reorder — and *why* |
+| [[2026-08-capability-audit]] | Verified Spotify/librespot/LRCLIB capability boundary and acceptance results |
 
 ## Modules
 
 | Module | Contents |
 | --- | --- |
-| [[backend-rust]] | The 13 Rust source files in `src-tauri/src/` |
+| [[backend-rust]] | Rust source files in `src-tauri/src/`, including Spotify and lyrics integrations |
 | [[frontend-svelte]] | The Svelte 5 app shell and its shared library |
-| [[frontend-views]] | Full-screen views: login, home, search, now-playing, album, artist |
+| [[frontend-views]] | Full-screen views: setup/login, home, search, library, profile/settings, now-playing, album, artist |
 | [[frontend-components]] | Reusable UI: player bar, device picker, track list |
 | [[tauri-config]] | `tauri.conf.json`, capabilities, `Cargo.toml`, build script |
 | [[project-root]] | Root-level config: Vite, TypeScript, npm, git |
@@ -49,12 +50,12 @@ from the official Spotify Web API.
 
 ### Backend — Rust (`src-tauri/src/`) `#backend`
 Entry and wiring: [[main.rs]] · [[lib.rs]] · [[state.rs]] · [[error.rs]]
-Feature modules: [[auth.rs]] · [[player.rs]] · [[commands.rs]] · [[connect.rs]] · [[library.rs]] · [[search.rs]] · [[queue.rs]] · [[media_keys.rs]] · [[webapi.rs]]
+Feature modules: [[auth.rs]] · [[player.rs]] · [[commands.rs]] · [[connect.rs]] · [[library.rs]] · [[lyrics.rs]] · [[search.rs]] · [[queue.rs]] · [[media_keys.rs]] · [[webapi.rs]]
 
 ### Frontend — Svelte (`src/`) `#frontend`
 Shell & bootstrap: [[main.ts]] · [[App.svelte]] · [[app.css]] · [[vite-env.d.ts]]
 Shared library: [[api.ts]] · [[types.ts]] · [[store.svelte.ts]]
-Views: [[Setup.svelte]] · [[Login.svelte]] · [[Home.svelte]] · [[Search.svelte]] · [[NowPlaying.svelte]] · [[AlbumView.svelte]] · [[ArtistView.svelte]]
+Views: [[Setup.svelte]] · [[Login.svelte]] · [[Home.svelte]] · [[Search.svelte]] · [[Library.svelte]] · [[NowPlaying.svelte]] · [[Profile.svelte]] · [[Settings.svelte]] · [[PlaylistView.svelte]] · [[AlbumView.svelte]] · [[ArtistView.svelte]]
 Components: [[PlayerBar.svelte]] · [[DevicePicker.svelte]] · [[TrackList.svelte]]
 
 ### Tauri configuration (`src-tauri/`) `#config`

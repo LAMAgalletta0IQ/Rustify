@@ -14,7 +14,7 @@ What the project depends on and how each is used.
 | `tauri` | 2 | Window, IPC, app data paths |
 | `tauri-plugin-opener` | 2 | Opens the browser for OAuth |
 | `tauri-plugin-global-shortcut` | 2 | Media keys |
-| `reqwest` | 0.12 | HTTP for the Web API (`json`, `native-tls`) |
+| `reqwest` | 0.12 | HTTP for Spotify and documented LRCLIB reads (`json`, `native-tls`) |
 | `tokio` | 1 | Async runtime (shared with Tauri) |
 | `serde` / `serde_json` | 1 | Serialisation across IPC and HTTP |
 | `thiserror` | 2 | Error derive |
@@ -75,13 +75,14 @@ app touches:
 | --- | --- | --- |
 | `/me` | GET | [[auth.rs]] — profile + Premium check |
 | `/me/playlists` | GET | [[library.rs]] |
-| `/playlists/{id}/tracks` | GET | [[library.rs]] |
-| `/me/tracks` | GET/PUT/DELETE | [[library.rs]] — liked songs, save/unsave |
-| `/me/tracks/contains` | GET | [[library.rs]] — ♥ state |
-| `/me/albums` | GET/PUT/DELETE | [[library.rs]] |
+| `/playlists/{id}/items` | GET | [[library.rs]] |
+| `/me/tracks`, `/me/albums` | GET | [[library.rs]] — saved collections |
+| `/me/library` | PUT/DELETE | [[library.rs]] — generic URI save/unsave |
+| `/me/library/contains` | GET | [[library.rs]] — generic URI saved state |
 | `/albums/{id}/tracks` | GET | [[library.rs]] |
-| `/artists/{id}/top-tracks` | GET | [[library.rs]] |
-| `/artists/{id}/albums` | GET | [[library.rs]] |
+| `/artists/{id}`, `/artists/{id}/albums` | GET | [[library.rs]] |
+| `/me/top/tracks`, `/me/top/artists` | GET | [[library.rs]] — personalized history alternatives |
+| `/me/player/recently-played` | GET | [[library.rs]] — context-aware recent activity |
 | `/tracks/{id}`, `/episodes/{id}` | GET | [[player.rs]] — now-playing metadata |
 | `/search` | GET | [[search.rs]] |
 | `/me/player/devices` | GET | [[connect.rs]] |
@@ -90,18 +91,27 @@ app touches:
 
 ### API quirks the code handles
 
-- **`204 No Content`** on player PUT/POST — [[webapi.rs]] special-cases it, or
-  JSON parsing would fail on an empty body.
+- **Empty 200 or 204 bodies** on mutations — [[webapi.rs]] maps either to JSON
+  null. Query-only generic library mutations send an explicit
+  `Content-Length: 0`, required by Spotify's edge.
 - **Nulls inside `items`** — search returns `null` entries for unavailable
   results, hence `Vec<Option<T>>` + `flatten` in [[search.rs]]. Playlists
   return null tracks for local files, filtered in [[library.rs]].
-- **50-item cap** on `/me/tracks/contains`, so [[TrackList.svelte]] chunks.
+- **40-URI cap** on `/me/library` and `/me/library/contains`; Rust chunks both.
 - **Simplified track objects** from `/albums/{id}/tracks` carry no nested
   album, so those rows have no cover art.
 - **Errors** are `{"error": {"status", "message"}}`, unwrapped in [[webapi.rs]].
 - **429 with `Retry-After`** — quota is metered per *client ID* over a rolling
   30-second window, and ours is shared globally by all librespot clients.
   Handled as its own error variant; see [[rate-limiting]].
+
+## LRCLIB
+
+`GET https://lrclib.net/api/get` is the only non-Spotify product API. The Rust
+backend supplies exact track, first artist, album, and duration parameters plus
+an identifying User-Agent. It uses no key, secret, scraping, or undocumented
+endpoint. A 404 becomes an `unavailable` lyrics state; 429 honors
+`Retry-After`; synchronized LRC is parsed and sorted locally. See [[lyrics.rs]].
 
 ## Platform dependencies
 
@@ -118,7 +128,8 @@ idle private memory. The native side is ~5.9 MB. See [[README.md]].
 ## Not used
 
 No database, no telemetry, no backend service of our own, no auto-update
-server. The only network traffic is to Spotify.
+server. Product traffic is limited to Spotify and the optional LRCLIB lyrics
+lookup described above.
 
 ## See also
 

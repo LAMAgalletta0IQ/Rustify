@@ -21,6 +21,12 @@ pub enum AppError {
     #[error("Spotify Web API error: {0}")]
     WebApi(String),
 
+    #[error("The Spotify session has expired. Sign in again to continue.")]
+    SessionExpired,
+
+    #[error("Spotify rejected this request (400): {0}")]
+    BadRequest(String),
+
     /// Spotify returned HTTP 403.
     ///
     /// Not always a scope problem: Spotify refuses some endpoints outright
@@ -30,6 +36,12 @@ pub enum AppError {
     /// only need decoration should degrade rather than surface this.
     #[error("Spotify refused this request (403): {0}")]
     Forbidden(String),
+
+    #[error("This item or endpoint is unavailable on Spotify (404): {0}")]
+    Unavailable(String),
+
+    #[error("Spotify is temporarily unavailable ({status}). Try again shortly.")]
+    ServiceUnavailable { status: u16 },
 
     /// Spotify returned HTTP 429.
     ///
@@ -54,7 +66,11 @@ impl AppError {
             Self::Auth(_) => "Auth",
             Self::Playback(_) => "Playback",
             Self::WebApi(_) => "WebApi",
+            Self::SessionExpired => "SessionExpired",
+            Self::BadRequest(_) => "BadRequest",
             Self::Forbidden(_) => "Forbidden",
+            Self::Unavailable(_) => "Unavailable",
+            Self::ServiceUnavailable { .. } => "ServiceUnavailable",
             Self::RateLimited { .. } => "RateLimited",
             Self::Other(_) => "Other",
         }

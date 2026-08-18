@@ -150,7 +150,7 @@ not security.
 | OAuth redirects | [[auth.rs]] | `127.0.0.1:8898/login` (streaming, falls back to an ephemeral port) · `127.0.0.1:8899/login` (Web API, fixed) |
 | Scopes | [[auth.rs]] | `STREAMING_SCOPES` / `WEBAPI_SCOPES` |
 | Connect device name | [[commands.rs]] | `<COMPUTERNAME> (Rustify)` |
-| Audio cache cap | [[player.rs]] | 2 GB |
+| Audio cache cap | [[auth.rs]] / [[player.rs]] | Persisted setting; 2 GB default, 128–8192 MB |
 | Refresh margin | [[auth.rs]] | 5 min before expiry |
 | Remote poll interval | [[player.rs]] | 5 s, only while another device is active |
 | Search page size | [[search.rs]] | `MAX_SEARCH_LIMIT` = 10, the API ceiling |

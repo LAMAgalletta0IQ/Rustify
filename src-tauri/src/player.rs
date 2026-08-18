@@ -8,10 +8,10 @@ use librespot::core::cache::Cache;
 use librespot::core::config::{DeviceType, SessionConfig};
 use librespot::core::session::Session;
 use librespot::core::SpotifyUri;
+use librespot::playback::audio_backend;
 use librespot::playback::config::{AudioFormat, PlayerConfig};
 use librespot::playback::mixer::{self, MixerConfig};
 use librespot::playback::player::{Player, PlayerEvent};
-use librespot::playback::audio_backend;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
@@ -39,6 +39,8 @@ pub async fn start_session(
     tokens: TokenStore,
     device_name: String,
     cache_dir: PathBuf,
+    initial_volume_percent: u8,
+    cache_limit_mb: u32,
 ) -> AppResult<StartedSession> {
     let session_config = SessionConfig::default();
     let player_config = PlayerConfig::default();
@@ -50,7 +52,7 @@ pub async fn start_session(
         device_type: DeviceType::Computer,
         // Raw 0..=u16::MAX scale, NOT a percentage — librespot's own default
         // is u16::MAX / 2. Passing 50 here yields ~0.08% volume, i.e. silence.
-        initial_volume: percent_to_volume(50),
+        initial_volume: percent_to_volume(initial_volume_percent),
         ..Default::default()
     };
 
@@ -61,13 +63,13 @@ pub async fn start_session(
         Some(cache_dir.as_path()),
         Some(cache_dir.join("files").as_path()),
         // Cap the audio cache so it cannot grow without bound on a small disk.
-        Some(2 * 1024 * 1024 * 1024),
+        Some(cache_limit_mb as u64 * 1024 * 1024),
     )?;
 
     let sink_builder = audio_backend::find(None)
         .ok_or_else(|| AppError::Playback("no audio backend available".into()))?;
-    let mixer_builder = mixer::find(None)
-        .ok_or_else(|| AppError::Playback("no mixer available".into()))?;
+    let mixer_builder =
+        mixer::find(None).ok_or_else(|| AppError::Playback("no mixer available".into()))?;
 
     let session = Session::new(session_config, Some(cache));
     let mixer = mixer_builder(mixer_config)?;
@@ -214,11 +216,7 @@ fn spawn_event_pump(
             // shape. Cached per URI so repeats cost nothing.
             if let Some(uri) = track_to_resolve {
                 let uri_str = uri.to_uri().unwrap_or_default();
-                let changed = pb
-                    .track
-                    .as_ref()
-                    .map(|t| t.uri != uri_str)
-                    .unwrap_or(true);
+                let changed = pb.track.as_ref().map(|t| t.uri != uri_str).unwrap_or(true);
 
                 if changed && !uri_str.is_empty() {
                     let cached = cache.lock().await.get(&uri_str).cloned();
@@ -391,7 +389,11 @@ async fn apply_remote(
     remote: Option<connect::RemotePlayback>,
 ) -> bool {
     let mut pb = state.playback.write().await;
-    let before = (pb.is_playing, pb.position_ms, pb.track.as_ref().map(|t| t.uri.clone()));
+    let before = (
+        pb.is_playing,
+        pb.position_ms,
+        pb.track.as_ref().map(|t| t.uri.clone()),
+    );
 
     let Some(r) = remote else {
         // 204: nothing playing anywhere.
@@ -442,7 +444,11 @@ async fn apply_remote(
         });
     }
 
-    let after = (pb.is_playing, pb.position_ms, pb.track.as_ref().map(|t| t.uri.clone()));
+    let after = (
+        pb.is_playing,
+        pb.position_ms,
+        pb.track.as_ref().map(|t| t.uri.clone()),
+    );
     before != after
 }
 

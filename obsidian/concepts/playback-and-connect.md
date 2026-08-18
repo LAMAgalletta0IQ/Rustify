@@ -57,7 +57,7 @@ playback. This single ordering constraint is what makes the whole UI work.
 | --- | --- |
 | `name` | `<COMPUTERNAME> (Rustify)` |
 | `device_type` | `DeviceType::Computer` |
-| `initial_volume` | `percent_to_volume(50)` — **raw 0..=65535 scale** |
+| `initial_volume` | `percent_to_volume(settings.default_volume_percent)` — **raw 0..=65535 scale** |
 
 Registration happens over Spotify's dealer/websocket once logged in, **not**
 mDNS. This is why librespot's `with-libmdns` default feature is disabled in

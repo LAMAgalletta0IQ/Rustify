@@ -1,84 +1,36 @@
 ---
-tags: [file, frontend, ui]
+tags: [file, frontend, ui, home]
 ---
 # `src/lib/views/Home.svelte`
 
-**Module:** [[frontend-views]] · **Language:** Svelte 5 · **315 lines**
+Home is a landing surface with three independent real-data shelves and a
+ranked quick-access grid.
 
-The largest frontend file. Library browsing across three sections, with
-pagination and inline detail.
+## Data and ranking
 
-## Key items
+- `get_recently_played(50)` returns [[library.rs]]'s context-aware
+  `RecentActivityItem`; Home displays 12. Album/playlist/artist contexts are one
+  item each, while loose tracks remain tracks.
+- Quick access takes the newest distinct recent contexts first, then fills to
+  six with the stable order from the user's playlist library. Known playlist
+  IDs are enriched with their real title/owner/art.
+- "Your listening mix" is the account's `/me/top/tracks` data, explicitly
+  labeled as a locally assembled history view rather than Spotify editorial
+  content.
+- "From your top artists" combines `/me/top/artists` with supported artist
+  release pages, deduplicates album URIs, and makes no recommendation claim.
 
-### Constants
-- `PAGE = 50` — playlists, albums, liked songs.
-- `TRACK_PAGE = 100` — the Web API allows 100 for playlist tracks, not 50.
+Each source has its own loading, empty, error, retry, and cancellation state;
+one forbidden/offline endpoint does not blank the others. Spotify itself
+persists history/top-item state, so Rustify does not maintain a competing local
+history database.
 
-### State
-| Name | Purpose |
-| --- | --- |
-| `section` | `"playlists" \| "albums" \| "liked"` |
-| `playlists`, `albums`, `liked` | Cached per section |
-| `loading`, `loadingMore` | Separate, so paging does not blank the list |
-| `exhausted` | `Record<Section, boolean>` — hides "Load more" |
-| `detail` | `{title, uri, tracks, playlistId, exhausted} \| null` |
-
-### `likedUri` (`$derived`)
-`api.likedSongsUri(store.auth.userId)`, or `null` if the id is missing. Gives
-Liked Songs a real playable context.
-
-### Functions
-- **`load()`** — first page for the active section, **only if empty** (acts as
-  a cache).
-- **`loadMore()`** — appends the next page; sets `exhausted` when a short page
-  returns.
-- **`loadMoreTracks()`** — the same for tracks inside an open playlist.
-- **`openPlaylist(p)` / `openAlbum(a)`** — build `detail`. Albums set
-  `playlistId: null` and `exhausted: true`, since `getAlbumTracks` returns
-  everything at once.
-
-### The effect
-```svelte
-$effect(() => {
-  section;
-  untrack(load);
-});
-```
-
-## Inputs / outputs / side effects
-
-Reads `store.auth.userId`. Calls five library commands. Play buttons issue
-`loadContext`.
-
-## Dependencies
-
-**Imports:** `svelte` (`untrack`), [[api.ts]], [[store.svelte.ts]],
-[[TrackList.svelte]], [[types.ts]]
-**Imported by:** [[App.svelte]]
-
-## Notable logic / gotchas
-
-> ### Why `untrack`
-> `load()` reads `playlists.length` **synchronously** before its first `await`,
-> so that read is tracked. Without `untrack`, appending a page would re-trigger
-> the effect. It converged (the `.length === 0` guard prevented a refetch) but
-> re-ran needlessly on every page. See [[frontend-svelte]].
-
-- **`exhausted` is inferred from a short page**, not a total count — the
-  simplest correct signal, and it works even when Spotify omits `total`.
-- **Section caches are never invalidated.** Saving a track from
-  [[TrackList.svelte]] does not refresh the Liked Songs list; switching tabs
-  shows stale data until relaunch.
-- **`detail.uri` is what makes playback continue.** An earlier version stored
-  only `{title, tracks}` and played `tracks[0].uri`, so a playlist played one
-  song and stopped. Passing `contextUri` to [[TrackList.svelte]] is the fix.
-- **Detail rendering here is inline**, unlike [[Search.svelte]], which
-  delegates to [[AlbumView.svelte]]. Two patterns for one job — see
-  [[frontend-views]].
-- `detail!` non-null assertions inside the template are safe within the
-  `{:else if detail}` branch.
+Quick items drill into known albums/artists/playlists. Unknown playlist
+contexts remain playable. Loose tracks and the top-track shelf use
+`load_tracks`; contexts use `load_context` with the most recently played track
+as their starting point.
 
 ## See also
 
-[[TrackList.svelte]] · [[api.ts]] · [[library.rs]] · [[AlbumView.svelte]] ·
-[[playback-and-connect]] · [[frontend-views]] · [[MOC]]
+[[2026-08-capability-audit]] · [[library.rs]] · [[ArtistView.svelte]] ·
+[[AlbumView.svelte]] · [[PlaylistView.svelte]] · [[MOC]]

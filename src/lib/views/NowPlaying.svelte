@@ -2,21 +2,38 @@
   import { untrack } from "svelte";
   import * as api from "../api";
   import { store } from "../store.svelte";
-  import { formatMs, type QueueView } from "../types";
+  import {
+    formatMs,
+    type LyricsResult,
+    type QueueView,
+  } from "../types";
 
   let { onClose }: { onClose: () => void } = $props();
 
   let queue = $state<QueueView | null>(null);
   let loading = $state(false);
+  let lyrics = $state<LyricsResult | null>(null);
+  let lyricsLoading = $state(false);
+  let lyricsError = $state<string | null>(null);
+  let lyricsPanel: HTMLElement | null = $state(null);
 
   const pb = $derived(store.playback);
+  const activeLine = $derived.by(() => {
+    if (!lyrics?.synced.length) return -1;
+    let active = -1;
+    for (let i = 0; i < lyrics.synced.length; i++) {
+      if (lyrics.synced[i].startMs > pb.positionMs) break;
+      active = i;
+    }
+    return active;
+  });
 
   async function refresh() {
     loading = true;
     try {
       queue = await api.getQueue();
     } catch (e) {
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
     } finally {
       loading = false;
     }
@@ -26,6 +43,46 @@
   $effect(() => {
     pb.track?.uri;
     untrack(refresh);
+  });
+
+  $effect(() => {
+    const track = pb.track;
+    let cancelled = false;
+    lyrics = null;
+    lyricsError = null;
+    lyricsLoading = Boolean(track);
+    if (track) {
+      api
+        .getLyrics(
+          track.name,
+          track.artists[0] ?? "",
+          track.album,
+          track.durationMs,
+        )
+        .then((value) => {
+          if (!cancelled) lyrics = value;
+        })
+        .catch((e) => {
+          if (!cancelled) lyricsError = store.handleError(e, false).message;
+        })
+        .finally(() => {
+          if (!cancelled) lyricsLoading = false;
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  $effect(() => {
+    activeLine;
+    if (!lyricsPanel || activeLine < 0) return;
+    const frame = requestAnimationFrame(() => {
+      lyricsPanel
+        ?.querySelector(".line.active")
+        ?.scrollIntoView({ block: "center", behavior: store.settings.reduceMotion ? "auto" : "smooth" });
+    });
+    return () => cancelAnimationFrame(frame);
   });
 </script>
 
@@ -42,9 +99,32 @@
     <p class="muted truncate">{pb.track?.artists.join(", ") ?? ""}</p>
     <p class="muted small truncate">{pb.track?.album ?? ""}</p>
 
-    <!-- Lyrics deliberately absent: Spotify's public Web API exposes no
-         lyrics endpoint. Space is reserved here for a future provider. -->
   </div>
+
+  <section class="lyrics" aria-labelledby="lyrics-heading">
+    <header><h3 id="lyrics-heading">Lyrics</h3>{#if lyrics}<span class="provider">{lyrics.provider}</span>{/if}</header>
+    <div class="lyrics-scroll" bind:this={lyricsPanel} aria-live="polite">
+      {#if !pb.track}
+        <p class="muted">Start a track to see lyrics.</p>
+      {:else if lyricsLoading}
+        <p class="muted">Loading lyrics…</p>
+      {:else if lyricsError}
+        <p class="muted">{lyricsError}</p>
+      {:else if lyrics?.status === "instrumental"}
+        <p class="muted">This track is marked as instrumental.</p>
+      {:else if lyrics?.status === "unavailable" || !lyrics}
+        <p class="muted">Lyrics are not available for this track.</p>
+      {:else if lyrics.synced.length}
+        {#each lyrics.synced as line, i (`${line.startMs}-${i}`)}
+          <p class="line" class:active={i === activeLine}>{line.text || "♪"}</p>
+        {/each}
+      {:else if lyrics.plain}
+        {#each lyrics.plain.split("\n") as line, i (i)}
+          <p class="plain">{line || " "}</p>
+        {/each}
+      {/if}
+    </div>
+  </section>
 
   <aside>
     <header>
@@ -95,8 +175,8 @@
   .np {
     position: relative;
     display: grid;
-    grid-template-columns: 1fr 300px;
-    gap: 32px;
+    grid-template-columns: minmax(230px, 0.85fr) minmax(250px, 1fr) minmax(240px, 0.8fr);
+    gap: 26px;
     height: 100%;
     padding: 32px;
     overflow: hidden;
@@ -145,6 +225,18 @@
     min-height: 0;
     overflow-y: auto;
   }
+  .lyrics {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .lyrics header { flex: none; }
+  .provider { color: var(--fg-dim); font-size: 10px; letter-spacing: .08em; }
+  .lyrics-scroll { min-height: 0; overflow-y: auto; padding: 28vh 8px; scroll-behavior: smooth; mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent); }
+  .line { margin: 0 0 17px; color: var(--fg-dim); font-size: clamp(17px, 2.2vw, 25px); font-weight: 600; line-height: 1.3; transition: color .2s, transform .2s; transform-origin: left center; }
+  .line.active { color: var(--fg); transform: scale(1.025); }
+  .plain { margin: 0 0 10px; line-height: 1.55; }
   header {
     display: flex;
     justify-content: space-between;
@@ -174,5 +266,13 @@
   }
   .q.current {
     color: var(--accent);
+  }
+  @media (max-width: 900px) {
+    .np { grid-template-columns: minmax(220px, .8fr) minmax(260px, 1fr); overflow-y: auto; }
+    aside { grid-column: 1 / -1; max-height: 260px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lyrics-scroll { scroll-behavior: auto; }
+    .line { transition: none; }
   }
 </style>

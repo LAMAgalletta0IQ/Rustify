@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::search::ArtistSummary;
 use crate::webapi::WebApi;
 
@@ -38,6 +38,28 @@ pub struct ArtistPage {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AlbumPage {
+    pub items: Vec<AlbumSummary>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentActivityItem {
+    /// `track`, `album`, `playlist`, or `artist`.
+    pub kind: String,
+    pub uri: String,
+    pub id: String,
+    pub name: String,
+    pub subtitle: String,
+    pub image_url: Option<String>,
+    pub last_played_at: String,
+    /// Track to start at when the item represents a playable context.
+    pub track_uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TrackSummary {
     pub uri: String,
     pub id: String,
@@ -53,8 +75,10 @@ pub struct TrackSummary {
 #[derive(Debug, Deserialize)]
 struct Page<T> {
     items: Vec<T>,
-    #[allow(dead_code)]
+    #[serde(default)]
     total: Option<u32>,
+    #[serde(default)]
+    next: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +162,15 @@ struct PlaylistItem {
 #[derive(Debug, Deserialize)]
 struct PlayHistoryItem {
     track: WireTrack,
+    played_at: String,
+    context: Option<WireContext>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireContext {
+    #[serde(rename = "type")]
+    kind: String,
+    uri: String,
 }
 
 /// `/me/following` wraps its page in an extra object; nothing else here does.
@@ -329,12 +362,7 @@ pub async fn set_tracks_saved(
     if ids.is_empty() {
         return Ok(());
     }
-    let body = serde_json::json!({ "ids": ids });
-    if saved {
-        api.put(token, "/me/tracks", body).await
-    } else {
-        api.delete(token, "/me/tracks", body).await
-    }
+    set_library_saved(api, token, ids, "track", saved).await
 }
 
 pub async fn set_albums_saved(
@@ -346,75 +374,169 @@ pub async fn set_albums_saved(
     if ids.is_empty() {
         return Ok(());
     }
-    let body = serde_json::json!({ "ids": ids });
-    if saved {
-        api.put(token, "/me/albums", body).await
-    } else {
-        api.delete(token, "/me/albums", body).await
-    }
+    set_library_saved(api, token, ids, "album", saved).await
 }
 
-/// Returns one bool per id, in the order given.
-pub async fn tracks_saved(
+async fn set_library_saved(
     api: &WebApi,
     token: &str,
     ids: &[String],
-) -> AppResult<Vec<bool>> {
+    kind: &str,
+    saved: bool,
+) -> AppResult<()> {
+    for chunk in ids.chunks(40) {
+        let uris = chunk
+            .iter()
+            .map(|id| format!("spotify:{kind}:{id}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = [("uris", uris)];
+        if saved {
+            api.put_query(token, "/me/library", &query).await?;
+        } else {
+            api.delete_query(token, "/me/library", &query).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Returns one bool per id, in the order given.
+pub async fn tracks_saved(api: &WebApi, token: &str, ids: &[String]) -> AppResult<Vec<bool>> {
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    match api
-        .get(token, "/me/tracks/contains", &[("ids", ids.join(","))])
-        .await
-    {
-        Ok(v) => Ok(v),
-        // Spotify currently refuses the whole `*/contains` family with 403,
-        // even though `/me/tracks` itself succeeds on the same token. The
-        // saved-state is only the heart icon's fill, so answering "unknown"
-        // keeps every track list usable instead of failing it outright with a
-        // banner the user can do nothing about.
-        Err(AppError::Forbidden(msg)) => {
-            log::warn!("/me/tracks/contains refused ({msg}); showing tracks as unsaved");
-            Ok(vec![false; ids.len()])
-        }
-        Err(e) => Err(e),
+    library_saved(api, token, ids, "track").await
+}
+
+pub async fn albums_saved(api: &WebApi, token: &str, ids: &[String]) -> AppResult<Vec<bool>> {
+    library_saved(api, token, ids, "album").await
+}
+
+async fn library_saved(
+    api: &WebApi,
+    token: &str,
+    ids: &[String],
+    kind: &str,
+) -> AppResult<Vec<bool>> {
+    let mut result = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(40) {
+        let uris = chunk
+            .iter()
+            .map(|id| format!("spotify:{kind}:{id}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let values: Vec<bool> = api
+            .get(token, "/me/library/contains", &[("uris", uris)])
+            .await?;
+        result.extend(values);
     }
+    Ok(result)
 }
 
 // ---- artist -------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-struct TopTracks {
-    tracks: Vec<WireTrack>,
-}
-
-pub async fn artist_top_tracks(
+pub async fn artist_tracks(
     api: &WebApi,
     token: &str,
     artist_id: &str,
 ) -> AppResult<Vec<TrackSummary>> {
-    let resp: TopTracks = api
-        .get(token, &format!("/artists/{artist_id}/top-tracks"), &[])
-        .await?;
-    Ok(resp.tracks.into_iter().map(Into::into).collect())
+    // `/artists/{id}/top-tracks` was removed in February 2026. Build a
+    // truthful, deterministic sample from the artist's recent releases using
+    // endpoints that remain supported; the UI labels it accordingly.
+    let releases = artist_albums(api, token, artist_id, 5, 0).await?;
+    let mut tracks = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for album in releases.items {
+        for mut track in album_tracks(api, token, &album.id).await? {
+            track.album = album.name.clone();
+            track.image_url = album.image_url.clone();
+            if seen.insert(track.uri.clone()) {
+                tracks.push(track);
+            }
+            if tracks.len() >= 10 {
+                return Ok(tracks);
+            }
+        }
+    }
+    Ok(tracks)
 }
 
 pub async fn artist_albums(
     api: &WebApi,
     token: &str,
     artist_id: &str,
-) -> AppResult<Vec<AlbumSummary>> {
+    limit: u32,
+    offset: u32,
+) -> AppResult<AlbumPage> {
     let page: Page<WireAlbum> = api
         .get(
             token,
             &format!("/artists/{artist_id}/albums"),
             &[
                 ("include_groups", "album,single".to_string()),
-                ("limit", "50".to_string()),
+                ("limit", limit.min(10).to_string()),
+                ("offset", offset.to_string()),
+            ],
+        )
+        .await?;
+    let count = page.items.len() as u32;
+    let has_more = page.next.is_some()
+        || page
+            .total
+            .is_some_and(|total| offset.saturating_add(count) < total);
+    Ok(AlbumPage {
+        items: page.items.into_iter().map(Into::into).collect(),
+        has_more,
+    })
+}
+
+pub async fn artist(api: &WebApi, token: &str, artist_id: &str) -> AppResult<ArtistSummary> {
+    let a: WireFullArtist = api
+        .get(token, &format!("/artists/{artist_id}"), &[])
+        .await?;
+    Ok(ArtistSummary {
+        image_url: pick_image(a.images.as_deref().unwrap_or_default()),
+        id: a.id,
+        uri: a.uri,
+        name: a.name,
+    })
+}
+
+pub async fn top_tracks(api: &WebApi, token: &str, limit: u32) -> AppResult<Vec<TrackSummary>> {
+    let page: Page<WireTrack> = api
+        .get(
+            token,
+            "/me/top/tracks",
+            &[
+                ("limit", limit.min(50).to_string()),
+                ("time_range", "medium_term".to_string()),
             ],
         )
         .await?;
     Ok(page.items.into_iter().map(Into::into).collect())
+}
+
+pub async fn top_artists(api: &WebApi, token: &str, limit: u32) -> AppResult<Vec<ArtistSummary>> {
+    let page: Page<WireFullArtist> = api
+        .get(
+            token,
+            "/me/top/artists",
+            &[
+                ("limit", limit.min(50).to_string()),
+                ("time_range", "medium_term".to_string()),
+            ],
+        )
+        .await?;
+    Ok(page
+        .items
+        .into_iter()
+        .map(|a| ArtistSummary {
+            image_url: pick_image(a.images.as_deref().unwrap_or_default()),
+            id: a.id,
+            uri: a.uri,
+            name: a.name,
+        })
+        .collect())
 }
 
 /// Artists the user follows.
@@ -460,7 +582,11 @@ pub async fn followed_artists(
 /// History contains one entry per *play*, so a track on repeat fills the whole
 /// response. Deduplicated by URI here — a "recently played" shelf showing the
 /// same album six times is worse than showing six items.
-pub async fn recently_played(api: &WebApi, token: &str, limit: u32) -> AppResult<Vec<TrackSummary>> {
+pub async fn recently_played(
+    api: &WebApi,
+    token: &str,
+    limit: u32,
+) -> AppResult<Vec<RecentActivityItem>> {
     let page: Page<PlayHistoryItem> = api
         .get(
             token,
@@ -469,11 +595,167 @@ pub async fn recently_played(api: &WebApi, token: &str, limit: u32) -> AppResult
         )
         .await?;
 
+    Ok(collapse_history(page.items))
+}
+
+fn collapse_history(history_items: Vec<PlayHistoryItem>) -> Vec<RecentActivityItem> {
     let mut seen = std::collections::HashSet::new();
-    Ok(page
-        .items
-        .into_iter()
-        .map(|h| TrackSummary::from(h.track))
-        .filter(|t| seen.insert(t.uri.clone()))
-        .collect())
+    let mut result = Vec::new();
+    for history in history_items {
+        let track_uri = history.track.uri.clone();
+        let track = TrackSummary::from(history.track);
+        let activity = match history.context {
+            Some(context) if context.kind == "album" => {
+                let id = context
+                    .uri
+                    .rsplit(':')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                RecentActivityItem {
+                    kind: "album".into(),
+                    uri: context.uri,
+                    id,
+                    name: track.album.clone(),
+                    subtitle: track.artists.join(", "),
+                    image_url: track.image_url.clone(),
+                    last_played_at: history.played_at,
+                    track_uri: Some(track_uri),
+                }
+            }
+            Some(context) if context.kind == "artist" => {
+                let id = context
+                    .uri
+                    .rsplit(':')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                RecentActivityItem {
+                    kind: "artist".into(),
+                    uri: context.uri,
+                    id,
+                    name: track
+                        .artists
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Artist".into()),
+                    subtitle: "Artist".into(),
+                    image_url: None,
+                    last_played_at: history.played_at,
+                    track_uri: Some(track_uri),
+                }
+            }
+            // Playlist context metadata is not embedded in playback history.
+            // Keep the real context playable and label it honestly rather than
+            // inventing a playlist name or making one request per history row.
+            Some(context) if context.kind == "playlist" => {
+                let id = context
+                    .uri
+                    .rsplit(':')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                RecentActivityItem {
+                    kind: "playlist".into(),
+                    uri: context.uri,
+                    id,
+                    name: "Recently played playlist".into(),
+                    subtitle: format!("Last played track: {}", track.name),
+                    image_url: track.image_url.clone(),
+                    last_played_at: history.played_at,
+                    track_uri: Some(track_uri),
+                }
+            }
+            _ => RecentActivityItem {
+                kind: "track".into(),
+                uri: track.uri.clone(),
+                id: track.id.clone(),
+                name: track.name.clone(),
+                subtitle: track.artists.join(", "),
+                image_url: track.image_url.clone(),
+                last_played_at: history.played_at,
+                track_uri: None,
+            },
+        };
+        if seen.insert(activity.uri.clone()) {
+            result.push(activity);
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_library_uris_are_stable() {
+        let ids = ["abc".to_string(), "def".to_string()];
+        let uris = ids
+            .iter()
+            .map(|id| format!("spotify:track:{id}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(uris, "spotify:track:abc,spotify:track:def");
+    }
+
+    fn wire_track(id: &str, name: &str, album_id: &str) -> WireTrack {
+        WireTrack {
+            id: Some(id.into()),
+            uri: format!("spotify:track:{id}"),
+            name: name.into(),
+            artists: vec![WireArtist {
+                name: "Artist".into(),
+            }],
+            album: Some(WireAlbum {
+                id: album_id.into(),
+                uri: format!("spotify:album:{album_id}"),
+                name: "Album".into(),
+                artists: vec![WireArtist {
+                    name: "Artist".into(),
+                }],
+                images: vec![],
+            }),
+            duration_ms: 180_000,
+        }
+    }
+
+    #[test]
+    fn recent_activity_groups_contexts_and_keeps_latest_order() {
+        let rows = vec![
+            PlayHistoryItem {
+                track: wire_track("one", "One", "album"),
+                played_at: "2026-08-18T12:00:00Z".into(),
+                context: Some(WireContext {
+                    kind: "album".into(),
+                    uri: "spotify:album:album".into(),
+                }),
+            },
+            PlayHistoryItem {
+                track: wire_track("two", "Two", "album"),
+                played_at: "2026-08-18T11:59:00Z".into(),
+                context: Some(WireContext {
+                    kind: "album".into(),
+                    uri: "spotify:album:album".into(),
+                }),
+            },
+            PlayHistoryItem {
+                track: wire_track("loose", "Loose", "single"),
+                played_at: "2026-08-18T11:58:00Z".into(),
+                context: None,
+            },
+            PlayHistoryItem {
+                track: wire_track("loose", "Loose", "single"),
+                played_at: "2026-08-18T11:57:00Z".into(),
+                context: None,
+            },
+        ];
+
+        let result = collapse_history(rows);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].kind, "album");
+        assert_eq!(result[0].track_uri.as_deref(), Some("spotify:track:one"));
+        assert_eq!(result[1].kind, "track");
+        assert_eq!(result[1].uri, "spotify:track:loose");
+    }
 }

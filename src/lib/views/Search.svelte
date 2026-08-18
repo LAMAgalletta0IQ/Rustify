@@ -31,7 +31,7 @@
     try {
       results = await api.searchSpotify(q);
     } catch (e) {
-      store.error = api.asAppError(e).message;
+      store.handleError(e);
     } finally {
       loading = false;
     }

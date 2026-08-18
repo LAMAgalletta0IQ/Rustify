@@ -8,7 +8,6 @@
   // the dev watcher in vite.config.ts, so changing the icon needs a restart
   // rather than showing up on HMR.
   import iconUrl from "../src-tauri/icons/64x64.png";
-  import * as api from "./lib/api";
   import { store } from "./lib/store.svelte";
   import PlayerBar from "./lib/components/PlayerBar.svelte";
   import Home from "./lib/views/Home.svelte";
@@ -16,12 +15,15 @@
   import Login from "./lib/views/Login.svelte";
   import NowPlaying from "./lib/views/NowPlaying.svelte";
   import Search from "./lib/views/Search.svelte";
+  import Settings from "./lib/views/Settings.svelte";
+  import Profile from "./lib/views/Profile.svelte";
   import Setup from "./lib/views/Setup.svelte";
 
-  type Tab = "home" | "search" | "library";
+  type Tab = "home" | "search" | "library" | "settings";
 
   let tab = $state<Tab>("home");
   let nowPlayingOpen = $state(false);
+  let profileOpen = $state(false);
   let main: HTMLElement | null = $state(null);
 
   const appWindow = getCurrentWindow();
@@ -29,15 +31,23 @@
   function go(next: Tab) {
     tab = next;
     nowPlayingOpen = false;
+    profileOpen = false;
     // Each tab keeps its own component state, but they share one scroller.
     if (main) main.scrollTop = 0;
+  }
+
+  async function reconfigure() {
+    await store.run(async () => {
+      await store.logout();
+      store.setupNeeded = true;
+    });
   }
 
   onMount(() => store.init());
   onDestroy(() => store.destroy());
 </script>
 
-<div class="root">
+<div class="root" class:reduce-motion={store.settings.reduceMotion}>
   <!-- Colour wash behind every panel. Without something to refract, glass
        reads as flat grey. -->
   <div class="ambient"></div>
@@ -48,18 +58,20 @@
   {:else if store.setupNeeded || !store.auth.loggedIn}
     <!-- The title bar is gone with decorations, so Setup/Login need their own
          drag strip or the window becomes unmovable before sign-in. -->
-    <div class="predrag" data-tauri-drag-region>
-      <div class="wctl">
-        <button onclick={() => appWindow.minimize()} title="Minimize">&#9472;</button>
-        <button onclick={() => appWindow.toggleMaximize()} title="Maximize">&#9723;</button>
-        <button class="x" onclick={() => appWindow.close()} title="Close">&#10005;</button>
+    <div class="preauth">
+      <div class="predrag" data-tauri-drag-region>
+        <div class="wctl">
+          <button onclick={() => appWindow.minimize()} title="Minimize">&#9472;</button>
+          <button onclick={() => appWindow.toggleMaximize()} title="Maximize">&#9723;</button>
+          <button class="x" onclick={() => appWindow.close()} title="Close">&#10005;</button>
+        </div>
       </div>
+      {#if store.setupNeeded}
+        <Setup onDone={() => store.finishSetup()} />
+      {:else}
+        <Login />
+      {/if}
     </div>
-    {#if store.setupNeeded}
-      <Setup onDone={() => store.finishSetup()} />
-    {:else}
-      <Login />
-    {/if}
   {:else}
     <div class="shell">
       <header class="titlebar" data-tauri-drag-region>
@@ -69,18 +81,28 @@
         </div>
 
         <nav class="tabs">
-          <button class:on={tab === "home"} onclick={() => go("home")}>Home</button>
-          <button class:on={tab === "search"} onclick={() => go("search")}>
+          <button class:on={tab === "home"} aria-current={tab === "home" ? "page" : undefined} onclick={() => go("home")}>Home</button>
+          <button class:on={tab === "search"} aria-current={tab === "search" ? "page" : undefined} onclick={() => go("search")}>
             Search
           </button>
-          <button class:on={tab === "library"} onclick={() => go("library")}>
+          <button class:on={tab === "library"} aria-current={tab === "library" ? "page" : undefined} onclick={() => go("library")}>
             Library
+          </button>
+          <button class:on={tab === "settings"} aria-current={tab === "settings" ? "page" : undefined} onclick={() => go("settings")}>
+            Settings
           </button>
         </nav>
 
         <div class="spacer" data-tauri-drag-region></div>
 
-        <button class="who" onclick={() => store.run(api.logout)} title="Log out">
+        <button
+          class="who"
+          onclick={() => {
+            profileOpen = true;
+            nowPlayingOpen = false;
+          }}
+          title="Open profile"
+        >
           {#if store.auth.avatarUrl}
             <img src={store.auth.avatarUrl} alt="" width="24" height="24" />
           {:else}
@@ -108,14 +130,18 @@
       {/if}
 
       <main bind:this={main}>
-        {#if nowPlayingOpen}
+        {#if profileOpen}
+          <Profile onBack={() => (profileOpen = false)} />
+        {:else if nowPlayingOpen}
           <NowPlaying onClose={() => (nowPlayingOpen = false)} />
         {:else if tab === "home"}
           <Home onBrowseLibrary={() => go("library")} />
         {:else if tab === "search"}
           <Search />
-        {:else}
+        {:else if tab === "library"}
           <Library />
+        {:else}
+          <Settings onReconfigure={reconfigure} />
         {/if}
       </main>
 
@@ -162,6 +188,7 @@
     filter: saturate(0.85) blur(70px);
     animation: drift 26s ease-in-out infinite alternate;
   }
+  .reduce-motion .ambient { animation: none; }
   @keyframes drift {
     from {
       transform: translate3d(-2%, -1%, 0) scale(1.05);
@@ -212,6 +239,14 @@
     justify-content: flex-end;
     height: 46px;
   }
+  .preauth {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .preauth .predrag { flex: none; }
 
   /* Pinned to the root's edges rather than `height: 100%`. A percentage height
      silently collapses to content height if any ancestor's height is not
@@ -272,7 +307,7 @@
   .tabs button {
     padding: 5px 16px;
     border-radius: 999px;
-    color: var(--fg-dim);
+    color: rgba(245, 240, 230, 0.72);
     font-size: 13px;
     transition: background 0.18s, color 0.18s;
   }

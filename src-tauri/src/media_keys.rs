@@ -30,33 +30,33 @@ pub fn register(app: &AppHandle) {
         let shortcut = Shortcut::new(None, code);
         let handle = app.clone();
 
-        let res = app.global_shortcut().on_shortcut(shortcut, move |_, _, event| {
-            // Fire once per press, not again on release.
-            if event.state() != ShortcutState::Pressed {
-                return;
-            }
-            let handle = handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let state = handle.state::<AppState>();
-                let guard = state.spotify.read().await;
-                let Some(session) = guard.as_ref() else {
+        let res = app
+            .global_shortcut()
+            .on_shortcut(shortcut, move |_, _, event| {
+                // Fire once per press, not again on release.
+                if event.state() != ShortcutState::Pressed {
                     return;
-                };
-                let result = match action {
-                    Action::PlayPause => session.spirc.play_pause(),
-                    Action::Next => session.spirc.next(),
-                    Action::Prev => session.spirc.prev(),
-                };
-                if let Err(e) = result {
-                    log::warn!("media key command failed: {e}");
                 }
+                let handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = handle.state::<AppState>();
+                    let guard = state.spotify.read().await;
+                    let Some(session) = guard.as_ref() else {
+                        return;
+                    };
+                    let result = match action {
+                        Action::PlayPause => session.spirc.play_pause(),
+                        Action::Next => session.spirc.next(),
+                        Action::Prev => session.spirc.prev(),
+                    };
+                    if let Err(e) = result {
+                        log::warn!("media key command failed: {e}");
+                    }
+                });
             });
-        });
 
         if let Err(e) = res {
-            log::warn!(
-                "could not register media key {code:?} (another player may hold it): {e}"
-            );
+            log::warn!("could not register media key {code:?} (another player may hold it): {e}");
         }
     }
 }

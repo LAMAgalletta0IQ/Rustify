@@ -75,10 +75,10 @@ None. Documentation only.
 
 - **The prerequisites table records verified versions** for this machine
   (Rust 1.97.1, Node 24.x, WebView2 151.x), not minimums.
-- **The status claims are honest and worth preserving:** the app compiles,
-  links and launches, but login, playback, Connect and the Web API calls are
-  **not yet exercised against a live Premium account**. See
-  [[known-limitations]].
+- The README's older verification caveat is superseded: on 2026-08-18 the app
+  was exercised against a live Premium account through restore, passive remote
+  playback, metadata/library/search, Home, artist, lyrics, and reversible
+  track/album mutations. See [[2026-08-capability-audit]].
 
 ## See also
 

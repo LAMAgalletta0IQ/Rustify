@@ -5,9 +5,10 @@ use std::time::{Duration, Instant};
 use librespot::core::config::SessionConfig;
 use librespot_oauth::{OAuthClientBuilder, OAuthToken};
 use serde::{Deserialize, Serialize};
+use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
-use crate::state::{AuthState, TokenStore};
+use crate::state::{events, AppState, AuthState, PlaybackState, TokenStore};
 use crate::webapi::WebApi;
 
 /// Preferred loopback port for the streaming login. Spotify's own desktop
@@ -106,9 +107,35 @@ pub fn webapi_client_id(data_dir: &Path) -> AppResult<String> {
 /// Persisted app settings, distinct from `tokens.json`: this survives logout,
 /// since the Client ID belongs to the Spotify app the user registered, not to
 /// any one login session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
+    #[serde(default)]
     pub webapi_client_id: Option<String>,
+    #[serde(default = "default_volume_percent")]
+    pub default_volume_percent: u8,
+    #[serde(default)]
+    pub reduce_motion: bool,
+    #[serde(default = "default_cache_limit_mb")]
+    pub cache_limit_mb: u32,
+}
+
+const fn default_volume_percent() -> u8 {
+    50
+}
+
+const fn default_cache_limit_mb() -> u32 {
+    2048
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            webapi_client_id: None,
+            default_volume_percent: default_volume_percent(),
+            reduce_motion: false,
+            cache_limit_mb: default_cache_limit_mb(),
+        }
+    }
 }
 
 fn settings_path(data_dir: &Path) -> PathBuf {
@@ -118,6 +145,10 @@ fn settings_path(data_dir: &Path) -> PathBuf {
 pub fn load_settings(data_dir: &Path) -> Option<Settings> {
     let raw = std::fs::read_to_string(settings_path(data_dir)).ok()?;
     serde_json::from_str(&raw).ok()
+}
+
+pub fn settings_or_default(data_dir: &Path) -> Settings {
+    load_settings(data_dir).unwrap_or_default()
 }
 
 pub fn save_settings(data_dir: &Path, settings: &Settings) -> AppResult<()> {
@@ -337,10 +368,7 @@ pub async fn restore_login(stored: &StoredTokens, data_dir: &Path) -> AppResult<
     // rather than failing the restore. `and_then(non_empty)` guards files
     // written before the check above, which may hold `""` rather than a real
     // token.
-    let webapi_rt = stored
-        .webapi_refresh_token
-        .as_deref()
-        .and_then(non_empty);
+    let webapi_rt = stored.webapi_refresh_token.as_deref().and_then(non_empty);
     let id = webapi_client_id(data_dir)?;
 
     match webapi_rt.as_deref() {
@@ -369,7 +397,9 @@ pub async fn restore_login(stored: &StoredTokens, data_dir: &Path) -> AppResult<
                 // floor and lock the user out on the next launch. Degrade to
                 // the shared token instead; the caller persists the rotation.
                 Err(e) => {
-                    log::warn!("web api token refresh failed, falling back to the shared token: {e}");
+                    log::warn!(
+                        "web api token refresh failed, falling back to the shared token: {e}"
+                    );
                     Ok(SessionTokens::shared(streaming))
                 }
             }
@@ -413,6 +443,7 @@ const MIN_REFRESH_DELAY: Duration = Duration::from_secs(30);
 /// its own connection and internal token provider once connected, so it does
 /// not need re-authenticating on this schedule.
 pub fn spawn_refresher(
+    app: tauri::AppHandle,
     client_id: String,
     mut stored: StoredTokens,
     tokens: TokenStore,
@@ -434,7 +465,11 @@ pub fn spawn_refresher(
         // actually bind the port — it is only echoed to the token endpoint.
         format!("http://127.0.0.1:{STREAMING_PORT}/login")
     };
-    let scopes: &[&str] = if split { WEBAPI_SCOPES } else { STREAMING_SCOPES };
+    let scopes: &[&str] = if split {
+        WEBAPI_SCOPES
+    } else {
+        STREAMING_SCOPES
+    };
 
     tauri::async_runtime::spawn(async move {
         loop {
@@ -466,6 +501,26 @@ pub fn spawn_refresher(
                     log::info!("web api token refreshed");
                 }
                 Err(e) => {
+                    if is_grant_rejected(&e) {
+                        // Refresh tokens now expire after six months. This is
+                        // terminal, not a transient network failure: clear the
+                        // rejected credential and move the whole app to the
+                        // logged-out state instead of retrying forever.
+                        log::warn!("web api refresh grant expired; ending the session: {e}");
+                        clear_stored_tokens(&data_dir);
+                        tokens.set(String::new()).await;
+                        let state = app.state::<AppState>();
+                        if let Some(session) = state.spotify.write().await.take() {
+                            let _ = session.spirc.shutdown();
+                            session.remote_task.abort();
+                            // `session.refresh_task` is this task. Dropping its
+                            // handle detaches it, and returning below ends it.
+                        }
+                        *state.auth.write().await = AuthState::default();
+                        *state.playback.write().await = PlaybackState::default();
+                        let _ = app.emit(events::AUTH, AuthState::default());
+                        return;
+                    }
                     // Transient network failure is likely; retry on the floor
                     // rather than killing the session.
                     log::warn!("token refresh failed, retrying shortly: {e}");
@@ -498,19 +553,37 @@ struct ImageObj {
 pub async fn fetch_profile_require_premium(api: &WebApi, token: &str) -> AppResult<AuthState> {
     let me: MeResponse = api.get(token, "/me", &[]).await?;
 
-    let product = me.product.clone().unwrap_or_else(|| "unknown".into());
-    if product != "premium" {
-        return Err(AppError::PremiumRequired(product));
+    // Spotify removed `product` from `/me` for newer Development Mode apps in
+    // February 2026. Enforce Premium when the field is present; when omitted,
+    // let librespot perform the authoritative streaming capability check.
+    if let Some(product) = me.product.as_deref() {
+        if product != "premium" {
+            return Err(AppError::PremiumRequired(product.to_string()));
+        }
     }
 
     Ok(AuthState {
         logged_in: true,
         display_name: me.display_name,
         user_id: Some(me.id),
-        product: Some(product),
+        product: me.product,
         avatar_url: me
             .images
             .and_then(|imgs| imgs.into_iter().next())
             .map(|i| i.url),
     })
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_files_receive_functional_defaults() {
+        let settings: Settings = serde_json::from_str(r#"{"webapi_client_id":"client"}"#).unwrap();
+        assert_eq!(settings.webapi_client_id.as_deref(), Some("client"));
+        assert_eq!(settings.default_volume_percent, 50);
+        assert_eq!(settings.cache_limit_mb, 2048);
+        assert!(!settings.reduce_motion);
+    }
 }

@@ -8,7 +8,7 @@ tags: [file, backend, webapi, rust]
 ## Purpose
 
 A minimal HTTP client for the Spotify Web API. Centralises the base URL, the
-bearer header, error unwrapping, and the `204 No Content` quirk so the four
+bearer header, error unwrapping, and empty-success handling so the feature
 Web API modules stay free of HTTP concerns.
 
 ## Key items
@@ -26,13 +26,14 @@ The core path used by every verb:
 2. **If `429`, read the `Retry-After` header** and return
    `AppError::RateLimited { retry_after }`, logging a warning. Handled before
    anything else because it is recoverable by waiting — see [[rate-limiting]].
-3. **If `204 No Content`, deserialise from the literal `"null"`** — player
-   PUT/POST endpoints answer with an empty body, which would otherwise fail
-   JSON parsing.
+3. Read the body, then map HTTP status to typed `BadRequest`,
+   `SessionExpired`, `Forbidden`, `Unavailable`, `RateLimited`, or
+   `ServiceUnavailable` as appropriate.
 4. On non-success, extract `error.message` from Spotify's
    `{"error":{"status","message"}}` envelope, falling back to the raw body, or
    to `"no response body"` when the body is empty.
-5. Otherwise deserialise into `T`.
+5. On any successful empty body (200 or 204), deserialize the literal `null`;
+   otherwise deserialize the body into `T`.
 
 ### Retry constants
 ```rust
@@ -46,13 +47,16 @@ const MAX_RETRIES: u32 = 2;
   `Retry-After` (or `1 << attempt` when absent), up to `MAX_AUTO_RETRY_SECS`
   and `MAX_RETRIES`. Longer waits return `RateLimited` to the caller. The
   request is rebuilt each attempt, since a `RequestBuilder` is consumed on send.
-- `put`, `post`, `delete` — **no retry**. Repeating a `POST /me/player/queue`
+- `put`, `post`, `put_query`, `delete_query` — **no retry**. Repeating a
+  `POST /me/player/queue`
   would double-queue a track.
+- Query-only library mutations send an explicit `Content-Length: 0`; Spotify's
+  edge returned 411 for a bodyless PUT during live verification.
 
 ## Inputs / outputs / side effects
 
-**Network I/O only.** Every outbound HTTP request in the app originates here
-(librespot's own traffic excepted).
+**Network I/O only.** Spotify Web API requests originate here. librespot and
+[[lyrics.rs]] own their separate traffic.
 
 ## Dependencies
 
@@ -72,8 +76,8 @@ const MAX_RETRIES: u32 = 2;
 - **An empty bearer token is called out explicitly.** Spotify answers a
   malformed `Authorization` header with **400**, not 401, so it is otherwise
   indistinguishable from a bad query.
-- **The `204` special case is load-bearing.** Without it, `transfer_playback`
-  and `add_to_queue` would report a parse error on success. `serde_json` maps
+- **Empty-success handling is load-bearing.** Without it, transfer, queue, and
+  generic library writes can report a parse error on success. `serde_json` maps
   `null` onto `()` and `Value::Null`, which is why the trick works.
 - **Error messages are unwrapped from Spotify's envelope**, so the frontend
   banner shows "Player command failed: Restriction violated" rather than raw
@@ -90,7 +94,7 @@ const MAX_RETRIES: u32 = 2;
 - **Only GETs retry**, and only through short windows. A minute-long
   `Retry-After` is returned to the UI so the user is not left watching a frozen
   view; [[Login.svelte]] runs a visible countdown instead.
-- Still no handling for `503` or generic transient failures — only 429.
+- 502/503/504 are `ServiceUnavailable`; writes are never silently retried.
 
 ## See also
 

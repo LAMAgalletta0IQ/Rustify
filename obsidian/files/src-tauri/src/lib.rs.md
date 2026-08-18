@@ -8,7 +8,7 @@ tags: [file, backend, entrypoint, rust]
 ## Purpose
 
 The crate root and application assembly point. Loads `.env`, declares every
-backend module, configures the Tauri builder, and registers all 33 commands.
+backend module, configures the Tauri builder, and registers all 43 commands.
 The single best file to read first — it is the table of contents for the
 backend.
 
@@ -48,7 +48,11 @@ kept from the Tauri template. Executes in order:
 5. **`tauri_plugin_global_shortcut`** — backs [[media_keys.rs]].
 6. **`.setup(...)`** — calls `media_keys::register(app.handle())`.
 7. **`.manage(AppState::new())`** — installs shared state ([[state.rs]]).
-8. **`.invoke_handler(generate_handler![...])`** — the 33 commands.
+8. **`.invoke_handler(generate_handler![...])`** — the 43 commands.
+
+Debug builds also register `tauri-plugin-mcp-bridge` on `127.0.0.1:9223` for
+Tauri MCP inspection. `cfg(debug_assertions)` removes it from the verified
+release/NSIS build; loopback binding prevents LAN exposure during development.
 9. **`.run(generate_context!())`** — reads [[tauri.conf.json]] at compile time;
    blocks until exit.
 
@@ -61,7 +65,9 @@ Grouped by comment in the source:
 | auth | `get_auth_state`, `get_login_info`, `login`, `restore_session`, `logout` |
 | playback | `get_playback`, `play`, `pause`, `play_pause`, `next_track`, `previous_track`, `seek`, `set_volume`, `set_shuffle`, `set_repeat`, `load_context`, `load_tracks` |
 | connect | `list_devices`, `transfer_playback`, `activate_this_device` |
-| library | `get_playlists`, `get_playlist_tracks`, `get_saved_tracks`, `get_saved_albums`, `get_album_tracks`, `get_followed_artists`, `get_recently_played`, `set_tracks_saved`, `set_albums_saved`, `get_tracks_saved`, `get_artist_top_tracks`, `get_artist_albums` |
+| library/home/artist | collection reads, context-aware recent activity, generic track/album saved state, artist identity/releases/tracks, user top tracks/artists |
+| settings | `get_settings`, `update_settings` |
+| lyrics | `get_lyrics` |
 | search | `search_spotify` |
 | queue | `get_queue`, `add_to_queue` |
 

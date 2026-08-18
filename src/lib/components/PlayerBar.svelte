@@ -10,15 +10,29 @@
   const pct = $derived(
     pb.durationMs > 0 ? (pb.positionMs / pb.durationMs) * 100 : 0,
   );
+  let seekDraft = $state<number | null>(null);
+  let volumeDraft = $state<number | null>(null);
+  const seekPct = $derived(seekDraft ?? pct);
+  const volumePct = $derived(volumeDraft ?? volumeToPercent(pb.volume));
 
-  function onSeek(e: Event) {
-    const v = Number((e.currentTarget as HTMLInputElement).value);
-    store.run(() => api.seek(Math.round((v / 100) * pb.durationMs)));
+  function previewSeek(e: Event) {
+    seekDraft = Number((e.currentTarget as HTMLInputElement).value);
   }
 
-  function onVolume(e: Event) {
+  function previewVolume(e: Event) {
+    volumeDraft = Number((e.currentTarget as HTMLInputElement).value);
+  }
+
+  async function onSeek(e: Event) {
     const v = Number((e.currentTarget as HTMLInputElement).value);
-    store.run(() => api.setVolume(v));
+    await store.run(() => api.seek(Math.round((v / 100) * pb.durationMs)));
+    seekDraft = null;
+  }
+
+  async function onVolume(e: Event) {
+    const v = Number((e.currentTarget as HTMLInputElement).value);
+    await store.run(() => api.setVolume(v));
+    volumeDraft = null;
   }
 
   function cycleRepeat() {
@@ -101,14 +115,16 @@
 
       <div class="scrub">
         <span class="t muted">{formatMs(pb.positionMs)}</span>
-        <span class="rail" style="--frac: {pct / 100}">
+        <span class="rail" class:disabled={!pb.track} style="--frac: {seekPct / 100}">
           <input
             type="range"
             min="0"
             max="100"
             step="0.1"
-            value={pct}
+            value={seekPct}
+            oninput={previewSeek}
             onchange={onSeek}
+            onblur={() => (seekDraft = null)}
             disabled={!pb.track}
             aria-label="Seek"
           />
@@ -122,13 +138,15 @@
       <svg class="vicon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 8a5 5 0 0 1 0 8" />
       </svg>
-      <span class="rail vol" style="--frac: {volumeToPercent(pb.volume) / 100}">
+      <span class="rail vol" style="--frac: {volumePct / 100}">
         <input
           type="range"
           min="0"
           max="100"
-          value={volumeToPercent(pb.volume)}
+          value={volumePct}
+          oninput={previewVolume}
           onchange={onVolume}
+          onblur={() => (volumeDraft = null)}
           aria-label="Volume"
         />
       </span>
@@ -278,26 +296,50 @@
   }
   .rail input[type="range"] {
     position: absolute;
-    inset: -6px 0;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
     width: 100%;
     height: 16px;
+    margin: 0;
+    padding: 0;
+    border: 0;
     -webkit-appearance: none;
     appearance: none;
-    background: none;
+    background: transparent;
     cursor: pointer;
+  }
+  .rail input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    border: 0;
+    background: transparent;
   }
   .rail input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 11px;
-    height: 11px;
+    width: var(--thumb);
+    height: var(--thumb);
+    margin-top: calc((4px - var(--thumb)) / 2);
+    border: 0;
     border-radius: 50%;
     background: var(--fg);
     opacity: 0;
-    transition: opacity 0.15s;
+    box-shadow: 0 0 0 0 rgba(255, 241, 224, 0.25);
+    transition: opacity 0.15s, box-shadow 0.15s;
   }
-  footer:hover .rail input[type="range"]::-webkit-slider-thumb {
+  .rail:hover input[type="range"]::-webkit-slider-thumb,
+  .rail input[type="range"]:active::-webkit-slider-thumb,
+  .rail input[type="range"]:focus-visible::-webkit-slider-thumb {
     opacity: 1;
   }
+  .rail input[type="range"]:focus-visible {
+    outline: none;
+  }
+  .rail input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgba(255, 241, 224, 0.22);
+  }
+  .rail.disabled { opacity: .45; }
+  .rail input[type="range"]:disabled { cursor: default; }
+  .rail input[type="range"]:disabled::-webkit-slider-thumb { opacity: 0; }
 
   .right {
     display: flex;

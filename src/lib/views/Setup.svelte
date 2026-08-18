@@ -87,9 +87,10 @@
 
 <style>
   .wrap {
-    display: grid;
-    place-items: center;
-    height: 100%;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
     padding: 24px;
     overflow-y: auto;
   }
@@ -104,6 +105,7 @@
     border: 1px solid var(--hairline);
     border-radius: var(--r-lg);
     backdrop-filter: blur(var(--blur));
+    margin: auto;
   }
   h1 {
     margin: 0;

@@ -1,0 +1,11 @@
+# Suggested commands
+- Frontend dev: `npm run dev`
+- Full Tauri dev: `npm run tauri dev`
+- Type/style diagnostics: `npm run check`
+- Frontend production bundle: `npm run build`
+- Rust format check: `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- Rust lint: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`
+- Rust tests/check: `cargo test --manifest-path src-tauri/Cargo.toml`; `cargo check --manifest-path src-tauri/Cargo.toml`
+- Release executable without bundler download: `npm run tauri build -- --no-bundle`
+- Restore dependency pin: `cargo update --manifest-path src-tauri/Cargo.toml -p vergen --precise 9.0.6`
+- Windows file search: `rg --files`; content search: `rg PATTERN PATH`.

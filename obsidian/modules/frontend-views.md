@@ -14,11 +14,14 @@ stays visible beneath all of them.
 | --- | --- | --- |
 | [[Setup.svelte]] | `store.setupNeeded` (no Web API Client ID configured yet) | `get_login_info`, `set_client_id` |
 | [[Login.svelte]] | `!store.setupNeeded && !store.auth.loggedIn` | `login` command |
-| [[Home.svelte]] | `tab === "home"` | Playlists, saved albums, liked songs |
+| [[Home.svelte]] | `tab === "home"` | Recent contexts, top tracks/artists, releases, playlist fallback |
 | [[Search.svelte]] | `tab === "search"` | `search_spotify` |
-| [[NowPlaying.svelte]] | `nowPlayingOpen` (overlay) | Store + `get_queue` |
+| [[Library.svelte]] | `tab === "library"` | Saved collections/followed artists |
+| [[Settings.svelte]] | `tab === "settings"` | Persisted functional settings + integration status |
+| [[Profile.svelte]] | Account button | Current session, top items, playlists |
+| [[NowPlaying.svelte]] | `nowPlayingOpen` (overlay) | Store + queue + LRCLIB lyrics |
 | [[AlbumView.svelte]] | Drill-down from search/artist | `get_album_tracks` |
-| [[ArtistView.svelte]] | Drill-down from search | Top tracks + albums |
+| [[ArtistView.svelte]] | Drill-down from search/Home | Artist identity + release-derived tracks + paged releases |
 
 ## Navigation
 
@@ -37,18 +40,18 @@ App.svelte
 ├── Setup.svelte                    (no Client ID configured yet)
 ├── Login.svelte                    (logged out)
 └── logged in
-    ├── Home.svelte ──► detail (inline, not a separate view)
+    ├── Home.svelte ──► Playlist / Album / Artist views
     ├── Search.svelte
     │   ├── AlbumView.svelte
     │   └── ArtistView.svelte ──► AlbumView.svelte
-    └── NowPlaying.svelte           (overlay)
+    ├── Library.svelte
+    ├── Settings.svelte
+    ├── Profile.svelte              (account area)
+    └── NowPlaying.svelte           (overlay with lyrics/queue)
 ```
 
-> **Asymmetry worth noting:** [[Home.svelte]] renders playlist/album detail
-> *inline* via a `detail` object, while [[Search.svelte]] delegates to the
-> standalone [[AlbumView.svelte]]. Two different patterns for a similar job —
-> Home's predates the extracted views. Consolidating would be a reasonable
-> cleanup.
+Home and Search both reuse the standalone album/artist/playlist detail views;
+their local state only decides which drill-down is active.
 
 ## Shared patterns
 

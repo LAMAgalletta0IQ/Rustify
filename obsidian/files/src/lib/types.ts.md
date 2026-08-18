@@ -21,8 +21,11 @@ in sync with `src-tauri/src/{state,library,search,connect,queue}.rs`.
 | `AuthState` | `AuthState` | [[state.rs]] |
 | `Device` | `Device` | [[connect.rs]] |
 | `TrackSummary`, `PlaylistSummary`, `AlbumSummary` | same | [[library.rs]] |
+| `AlbumPage`, `RecentActivityItem` | same | [[library.rs]] |
 | `ArtistSummary`, `PlaylistHit`, `SearchResults` | same | [[search.rs]] |
 | `QueueView` | `QueueView` | [[queue.rs]] |
+| `LyricsResult`, `LyricsLine` | same | [[lyrics.rs]] |
+| `AppSettings` | `commands::AppSettings` | [[commands.rs]] |
 
 `AppErrorPayload["kind"]` is a **string-literal union** matching `AppError::kind`,
 so branching on it is exhaustively checked in TypeScript even though nothing

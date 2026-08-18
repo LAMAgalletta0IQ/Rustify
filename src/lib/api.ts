@@ -1,14 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AlbumSummary,
+  AlbumPage,
+  AppSettings,
   AppErrorPayload,
   ArtistPage,
+  ArtistSummary,
   AuthState,
   Device,
   LoginInfo,
+  LyricsResult,
   PlaybackState,
   PlaylistSummary,
   QueueView,
+  RecentActivityItem,
   SearchResults,
   TrackSummary,
 } from "./types";
@@ -41,6 +46,9 @@ export const setClientId = (clientId: string) =>
 export const login = () => invoke<AuthState>("login");
 export const restoreSession = () => invoke<AuthState>("restore_session");
 export const logout = () => invoke<void>("logout");
+export const getSettings = () => invoke<AppSettings>("get_settings");
+export const updateSettings = (settings: AppSettings) =>
+  invoke<AppSettings>("update_settings", { settings });
 
 // ---- playback -----------------------------------------------------------
 export const getPlayback = () => invoke<PlaybackState>("get_playback");
@@ -100,7 +108,7 @@ export const getAlbumTracks = (albumId: string) =>
 export const getFollowedArtists = (limit?: number, after?: string) =>
   invoke<ArtistPage>("get_followed_artists", { limit, after });
 export const getRecentlyPlayed = (limit?: number) =>
-  invoke<TrackSummary[]>("get_recently_played", { limit });
+  invoke<RecentActivityItem[]>("get_recently_played", { limit });
 export const setTracksSaved = (ids: string[], saved: boolean) =>
   invoke<void>("set_tracks_saved", { ids, saved });
 export const setAlbumsSaved = (ids: string[], saved: boolean) =>
@@ -108,10 +116,30 @@ export const setAlbumsSaved = (ids: string[], saved: boolean) =>
 /** Returns one bool per id, in the order given. */
 export const getTracksSaved = (ids: string[]) =>
   invoke<boolean[]>("get_tracks_saved", { ids });
+export const getAlbumsSaved = (ids: string[]) =>
+  invoke<boolean[]>("get_albums_saved", { ids });
 export const getArtistTopTracks = (artistId: string) =>
   invoke<TrackSummary[]>("get_artist_top_tracks", { artistId });
-export const getArtistAlbums = (artistId: string) =>
-  invoke<AlbumSummary[]>("get_artist_albums", { artistId });
+export const getArtistAlbums = (artistId: string, limit = 10, offset = 0) =>
+  invoke<AlbumPage>("get_artist_albums", { artistId, limit, offset });
+export const getArtist = (artistId: string) =>
+  invoke<ArtistSummary>("get_artist", { artistId });
+export const getTopTracks = (limit?: number) =>
+  invoke<TrackSummary[]>("get_top_tracks", { limit });
+export const getTopArtists = (limit?: number) =>
+  invoke<ArtistSummary[]>("get_top_artists", { limit });
+export const getLyrics = (
+  trackName: string,
+  artistName: string,
+  albumName: string,
+  durationMs: number,
+) =>
+  invoke<LyricsResult>("get_lyrics", {
+    trackName,
+    artistName,
+    albumName,
+    durationMs,
+  });
 
 // ---- search -------------------------------------------------------------
 export const searchSpotify = (query: string, limit?: number) =>

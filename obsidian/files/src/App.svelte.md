@@ -16,8 +16,9 @@ and keeps [[PlayerBar.svelte]] permanently mounted.
 ### State
 | Name | Type | Purpose |
 | --- | --- | --- |
-| `tab` | `"home" \| "search"` | Active tab |
+| `tab` | `"home" \| "search" \| "library" \| "settings"` | Active tab |
 | `nowPlayingOpen` | `boolean` | Now-playing overlay |
+| `profileOpen` | `boolean` | Account/profile area |
 
 ### Lifecycle
 ```svelte
@@ -33,9 +34,9 @@ onDestroy(() => store.destroy());
 {:else if setupNeeded
        || !loggedIn}         → Setup.svelte | Login.svelte (drag strip + wctl)
 {:else}
-  header  (tabs, avatar, display name, log out)
+  header  (four tabs, avatar/display name opens Profile)
   banner  (store.error, dismissible)
-  main    → NowPlaying | Home | Search
+  main    → Profile | NowPlaying | Home | Search | Library | Settings
   PlayerBar.svelte
 {/if}
 ```
@@ -44,21 +45,23 @@ because both are "the window before the main shell exists" — the inner
 `{#if store.setupNeeded}` picks between them.
 
 ### Layout
-`.shell` is a CSS grid with rows `auto auto 1fr auto` — header, banner, scrolling
-content, player bar. Only `main` scrolls (`overflow-y: auto; min-height: 0`);
-the `min-height: 0` is required or the grid row refuses to shrink and the page
-scrolls as a whole.
+`.shell` is an absolute flex column. Only `main` grows and scrolls
+(`flex: 1; overflow-y: auto; min-height: 0`). Setup/Login live in a separate
+absolute `.preauth` flex column so the 46 px custom drag strip is subtracted
+from their usable viewport instead of making them one title bar too tall.
 
 ## Inputs / outputs / side effects
 
 **Inputs:** `store.booting`, `store.setupNeeded`, `store.auth`, `store.error`.
-**Side effects:** initialises and tears down the store; triggers `logout`.
+**Side effects:** initialises/tears down the store and explicitly replaces the
+Spotify integration when requested from Settings.
 
 ## Dependencies
 
-**Imports:** `svelte` (`onMount`, `onDestroy`), [[api.ts]],
+**Imports:** `svelte` (`onMount`, `onDestroy`),
 [[store.svelte.ts]], [[PlayerBar.svelte]], [[Home.svelte]], [[Login.svelte]],
-[[Setup.svelte]], [[NowPlaying.svelte]], [[Search.svelte]], and
+[[Setup.svelte]], [[NowPlaying.svelte]], [[Search.svelte]], [[Library.svelte]],
+[[Profile.svelte]], [[Settings.svelte]], and
 `../src-tauri/icons/64x64.png` — the **only** import that crosses out of `src/`
 into the Rust side of the tree
 **Imported by:** [[main.ts]]

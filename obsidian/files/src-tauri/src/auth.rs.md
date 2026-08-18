@@ -34,10 +34,10 @@ then `settings.json` in `data_dir` (written by `set_client_id` in
 fallback — see the gotcha below.
 
 ### `struct Settings` / `load_settings` / `save_settings`
-The Client ID's persisted home: `settings.json` in the app data dir, read and
-written the same way as `tokens.json` but deliberately a separate file — it
-survives logout, since it belongs to the Spotify app the user registered, not
-to any one login session.
+`settings.json` stores the Client ID, default volume (50%), reduced motion
+(false), and cache cap (2048 MB). Serde defaults migrate older Client-ID-only
+files. The document survives logout and every update merges rather than
+overwriting the Client ID.
 
 ### Redirect helpers
 - `streaming_redirect_uri()` — prefers `STREAMING_PORT`, falls back to an
@@ -97,12 +97,15 @@ The background loop, operating on whichever token serves the Web API role:
 2. Refresh under the issuing client ID.
 3. On success: `tokens.set(new_access_token)`, update `expires_at`, and persist
    the refresh token **if it rotated**, into the correct field.
-4. On failure: log a warning and retry after the margin + floor.
+4. On transient failure: log and retry after the margin + floor.
+5. On `invalid_grant`/`invalid_client`: clear rejected tokens, shut down the
+   session, reset auth/playback, emit logged-out state, and stop the task.
 
 ### `async fn fetch_profile_require_premium(api, token) -> AuthState`
-`GET /v1/me`, then rejects any `product` other than `"premium"` with
-`AppError::PremiumRequired`. Returns a populated `AuthState` on success, picking
-the first profile image as the avatar.
+`GET /v1/me`, then rejects a present non-premium `product` with
+`AppError::PremiumRequired`. Spotify may omit `product` for newer Development
+Mode apps; in that case librespot's streaming handshake is authoritative.
+Returns identity/avatar and preserves an absent product as `None`.
 
 ## Inputs / outputs / side effects
 

@@ -51,6 +51,10 @@ librespot so only one TLS stack is compiled in.
 `dotenvy` loads `.env` at startup ([[lib.rs]]). Tiny, and the only way the app
 takes configuration from outside the binary — see [[build-and-config]].
 
+`tauri-plugin-mcp-bridge = "0.12"` is the loopback-only automation bridge used
+for live UI verification. [[lib.rs]] registers it only under
+`cfg(debug_assertions)`, so the release app does not expose the server.
+
 ### `[profile.release]`
 ```toml
 opt-level = "s"      # size over speed

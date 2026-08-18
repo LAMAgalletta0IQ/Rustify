@@ -133,8 +133,10 @@ librespot cannot play the free, ad-supported tier. Rather than let that fail
 somewhere deep in the audio pipeline, `fetch_profile_require_premium`
 ([[auth.rs]]) reads `GET /v1/me` and checks `product`:
 
-- `"premium"` → proceed.
-- anything else → `AppError::PremiumRequired(product)`.
+- present `"premium"` → proceed.
+- present non-premium value → `AppError::PremiumRequired(product)`.
+- absent field → proceed to librespot, because Spotify removed `product` from
+  `/me` for some newer Development Mode apps.
 
 This runs **before** librespot starts, so a free account gets a clear message
 instead of silence. [[Login.svelte]] branches on the `kind` field to show a
@@ -189,8 +191,11 @@ start returning 401 after an hour of uptime.
 - Refreshes whichever token is serving the Web API role, under the client ID
   that issued it.
 - Persists a rotated refresh token into the correct field, preserving the other.
-- **Retries rather than ending the session** on failure; the likely cause is a
-  transient network error, not a revoked grant.
+- Retries transient network/provider failures.
+- Treats `invalid_grant`/`invalid_client` as terminal: Spotify refresh tokens
+  now expire after six months, so the task clears the rejected file/token,
+  shuts down the session, resets auth/playback, emits logged-out state, and
+  stops rather than looping forever.
 - Aborted on logout via the `JoinHandle` stored in `SpotifySession`.
 
 Only the *Web API* token is on this schedule. librespot's `Session` maintains its
@@ -255,6 +260,7 @@ network came up.
 | Stored token rejected (`invalid_grant`) | File deleted, login screen. Logged as a warning |
 | Restore fails transiently | **Tokens kept**, login screen, retried next launch |
 | Web API refresh fails mid-restore | Degrades to the shared token; rotation preserved |
+| Background refresh grant expires | Live session ends, stored token cleared, login screen shown |
 | Free account | `PremiumRequired` with the plan name |
 | **Rate limited on `/me`** | `RateLimited` with `Retry-After`; UI counts down and silently retries |
 | Logout | Spirc shut down, refresher + poller aborted, token cleared, file deleted |
