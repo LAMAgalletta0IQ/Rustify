@@ -20,6 +20,8 @@ const emptyPlayback: PlaybackState = {
   shuffle: false,
   repeatContext: false,
   repeatTrack: false,
+  audioQuality: "automatic",
+  audioQualityLabel: "160 kbps",
 };
 
 const emptyAuth: AuthState = {
@@ -34,6 +36,16 @@ const defaultSettings: AppSettings = {
   defaultVolumePercent: 50,
   reduceMotion: false,
   cacheLimitMb: 2048,
+  audioQuality: "automatic",
+  outputDevice: null,
+  equalizer: {
+    enabled: false,
+    bandsDb: [0, 0, 0, 0, 0, 0],
+    preampDb: 0,
+    autoHeadroom: true,
+    activePresetId: "flat",
+    customPresets: [],
+  },
 };
 
 class AppStore {

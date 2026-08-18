@@ -1,3 +1,4 @@
+mod audio;
 mod auth;
 mod commands;
 mod connect;
@@ -7,6 +8,7 @@ mod lyrics;
 mod media_keys;
 mod player;
 mod queue;
+mod relevance;
 mod search;
 mod state;
 mod webapi;
@@ -97,6 +99,9 @@ pub fn run() {
             commands::set_client_id,
             commands::get_settings,
             commands::update_settings,
+            commands::list_audio_devices,
+            commands::get_audio_status,
+            commands::get_equalizer_presets,
             commands::login,
             commands::restore_session,
             commands::logout,
@@ -124,11 +129,17 @@ pub fn run() {
             commands::get_saved_albums,
             commands::get_album_tracks,
             commands::get_followed_artists,
+            commands::get_followed_releases,
             commands::get_recently_played,
+            commands::get_quick_access,
+            commands::record_relevance,
             commands::set_tracks_saved,
             commands::set_albums_saved,
+            commands::set_artists_saved,
             commands::get_tracks_saved,
             commands::get_albums_saved,
+            commands::get_artists_saved,
+            commands::get_liked_tracks_by_artist,
             commands::get_artist_top_tracks,
             commands::get_artist_albums,
             commands::get_artist,

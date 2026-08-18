@@ -31,6 +31,7 @@ from the official Spotify Web API.
 | [[build-and-config]] | Toolchain, build commands, and `.env` configuration |
 | [[known-limitations]] | Password login, Jams, Blends, lyrics, queue reorder — and *why* |
 | [[2026-08-capability-audit]] | Verified Spotify/librespot/LRCLIB capability boundary and acceptance results |
+| [[2026-08-parity-pass]] | Relevance, followed releases, fullscreen lyrics, DSP/audio devices, and verified limitations |
 
 ## Modules
 

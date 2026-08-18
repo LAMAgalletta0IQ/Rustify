@@ -1,278 +1,51 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import * as api from "../api";
   import { store } from "../store.svelte";
-  import {
-    formatMs,
-    type LyricsResult,
-    type QueueView,
-  } from "../types";
-
-  let { onClose }: { onClose: () => void } = $props();
-
-  let queue = $state<QueueView | null>(null);
-  let loading = $state(false);
-  let lyrics = $state<LyricsResult | null>(null);
-  let lyricsLoading = $state(false);
-  let lyricsError = $state<string | null>(null);
-  let lyricsPanel: HTMLElement | null = $state(null);
-
-  const pb = $derived(store.playback);
-  const activeLine = $derived.by(() => {
-    if (!lyrics?.synced.length) return -1;
-    let active = -1;
-    for (let i = 0; i < lyrics.synced.length; i++) {
-      if (lyrics.synced[i].startMs > pb.positionMs) break;
-      active = i;
-    }
-    return active;
-  });
-
-  async function refresh() {
-    loading = true;
-    try {
-      queue = await api.getQueue();
-    } catch (e) {
-      store.handleError(e);
-    } finally {
-      loading = false;
-    }
-  }
-
-  // Refresh the queue whenever the track changes.
-  $effect(() => {
-    pb.track?.uri;
-    untrack(refresh);
-  });
-
-  $effect(() => {
-    const track = pb.track;
-    let cancelled = false;
-    lyrics = null;
-    lyricsError = null;
-    lyricsLoading = Boolean(track);
-    if (track) {
-      api
-        .getLyrics(
-          track.name,
-          track.artists[0] ?? "",
-          track.album,
-          track.durationMs,
-        )
-        .then((value) => {
-          if (!cancelled) lyrics = value;
-        })
-        .catch((e) => {
-          if (!cancelled) lyricsError = store.handleError(e, false).message;
-        })
-        .finally(() => {
-          if (!cancelled) lyricsLoading = false;
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  $effect(() => {
-    activeLine;
-    if (!lyricsPanel || activeLine < 0) return;
-    const frame = requestAnimationFrame(() => {
-      lyricsPanel
-        ?.querySelector(".line.active")
-        ?.scrollIntoView({ block: "center", behavior: store.settings.reduceMotion ? "auto" : "smooth" });
-    });
-    return () => cancelAnimationFrame(frame);
-  });
+  import { formatMs, volumeToPercent, type LyricsResult, type QueueView } from "../types";
+  let { onClose, onFullscreenChange = (_:boolean)=>{} }: { onClose:()=>void; onFullscreenChange?:(value:boolean)=>void }=$props();
+  const appWindow=getCurrentWindow(); const pb=$derived(store.playback);
+  let queue=$state<QueueView|null>(null); let loading=$state(false); let lyrics=$state<LyricsResult|null>(null); let lyricsLoading=$state(false); let lyricsError=$state<string|null>(null);
+  let lyricsPanel=$state<HTMLElement|null>(null); let autoFollow=$state(true); let fullscreen=$state(false); let panel=$state<"lyrics"|"queue">("lyrics"); let volumeDraft=$state<number|null>(null);
+  const volumePct=$derived(volumeDraft??volumeToPercent(pb.volume)); const pct=$derived(pb.durationMs?pb.positionMs/pb.durationMs*100:0);
+  const activeLine=$derived.by(()=>{if(!lyrics?.synced.length)return -1;let active=-1;for(let i=0;i<lyrics.synced.length;i++){if(lyrics.synced[i].startMs>pb.positionMs)break;active=i}return active});
+  async function refresh(){loading=true;try{queue=await api.getQueue()}catch(e){store.handleError(e)}finally{loading=false}}
+  $effect(()=>{pb.track?.uri;untrack(refresh)});
+  $effect(()=>{const track=pb.track;let cancelled=false;lyrics=null;lyricsError=null;lyricsLoading=Boolean(track);autoFollow=true;if(track)api.getLyrics(track.name,track.artists[0]??"",track.album,track.durationMs).then(v=>{if(!cancelled)lyrics=v}).catch(e=>{if(!cancelled)lyricsError=store.handleError(e,false).message}).finally(()=>{if(!cancelled)lyricsLoading=false});return()=>{cancelled=true}});
+  $effect(()=>{activeLine;if(!lyricsPanel||activeLine<0||!autoFollow)return;const frame=requestAnimationFrame(()=>lyricsPanel?.querySelector(".line.active")?.scrollIntoView({block:"center",behavior:store.settings.reduceMotion?"auto":"smooth"}));return()=>cancelAnimationFrame(frame)});
+  function resumeFollow(){autoFollow=true;lyricsPanel?.querySelector(".line.active")?.scrollIntoView({block:"center",behavior:store.settings.reduceMotion?"auto":"smooth"})}
+  function watchManualScroll(node:HTMLElement){const stop=()=>autoFollow=false;const pointer=(event:PointerEvent)=>{if(event.target===node)stop()};node.addEventListener("wheel",stop,{passive:true});node.addEventListener("touchmove",stop,{passive:true});node.addEventListener("pointerdown",pointer);return{destroy(){node.removeEventListener("wheel",stop);node.removeEventListener("touchmove",stop);node.removeEventListener("pointerdown",pointer)}}}
+  async function toggleFullscreen(){fullscreen=!fullscreen;try{await appWindow.setFullscreen(fullscreen);onFullscreenChange(fullscreen)}catch(e){fullscreen=!fullscreen;store.handleError(e)}}
+  async function close(){if(fullscreen){await appWindow.setFullscreen(false);fullscreen=false;onFullscreenChange(false)}onClose()}
+  function cycleRepeat(){const[c,t]=pb.repeatTrack?[false,false]:pb.repeatContext?[false,true]:[true,false];store.run(()=>api.setRepeat(c,t))}
+  async function seekPercent(event:Event){await store.run(()=>api.seek(Math.round(Number((event.currentTarget as HTMLInputElement).value)/100*pb.durationMs)))}
+  async function volume(event:Event){const value=Number((event.currentTarget as HTMLInputElement).value);await store.run(()=>api.setVolume(value));volumeDraft=null}
+  onMount(()=>{appWindow.isFullscreen().then(v=>{fullscreen=v;onFullscreenChange(v)});const key=(event:KeyboardEvent)=>{if(event.key==="F11"){event.preventDefault();void toggleFullscreen()}else if(event.key==="Escape"&&fullscreen){event.preventDefault();void toggleFullscreen()}else if(lyricsPanel?.contains(document.activeElement)&&["PageUp","PageDown","ArrowUp","ArrowDown","Home","End"].includes(event.key)){autoFollow=false}};window.addEventListener("keydown",key);return()=>{window.removeEventListener("keydown",key);if(fullscreen)void appWindow.setFullscreen(false);onFullscreenChange(false)}});
 </script>
-
-<div class="np">
-  <button class="close" onclick={onClose} title="Close">▾</button>
-
-  <div class="art">
-    {#if pb.track?.coverUrl}
-      <img src={pb.track.coverUrl} alt="" />
-    {:else}
-      <div class="ph"></div>
-    {/if}
-    <h2 class="truncate">{pb.track?.name ?? "Nothing playing"}</h2>
-    <p class="muted truncate">{pb.track?.artists.join(", ") ?? ""}</p>
-    <p class="muted small truncate">{pb.track?.album ?? ""}</p>
-
-  </div>
-
-  <section class="lyrics" aria-labelledby="lyrics-heading">
-    <header><h3 id="lyrics-heading">Lyrics</h3>{#if lyrics}<span class="provider">{lyrics.provider}</span>{/if}</header>
-    <div class="lyrics-scroll" bind:this={lyricsPanel} aria-live="polite">
-      {#if !pb.track}
-        <p class="muted">Start a track to see lyrics.</p>
-      {:else if lyricsLoading}
-        <p class="muted">Loading lyrics…</p>
-      {:else if lyricsError}
-        <p class="muted">{lyricsError}</p>
-      {:else if lyrics?.status === "instrumental"}
-        <p class="muted">This track is marked as instrumental.</p>
-      {:else if lyrics?.status === "unavailable" || !lyrics}
-        <p class="muted">Lyrics are not available for this track.</p>
-      {:else if lyrics.synced.length}
-        {#each lyrics.synced as line, i (`${line.startMs}-${i}`)}
-          <p class="line" class:active={i === activeLine}>{line.text || "♪"}</p>
-        {/each}
-      {:else if lyrics.plain}
-        {#each lyrics.plain.split("\n") as line, i (i)}
-          <p class="plain">{line || " "}</p>
-        {/each}
-      {/if}
-    </div>
-  </section>
-
-  <aside>
-    <header>
-      <h3>Queue</h3>
-      <button class="refresh muted" onclick={refresh} title="Refresh">⟳</button>
-    </header>
-
-    {#if loading && !queue}
-      <p class="muted">Loading…</p>
-    {:else if queue}
-      {#if queue.currentlyPlaying}
-        <p class="label muted">Now playing</p>
-        <div class="q current">
-          <span class="truncate">{queue.currentlyPlaying.name}</span>
-          <span class="muted small truncate"
-            >{queue.currentlyPlaying.artists.join(", ")}</span
-          >
+<div class="np" class:full={fullscreen}>
+  <header class="top" data-tauri-drag-region><button onclick={close} title="Close now playing">↓</button><div class="spacer" data-tauri-drag-region></div><span>{pb.audioQualityLabel}{!pb.isActiveDevice?" · remote quality unavailable":""}</span><button onclick={toggleFullscreen} title={fullscreen?"Exit fullscreen (F11)":"Fullscreen (F11)"}>{fullscreen?"⊡":"□"}</button>{#if fullscreen}<button onclick={()=>appWindow.minimize()} title="Minimize">—</button><button onclick={()=>appWindow.close()} title="Close window">✕</button>{/if}</header>
+  <main>
+    <section class="left">
+      <div class="artwork" role="group" aria-label="Artwork controls">
+        {#if pb.track?.coverUrl}<img src={pb.track.coverUrl} alt={`Artwork for ${pb.track.name}`}/>{:else}<div class="ph"></div>{/if}
+        <div class="overlay" class:visible={!pb.isPlaying||pb.isLoading} aria-label="Artwork playback controls">
+          <button class:on={pb.shuffle} onclick={()=>store.run(()=>api.setShuffle(!pb.shuffle))} title="Shuffle">⇄</button><button onclick={()=>store.run(api.previousTrack)} title="Previous">◀</button><button class="play" onclick={()=>store.run(api.playPause)} title={pb.isPlaying?"Pause":"Play"}>{pb.isLoading?"…":pb.isPlaying?"Ⅱ":"▶"}</button><button onclick={()=>store.run(api.nextTrack)} title="Next">▶</button><button class:on={pb.repeatContext||pb.repeatTrack} onclick={cycleRepeat} title="Repeat">↻{pb.repeatTrack?"¹":""}</button>
+          <label title="Volume"><span>◖</span><input type="range" min="0" max="100" value={volumePct} oninput={(e)=>volumeDraft=Number(e.currentTarget.value)} onchange={volume} onpointerdown={(e)=>e.stopPropagation()} aria-label="Volume"/></label>
+          <button onclick={()=>panel=panel==="lyrics"?"queue":"lyrics"}>{panel==="lyrics"?"Queue":"Lyrics"}</button><button onclick={toggleFullscreen}>{fullscreen?"Exit full":"Full"}</button><button onclick={close}>Close</button>
         </div>
-      {/if}
-
-      <p class="label muted">Next up</p>
-      {#each queue.queue as t, i (t.uri + i)}
-        <!-- Jumping into the queue replays it as an explicit track list from
-             the chosen entry onward; there is no "skip to queue index" API. -->
-        <button
-          class="q"
-          onclick={() =>
-            store.run(() =>
-              api.loadTracks(
-                queue!.queue.map((x) => x.uri),
-                t.uri,
-              ),
-            )}
-        >
-          <span class="truncate">{t.name}</span>
-          <span class="muted small truncate"
-            >{t.artists.join(", ")} · {formatMs(t.durationMs)}</span
-          >
-        </button>
-      {:else}
-        <p class="muted small">Queue is empty.</p>
-      {/each}
-    {/if}
-  </aside>
+      </div>
+      <div class="track"><h1>{pb.track?.name??"Nothing playing"}</h1><p>{pb.track?.artists.join(", ")??""}</p><small>{pb.track?.album??""}</small></div>
+      <div class="timeline"><span>{formatMs(pb.positionMs)}</span><input type="range" min="0" max="100" step="0.1" value={pct} onchange={seekPercent} disabled={!pb.track} aria-label="Seek"/><span>{formatMs(pb.durationMs)}</span></div>
+    </section>
+    <section class="right">
+      <div class="panel-tabs"><button class:on={panel==="lyrics"} onclick={()=>panel="lyrics"}>Lyrics</button><button class:on={panel==="queue"} onclick={()=>panel="queue"}>Queue</button>{#if panel==="lyrics"&&!autoFollow}<button class="resume" onclick={resumeFollow}>Resume following</button>{/if}</div>
+      {#if panel==="lyrics"}<div class="lyrics" bind:this={lyricsPanel} use:watchManualScroll aria-live="polite" role="region" aria-label="Synchronized lyrics">
+        {#if !pb.track}<p class="muted">Start a track to see lyrics.</p>{:else if lyricsLoading}<p class="muted">Loading lyrics…</p>{:else if lyricsError}<p class="muted">{lyricsError}</p>{:else if lyrics?.status==="instrumental"}<p class="muted">This track is marked as instrumental.</p>{:else if lyrics?.status==="unavailable"||!lyrics}<p class="muted">Lyrics are not available for this track.</p>{:else if lyrics.synced.length}{#each lyrics.synced as line,i (`${line.startMs}-${i}`)}<button class="line" class:past={i<activeLine} class:active={i===activeLine} onclick={()=>store.run(()=>api.seek(line.startMs))}>{line.text||"♪"}</button>{/each}{:else if lyrics.plain}{#each lyrics.plain.split("\n") as line,i(i)}<p class="plain">{line||" "}</p>{/each}{/if}
+      </div>{:else}<div class="queue">{#if loading&&!queue}<p class="muted">Loading queue…</p>{:else if queue}{#each queue.queue as track,i(track.uri+i)}<button onclick={()=>store.run(()=>api.loadTracks(queue!.queue.map(t=>t.uri),track.uri))}><strong class="truncate">{track.name}</strong><span class="truncate">{track.artists.join(", ")} · {formatMs(track.durationMs)}</span></button>{:else}<p class="muted">Queue is empty.</p>{/each}{/if}</div>{/if}
+    </section>
+  </main>
 </div>
-
 <style>
-  .np {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(230px, 0.85fr) minmax(250px, 1fr) minmax(240px, 0.8fr);
-    gap: 26px;
-    height: 100%;
-    padding: 32px;
-    overflow: hidden;
-  }
-  .close {
-    position: absolute;
-    top: 12px;
-    left: 16px;
-    color: var(--fg-dim);
-    font-size: 18px;
-    padding: 4px 10px;
-  }
-  .art {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-width: 0;
-  }
-  .art img,
-  .ph {
-    width: min(340px, 46vh);
-    aspect-ratio: 1;
-    border-radius: var(--r-md);
-    object-fit: cover;
-    background: rgba(255, 241, 224, 0.06);
-    box-shadow: 0 24px 60px rgba(18, 11, 4, 0.5);
-    margin-bottom: 16px;
-  }
-  .art h2 {
-    margin: 0;
-    font-size: 22px;
-    max-width: 100%;
-  }
-  .art p {
-    margin: 0;
-    max-width: 100%;
-  }
-  .small {
-    font-size: 12px;
-  }
-  aside {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow-y: auto;
-  }
-  .lyrics {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-  }
-  .lyrics header { flex: none; }
-  .provider { color: var(--fg-dim); font-size: 10px; letter-spacing: .08em; }
-  .lyrics-scroll { min-height: 0; overflow-y: auto; padding: 28vh 8px; scroll-behavior: smooth; mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent); }
-  .line { margin: 0 0 17px; color: var(--fg-dim); font-size: clamp(17px, 2.2vw, 25px); font-weight: 600; line-height: 1.3; transition: color .2s, transform .2s; transform-origin: left center; }
-  .line.active { color: var(--fg); transform: scale(1.025); }
-  .plain { margin: 0 0 10px; line-height: 1.55; }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  h3 {
-    margin: 0 0 4px;
-    font-size: 16px;
-  }
-  .label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin: 14px 0 6px;
-  }
-  .q {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    padding: 7px 8px;
-    text-align: left;
-    min-width: 0;
-  }
-  .q:hover {
-    background: var(--glass-hover);
-    border-radius: var(--r-sm);
-  }
-  .q.current {
-    color: var(--accent);
-  }
-  @media (max-width: 900px) {
-    .np { grid-template-columns: minmax(220px, .8fr) minmax(260px, 1fr); overflow-y: auto; }
-    aside { grid-column: 1 / -1; max-height: 260px; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .lyrics-scroll { scroll-behavior: auto; }
-    .line { transition: none; }
-  }
+  .np{height:100%;min-height:0;display:flex;flex-direction:column;background:rgba(17,11,6,.34)}.top{height:42px;display:flex;align-items:center;gap:6px;padding:0 8px 0 14px;color:var(--fg-dim);font-size:11px}.top button{padding:7px 10px}.spacer{flex:1;height:100%}.np main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,.9fr) minmax(360px,1.2fr);gap:clamp(24px,5vw,70px);padding:clamp(20px,5vh,58px) clamp(24px,6vw,88px)}.left{display:flex;flex-direction:column;justify-content:center;min-width:0}.artwork{position:relative;align-self:center;width:min(100%,56vh);aspect-ratio:1;border-radius:var(--r-lg);overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.5)}.artwork img,.ph{width:100%;height:100%;object-fit:cover;background:rgba(255,241,224,.06)}.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;align-content:center;gap:10px;padding:18%;opacity:0;background:rgba(13,9,5,.5);backdrop-filter:blur(3px);transition:opacity var(--motion-normal,.2s);pointer-events:none}.artwork:hover .overlay,.artwork:focus-within .overlay,.overlay.visible{opacity:1;pointer-events:auto}.overlay button{padding:9px;background:rgba(15,10,6,.58);border:1px solid rgba(255,255,255,.18);border-radius:999px}.overlay button.on{color:var(--accent)}.overlay .play{width:48px;height:48px;background:var(--fg);color:var(--ink)}.overlay label{display:flex;flex-basis:100%;align-items:center;gap:8px}.overlay input{width:100%;accent-color:var(--accent)}.track{text-align:center;margin-top:18px}.track h1{margin:0;font-size:clamp(22px,3vw,38px)}.track p,.track small{color:var(--fg-dim);margin:5px 0}.timeline{display:grid;grid-template-columns:42px 1fr 42px;align-items:center;gap:9px;margin-top:16px;font-size:11px;color:var(--fg-dim)}.timeline input{width:100%;accent-color:var(--accent)}.right{min-height:0;display:flex;flex-direction:column}.panel-tabs{display:flex;gap:6px;align-items:center}.panel-tabs button{padding:7px 12px;color:var(--fg-dim)}.panel-tabs button.on{color:var(--fg);background:var(--glass-strong)}.panel-tabs .resume{margin-left:auto;color:var(--accent);border:1px solid var(--hairline)}.lyrics,.queue{flex:1;min-height:0;overflow-y:auto;padding:32vh 8px;mask-image:linear-gradient(transparent,#000 10%,#000 90%,transparent)}.line{display:block;width:100%;margin:0 0 20px;padding:0;text-align:left;color:rgba(245,240,230,.38);font-size:clamp(20px,3vw,38px);font-weight:650;line-height:1.25;transition:color var(--motion-normal,.2s),transform var(--motion-normal,.2s)}.line.past{color:rgba(245,240,230,.58)}.line.active{color:var(--fg);transform:translateX(7px);text-shadow:0 0 22px rgba(245,240,230,.16)}.plain{font-size:18px;line-height:1.5}.queue{padding:12px 0}.queue button{display:flex;flex-direction:column;width:100%;padding:9px;text-align:left}.queue button:hover{background:var(--glass-hover)}.queue span{color:var(--fg-dim);font-size:12px}@media(max-width:800px){.np main{grid-template-columns:1fr;overflow-y:auto;padding:20px}.artwork{width:min(72vw,46vh)}.right{min-height:55vh}.lyrics{padding-top:24vh}}@media(max-height:560px) and (min-width:801px){.np main{padding:12px 28px}.artwork{width:min(38vw,52vh)}.track h1{font-size:20px}.right{min-height:0}}@media(prefers-reduced-motion:reduce){.overlay,.line{transition:none}}
 </style>

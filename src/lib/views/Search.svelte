@@ -13,6 +13,9 @@
   let query = $state("");
   let results = $state<SearchResults | null>(null);
   let loading = $state(false);
+  let loadingMore = $state(false);
+  let error = $state<string | null>(null);
+  let offset = $state(0);
   let timer: number | null = null;
 
   /** Debounced so typing doesn't fire a request per keystroke. */
@@ -28,13 +31,26 @@
       return;
     }
     loading = true;
+    error = null;
+    offset = 0;
     try {
-      results = await api.searchSpotify(q);
+      results = await api.searchSpotify(q, 10, 0);
     } catch (e) {
-      store.handleError(e);
+      error = store.handleError(e, false).message;
     } finally {
       loading = false;
     }
+  }
+  async function loadMore() {
+    if (!results?.hasMore || loadingMore) return;
+    loadingMore = true;
+    try {
+      const nextOffset = offset + 10;
+      const next = await api.searchSpotify(query.trim(), 10, nextOffset);
+      const merge = <T extends { uri: string }>(a:T[], b:T[]) => { const seen=new Set(a.map(x=>x.uri)); return [...a,...b.filter(x=>!seen.has(x.uri))]; };
+      results = { tracks:merge(results.tracks,next.tracks), albums:merge(results.albums,next.albums), artists:merge(results.artists,next.artists), playlists:merge(results.playlists,next.playlists), hasMore:next.hasMore };
+      offset = nextOffset;
+    } catch(e) { error=store.handleError(e,false).message; } finally { loadingMore=false; }
   }
 </script>
 
@@ -68,6 +84,10 @@
   {#if loading}
     <p class="muted">Searching…</p>
   {:else if results}
+    {#if error}<div class="search-error" role="alert">{error}</div>{/if}
+    {#if results.artists[0] || results.tracks[0]}
+      <section class="top-result"><span class="eyebrow">Top result</span>{#if results.artists[0]}<button onclick={() => (openArtist=results!.artists[0])}>{#if results.artists[0].imageUrl}<img src={results.artists[0].imageUrl} alt="" />{/if}<strong>{results.artists[0].name}</strong><span>Artist</span></button>{:else}<button onclick={() => store.run(()=>api.loadTracks(results!.tracks.map(t=>t.uri),results!.tracks[0].uri))}><strong>{results.tracks[0].name}</strong><span>{results.tracks[0].artists.join(", ")}</span></button>{/if}</section>
+    {/if}
     {#if results.tracks.length}
       <h3>Tracks</h3>
       <TrackList tracks={results.tracks} />
@@ -110,6 +130,8 @@
         {/each}
       </div>
     {/if}
+    {#if results.hasMore}<button class="load-more" disabled={loadingMore} onclick={loadMore}>{loadingMore?"Loading…":"Show more results"}</button>{/if}
+    {#if !results.tracks.length && !results.albums.length && !results.artists.length && !results.playlists.length}<div class="search-error">No results for “{query}”. Check the spelling or try fewer words.</div>{/if}
   {:else}
     <p class="hint muted">Search across tracks, albums, artists and playlists.</p>
   {/if}
@@ -138,4 +160,5 @@
     margin: 24px 0 10px;
     font-size: 15px;
   }
+  .top-result{margin:8px 0 22px}.eyebrow{color:var(--accent);font-size:10px;text-transform:uppercase;letter-spacing:.08em}.top-result button{display:flex;align-items:center;gap:12px;margin-top:7px;padding:14px 18px;background:var(--glass);border:1px solid var(--hairline);border-radius:var(--r-md);text-align:left}.top-result img{width:58px;height:58px;border-radius:50%;object-fit:cover}.top-result span{color:var(--fg-dim)}.search-error{padding:13px 15px;background:var(--glass);border:1px solid var(--hairline);border-radius:var(--r-md);color:var(--fg-dim)}.load-more{display:block;margin:22px auto 4px;padding:9px 14px;border:1px solid var(--hairline);background:var(--glass);border-radius:999px}
 </style>

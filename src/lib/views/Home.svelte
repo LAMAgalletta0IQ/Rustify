@@ -12,7 +12,7 @@
   import ArtistView from "./ArtistView.svelte";
   import PlaylistView from "./PlaylistView.svelte";
 
-  let { onBrowseLibrary }: { onBrowseLibrary: () => void } = $props();
+  let { onBrowseLibrary, onOpenForYou, onOpenReleases }: { onBrowseLibrary: () => void; onOpenForYou: () => void; onOpenReleases: () => void } = $props();
 
   const QUICK_LIMIT = 6;
   const RECENT_LIMIT = 12;
@@ -20,6 +20,7 @@
 
   let playlists = $state<PlaylistSummary[]>([]);
   let recent = $state<RecentActivityItem[]>([]);
+  let quickAccess = $state<RecentActivityItem[]>([]);
   let topTracks = $state<TrackSummary[]>([]);
   let discovery = $state<AlbumSummary[]>([]);
   let loadingRecent = $state(true);
@@ -46,46 +47,6 @@
     store.playback.isActiveDevice ? "this device" : "another device",
   );
 
-  const quickAccess = $derived.by(() => {
-    const items: RecentActivityItem[] = [];
-    const seen = new Set<string>();
-    for (const item of recent) {
-      if (seen.has(item.uri)) continue;
-      seen.add(item.uri);
-      const playlist =
-        item.kind === "playlist"
-          ? playlists.find((candidate) => candidate.uri === item.uri)
-          : undefined;
-      items.push(
-        playlist
-          ? {
-              ...item,
-              name: playlist.name,
-              subtitle: playlist.owner,
-              imageUrl: playlist.imageUrl,
-            }
-          : item,
-      );
-      if (items.length === QUICK_LIMIT) return items;
-    }
-    for (const playlist of playlists) {
-      if (seen.has(playlist.uri)) continue;
-      seen.add(playlist.uri);
-      items.push({
-        kind: "playlist",
-        uri: playlist.uri,
-        id: playlist.id,
-        name: playlist.name,
-        subtitle: playlist.owner,
-        imageUrl: playlist.imageUrl,
-        lastPlayedAt: "",
-        trackUri: null,
-      });
-      if (items.length === QUICK_LIMIT) break;
-    }
-    return items;
-  });
-
   $effect(() => {
     reloadKey;
     let cancelled = false;
@@ -101,7 +62,18 @@
       if (cancelled) return;
       if (playlistResult.status === "fulfilled") playlists = playlistResult.value;
       if (recentResult.status === "fulfilled") {
-        recent = recentResult.value.slice(0, RECENT_LIMIT);
+        const hydrated = recentResult.value.map((item) => {
+          const playlist = item.kind === "playlist"
+            ? playlists.find((candidate) => candidate.uri === item.uri)
+            : undefined;
+          return playlist ? { ...item, name: playlist.name, subtitle: playlist.owner, imageUrl: playlist.imageUrl } : item;
+        });
+        recent = hydrated.slice(0, RECENT_LIMIT);
+        api.getQuickAccess(hydrated, QUICK_LIMIT).then((items) => {
+          if (!cancelled) quickAccess = items;
+        }).catch((e) => {
+          if (!cancelled) recentError = store.handleError(e, false).message;
+        });
       } else {
         recentError = store.handleError(recentResult.reason, false).message;
       }
@@ -121,24 +93,11 @@
       });
 
     const discoveryTask = api
-      .getTopArtists(4)
-      .then(async (artists) => {
-        const pages = await Promise.allSettled(
-          artists.map((artist) => api.getArtistAlbums(artist.id, 4, 0)),
-        );
-        if (cancelled) return;
-        const seen = new Set<string>();
-        discovery = pages
-          .flatMap((page) =>
-            page.status === "fulfilled" ? page.value.items : [],
-          )
-          .filter((album) => seen.add(album.uri))
-          .slice(0, 12);
-        if (!discovery.length && pages.some((page) => page.status === "rejected")) {
-          const failed = pages.find((page) => page.status === "rejected");
-          if (failed?.status === "rejected") {
-            discoveryError = store.handleError(failed.reason, false).message;
-          }
+      .getFollowedReleases()
+      .then((page) => {
+        if (!cancelled) {
+          discovery = page.items.slice(0, 12);
+          if (page.partialErrors.length && !discovery.length) discoveryError = "Some followed-artist catalogs could not be refreshed.";
         }
       })
       .catch((e) => {
@@ -159,6 +118,7 @@
   }
 
   function openActivity(item: RecentActivityItem) {
+    void api.recordRelevance(item, false).catch(() => {});
     if (item.kind === "album") {
       openAlbum = {
         uri: item.uri,
@@ -185,6 +145,7 @@
   }
 
   function playRecent(item: RecentActivityItem) {
+    void api.recordRelevance(item, true).then(() => api.getQuickAccess(recent, QUICK_LIMIT)).then((items) => (quickAccess = items)).catch(() => {});
     if (item.kind === "track") {
       const tracks = recent.filter((x) => x.kind === "track").map((x) => x.uri);
       store.run(() => api.loadTracks(tracks, item.uri));
@@ -232,6 +193,8 @@
           </button>
         {/each}
       </div>
+    {:else if !loadingRecent && !recentError}
+      <div class="state"><span>Quick access will learn from real listening and navigation activity on this account.</span><button onclick={onBrowseLibrary}>Browse library</button></div>
     {/if}
 
     <section aria-labelledby="recent-heading">
@@ -263,7 +226,7 @@
 
     <section aria-labelledby="mix-heading">
       <div class="section-head">
-        <div><h2 id="mix-heading">Your listening mix</h2><p>Built from your Spotify top tracks, not an editorial Spotify playlist.</p></div>
+        <div><h2 id="mix-heading">For you</h2><p>Built from your Spotify top tracks, not an editorial Spotify playlist.</p></div><button class="link" onclick={onOpenForYou}>Show all</button>
       </div>
       {#if loadingMix}
         <p class="muted">Loading your listening history…</p>
@@ -284,7 +247,7 @@
 
     <section aria-labelledby="discovery-heading">
       <div class="section-head">
-        <div><h2 id="discovery-heading">From your top artists</h2><p>Recent releases selected from artists in your Spotify listening history.</p></div>
+        <div><h2 id="discovery-heading">New from followed artists</h2><p>Actual dated releases from artists you follow.</p></div><button class="link" onclick={onOpenReleases}>Show all</button>
       </div>
       {#if loadingDiscovery}
         <p class="muted">Finding releases…</p>
@@ -301,6 +264,10 @@
           {/each}
         </div>
       {:else}<p class="muted">No supported release suggestions are available yet.</p>{/if}
+    </section>
+    <section aria-labelledby="friends-heading">
+      <div class="section-head"><div><h2 id="friends-heading">Friend activity</h2><p>Private by design when Spotify does not expose presence.</p></div></div>
+      <div class="state"><span>Friend listening activity is unavailable. Spotify’s public Web API has no friend-presence endpoint, and librespot 0.8 does not implement its private buddy-list protocol. Rustify will not infer or fabricate activity.</span></div>
     </section>
   </div>
 {/if}

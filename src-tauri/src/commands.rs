@@ -2,11 +2,15 @@ use librespot::connect::{LoadRequest, LoadRequestOptions, PlayingTrack};
 use librespot::core::authentication::Credentials;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::audio::{
+    self, AudioDevice, AudioStatus, EqualizerPreset, EqualizerSettings, StreamQuality,
+};
 use crate::auth;
 use crate::connect::{self, Device};
 use crate::error::{AppError, AppResult};
 use crate::library::{
-    self, AlbumPage, AlbumSummary, ArtistPage, PlaylistSummary, RecentActivityItem, TrackSummary,
+    self, AlbumPage, AlbumSummary, ArtistPage, FollowedReleasePage, PlaylistSummary,
+    RecentActivityItem, TrackSummary,
 };
 use crate::lyrics::LyricsResult;
 use crate::player;
@@ -76,6 +80,9 @@ pub struct AppSettings {
     pub default_volume_percent: u8,
     pub reduce_motion: bool,
     pub cache_limit_mb: u32,
+    pub audio_quality: StreamQuality,
+    pub output_device: Option<String>,
+    pub equalizer: EqualizerSettings,
 }
 
 impl From<auth::Settings> for AppSettings {
@@ -84,6 +91,9 @@ impl From<auth::Settings> for AppSettings {
             default_volume_percent: value.default_volume_percent,
             reduce_motion: value.reduce_motion,
             cache_limit_mb: value.cache_limit_mb,
+            audio_quality: value.audio_quality,
+            output_device: value.output_device,
+            equalizer: value.equalizer,
         }
     }
 }
@@ -131,7 +141,11 @@ pub fn get_settings(app: AppHandle) -> AppResult<AppSettings> {
 }
 
 #[tauri::command]
-pub fn update_settings(app: AppHandle, settings: AppSettings) -> AppResult<AppSettings> {
+pub fn update_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: AppSettings,
+) -> AppResult<AppSettings> {
     let data_dir = app
         .path()
         .app_data_dir()
@@ -147,13 +161,41 @@ pub fn update_settings(app: AppHandle, settings: AppSettings) -> AppResult<AppSe
             "Cache size must be between 128 MB and 8192 MB.".into(),
         ));
     }
+    audio::validate_equalizer(&settings.equalizer)?;
+    audio::validate_output_device(settings.output_device.as_deref())?;
 
     let mut persisted = auth::settings_or_default(&data_dir);
     persisted.default_volume_percent = settings.default_volume_percent;
     persisted.reduce_motion = settings.reduce_motion;
     persisted.cache_limit_mb = settings.cache_limit_mb;
+    persisted.audio_quality = settings.audio_quality;
+    persisted.output_device = settings.output_device;
+    persisted.equalizer = settings.equalizer;
     auth::save_settings(&data_dir, &persisted)?;
+    state
+        .audio
+        .configure(persisted.output_device.clone(), persisted.equalizer.clone());
     Ok(persisted.into())
+}
+
+/// Enumerating devices can touch OS audio services, so callers run this command
+/// off the webview thread through Tauri's async command dispatcher.
+#[tauri::command]
+pub async fn list_audio_devices(state: State<'_, AppState>) -> AppResult<Vec<AudioDevice>> {
+    let runtime = state.audio.clone();
+    tauri::async_runtime::spawn_blocking(move || audio::list_output_devices(&runtime))
+        .await
+        .map_err(|e| AppError::Other(format!("audio device enumeration failed: {e}")))?
+}
+
+#[tauri::command]
+pub fn get_audio_status(state: State<'_, AppState>) -> AudioStatus {
+    state.audio.status()
+}
+
+#[tauri::command]
+pub fn get_equalizer_presets() -> Vec<EqualizerPreset> {
+    audio::builtin_presets()
 }
 
 /// Completes a login given an OAuth token: verifies Premium, starts librespot,
@@ -186,6 +228,10 @@ async fn establish(
     auth::save_stored_tokens(&data_dir, &stored)?;
 
     let settings = auth::settings_or_default(&data_dir);
+    audio::validate_equalizer(&settings.equalizer)?;
+    state
+        .audio
+        .configure(settings.output_device.clone(), settings.equalizer.clone());
 
     // Premium gate, so a free account gets a clear message rather than a
     // silent playback failure later. Uses the Web API token, which is the one
@@ -203,8 +249,11 @@ async fn establish(
         state.tokens.clone(),
         device_name(),
         data_dir.join("cache"),
-        settings.default_volume_percent,
-        settings.cache_limit_mb,
+        player::PlaybackOptions {
+            initial_volume_percent: settings.default_volume_percent,
+            cache_limit_mb: settings.cache_limit_mb,
+            quality: settings.audio_quality,
+        },
     )
     .await?;
 
@@ -535,12 +584,79 @@ pub async fn get_followed_artists(
 }
 
 #[tauri::command]
+pub async fn get_followed_releases(
+    state: State<'_, AppState>,
+    after: Option<String>,
+) -> AppResult<FollowedReleasePage> {
+    let t = token(&state).await?;
+    library::followed_releases(&WebApi::new(), &t, after.as_deref()).await
+}
+
+#[tauri::command]
 pub async fn get_recently_played(
     state: State<'_, AppState>,
     limit: Option<u32>,
 ) -> AppResult<Vec<RecentActivityItem>> {
     let t = token(&state).await?;
     library::recently_played(&WebApi::new(), &t, limit.unwrap_or(50)).await
+}
+
+/// Combines Spotify's real recent-play window with account-scoped local open
+/// and play history. This intentionally does not claim to reproduce Spotify's
+/// private Home ranking.
+#[tauri::command]
+pub async fn get_quick_access(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    recent: Vec<RecentActivityItem>,
+    limit: Option<usize>,
+) -> AppResult<Vec<RecentActivityItem>> {
+    let account = state
+        .auth
+        .read()
+        .await
+        .user_id
+        .clone()
+        .ok_or(AppError::NotLoggedIn)?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(crate::relevance::rank(
+            &data_dir,
+            &account,
+            recent,
+            limit.unwrap_or(6).min(12),
+        ))
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("relevance ranking failed: {e}")))?
+}
+
+#[tauri::command]
+pub async fn record_relevance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    item: RecentActivityItem,
+    played: bool,
+) -> AppResult<()> {
+    let account = state
+        .auth
+        .read()
+        .await
+        .user_id
+        .clone()
+        .ok_or(AppError::NotLoggedIn)?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::relevance::record(&data_dir, &account, item, played)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("could not persist relevance history: {e}")))?
 }
 
 #[tauri::command]
@@ -573,6 +689,16 @@ pub async fn set_albums_saved(
 }
 
 #[tauri::command]
+pub async fn set_artists_saved(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    saved: bool,
+) -> AppResult<()> {
+    let t = token(&state).await?;
+    library::set_artists_saved(&WebApi::new(), &t, &ids, saved).await
+}
+
+#[tauri::command]
 pub async fn get_tracks_saved(
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -588,6 +714,24 @@ pub async fn get_albums_saved(
 ) -> AppResult<Vec<bool>> {
     let t = token(&state).await?;
     library::albums_saved(&WebApi::new(), &t, &ids).await
+}
+
+#[tauri::command]
+pub async fn get_artists_saved(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> AppResult<Vec<bool>> {
+    let t = token(&state).await?;
+    library::artists_saved(&WebApi::new(), &t, &ids).await
+}
+
+#[tauri::command]
+pub async fn get_liked_tracks_by_artist(
+    state: State<'_, AppState>,
+    artist_id: String,
+) -> AppResult<Vec<TrackSummary>> {
+    let t = token(&state).await?;
+    library::liked_tracks_by_artist(&WebApi::new(), &t, &artist_id).await
 }
 
 #[tauri::command]
@@ -665,10 +809,11 @@ pub async fn search_spotify(
     state: State<'_, AppState>,
     query: String,
     limit: Option<u32>,
+    offset: Option<u32>,
 ) -> AppResult<SearchResults> {
     let t = token(&state).await?;
     let limit = limit.unwrap_or(search::MAX_SEARCH_LIMIT);
-    search::search(&WebApi::new(), &t, &query, limit).await
+    search::search(&WebApi::new(), &t, &query, limit, offset.unwrap_or(0)).await
 }
 
 // ---- queue --------------------------------------------------------------

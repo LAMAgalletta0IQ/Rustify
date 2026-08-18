@@ -16,6 +16,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
+use crate::audio::{self, StreamQuality};
 use crate::connect;
 use crate::error::{AppError, AppResult};
 use crate::state::{events, AppState, PlaybackState, TokenStore, TrackInfo};
@@ -39,11 +40,18 @@ pub async fn start_session(
     tokens: TokenStore,
     device_name: String,
     cache_dir: PathBuf,
-    initial_volume_percent: u8,
-    cache_limit_mb: u32,
+    options: PlaybackOptions,
 ) -> AppResult<StartedSession> {
+    let PlaybackOptions {
+        initial_volume_percent,
+        cache_limit_mb,
+        quality,
+    } = options;
     let session_config = SessionConfig::default();
-    let player_config = PlayerConfig::default();
+    let player_config = PlayerConfig {
+        bitrate: quality.bitrate(),
+        ..Default::default()
+    };
     let audio_format = AudioFormat::default();
     let mixer_config = MixerConfig::default();
 
@@ -74,11 +82,12 @@ pub async fn start_session(
     let session = Session::new(session_config, Some(cache));
     let mixer = mixer_builder(mixer_config)?;
 
+    let audio_runtime = app.state::<AppState>().audio.clone();
     let player = Player::new(
         player_config,
         session.clone(),
         mixer.get_soft_volume(),
-        move || sink_builder(None, audio_format),
+        move || audio::processing_sink(sink_builder, audio_format, audio_runtime),
     );
 
     // Must be taken before `player` is handed to Spirc.
@@ -113,7 +122,10 @@ pub async fn start_session(
     // slider is correct before the first VolumeChanged event arrives.
     {
         let state = app.state::<AppState>();
-        state.playback.write().await.volume = mixer.volume();
+        let mut playback = state.playback.write().await;
+        playback.volume = mixer.volume();
+        playback.audio_quality = quality;
+        playback.audio_quality_label = quality.effective_label().to_string();
     }
 
     Ok(StartedSession { session, spirc })
@@ -121,6 +133,12 @@ pub async fn start_session(
 
 /// What `start_session` hands back; the caller pairs it with the refresh task
 /// to form a [`SpotifySession`].
+pub struct PlaybackOptions {
+    pub initial_volume_percent: u8,
+    pub cache_limit_mb: u32,
+    pub quality: StreamQuality,
+}
+
 pub struct StartedSession {
     pub session: Session,
     pub spirc: Spirc,

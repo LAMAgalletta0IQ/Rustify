@@ -41,6 +41,8 @@ export interface PlaybackState {
   shuffle: boolean;
   repeatContext: boolean;
   repeatTrack: boolean;
+  audioQuality: StreamQuality;
+  audioQualityLabel: string;
 }
 
 export interface AuthState {
@@ -65,6 +67,40 @@ export interface AppSettings {
   defaultVolumePercent: number;
   reduceMotion: boolean;
   cacheLimitMb: number;
+  audioQuality: StreamQuality;
+  outputDevice: string | null;
+  equalizer: EqualizerSettings;
+}
+
+export type StreamQuality = "automatic" | "low" | "normal" | "veryHigh";
+
+export interface EqualizerPreset {
+  id: string;
+  name: string;
+  bandsDb: [number, number, number, number, number, number];
+  preampDb: number;
+}
+
+export interface EqualizerSettings {
+  enabled: boolean;
+  bandsDb: [number, number, number, number, number, number];
+  preampDb: number;
+  autoHeadroom: boolean;
+  activePresetId: string | null;
+  customPresets: EqualizerPreset[];
+}
+
+export interface AudioDevice {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  isSelected: boolean;
+  isActive: boolean;
+}
+
+export interface AudioStatus {
+  activeDevice: string | null;
+  lastError: string | null;
 }
 
 export interface Device {
@@ -81,9 +117,11 @@ export interface TrackSummary {
   id: string;
   name: string;
   artists: string[];
+  artistIds: string[];
   album: string;
   imageUrl: string | null;
   durationMs: number;
+  explicit: boolean;
 }
 
 export interface PlaylistSummary {
@@ -101,6 +139,10 @@ export interface AlbumSummary {
   name: string;
   artists: string[];
   imageUrl: string | null;
+  albumType?: string;
+  releaseDate?: string | null;
+  releaseDatePrecision?: string | null;
+  totalTracks?: number | null;
 }
 
 export interface ArtistSummary {
@@ -121,6 +163,12 @@ export interface AlbumPage {
   hasMore: boolean;
 }
 
+export interface FollowedReleasePage {
+  items: AlbumSummary[];
+  nextArtist: string | null;
+  partialErrors: string[];
+}
+
 export type RecentActivityKind = "track" | "album" | "playlist" | "artist";
 
 export interface RecentActivityItem {
@@ -132,6 +180,7 @@ export interface RecentActivityItem {
   imageUrl: string | null;
   lastPlayedAt: string;
   trackUri: string | null;
+  frequency: number;
 }
 
 export interface LyricsLine {
@@ -159,6 +208,7 @@ export interface SearchResults {
   albums: AlbumSummary[];
   artists: ArtistSummary[];
   playlists: PlaylistHit[];
+  hasMore: boolean;
 }
 
 export interface QueueView {

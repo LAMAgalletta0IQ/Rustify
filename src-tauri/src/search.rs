@@ -20,6 +20,7 @@ pub struct SearchResults {
     pub albums: Vec<AlbumSummary>,
     pub artists: Vec<ArtistSummary>,
     pub playlists: Vec<PlaylistHit>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +46,8 @@ struct SearchResponse {
 #[derive(Debug, Deserialize)]
 struct Wrap<T> {
     items: Vec<Option<T>>,
+    #[serde(default)]
+    next: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +58,8 @@ struct WireImage {
 
 #[derive(Debug, Deserialize)]
 struct WireNamed {
+    #[serde(default)]
+    id: Option<String>,
     name: String,
 }
 
@@ -70,6 +75,14 @@ struct WireAlbum {
     name: String,
     artists: Vec<WireNamed>,
     images: Vec<WireImage>,
+    #[serde(default)]
+    album_type: String,
+    #[serde(default)]
+    release_date: Option<String>,
+    #[serde(default)]
+    release_date_precision: Option<String>,
+    #[serde(default)]
+    total_tracks: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +93,8 @@ struct WireTrack {
     artists: Vec<WireNamed>,
     album: Option<WireAlbum>,
     duration_ms: u32,
+    #[serde(default)]
+    explicit: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +136,7 @@ pub async fn search(
     token: &str,
     query: &str,
     limit: u32,
+    offset: u32,
 ) -> AppResult<SearchResults> {
     if query.trim().is_empty() {
         return Ok(SearchResults::default());
@@ -137,11 +153,17 @@ pub async fn search(
                 // other endpoints allow. Exceeding it is a 400 "Invalid limit",
                 // not a silent truncation, so this clamp is load-bearing.
                 ("limit", limit.clamp(1, MAX_SEARCH_LIMIT).to_string()),
+                ("offset", offset.to_string()),
             ],
         )
         .await?;
 
+    let has_more = resp.tracks.as_ref().is_some_and(|w| w.next.is_some())
+        || resp.albums.as_ref().is_some_and(|w| w.next.is_some())
+        || resp.artists.as_ref().is_some_and(|w| w.next.is_some())
+        || resp.playlists.as_ref().is_some_and(|w| w.next.is_some());
     Ok(SearchResults {
+        has_more,
         tracks: resp
             .tracks
             .map(|w| {
@@ -149,6 +171,7 @@ pub async fn search(
                     .into_iter()
                     .flatten()
                     .map(|t| TrackSummary {
+                        artist_ids: t.artists.iter().filter_map(|a| a.id.clone()).collect(),
                         id: t.id.unwrap_or_default(),
                         uri: t.uri,
                         name: t.name,
@@ -156,6 +179,7 @@ pub async fn search(
                         album: t.album.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
                         image_url: t.album.as_ref().and_then(|a| pick_image(&a.images)),
                         duration_ms: t.duration_ms,
+                        explicit: t.explicit,
                     })
                     .collect()
             })
@@ -172,6 +196,10 @@ pub async fn search(
                         uri: a.uri,
                         name: a.name,
                         artists: a.artists.into_iter().map(|x| x.name).collect(),
+                        album_type: a.album_type,
+                        release_date: a.release_date,
+                        release_date_precision: a.release_date_precision,
+                        total_tracks: a.total_tracks,
                     })
                     .collect()
             })

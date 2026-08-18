@@ -78,15 +78,18 @@ Primary references:
 ## Verification record
 
 - `cargo fmt --check`: pass.
-- `cargo test`: 4 passed, including recent-context grouping, legacy settings
-  defaults, URI formation, and synchronized LRC parsing.
+- `cargo test`: 10 passed, covering recent grouping, relevance ordering and
+  deduplication, release-edition deduplication, bitrate mapping, exact EQ
+  bypass, invalid EQ rejection, legacy settings, URI formation, and LRC parsing.
 - `cargo clippy --all-targets -- -D warnings`: pass.
 - `npm run check`: zero errors/warnings.
 - `npm run build`: pass.
 - `npm run tauri build`: pass; optimized executable and NSIS installer built.
-- Live Tauri: Home three-source data, Profile, Settings save/effect/restore,
-  artist identity/tracks/pagination, LRCLIB synchronized display, account
-  restore, and clean final logs.
+- Live Tauri: account-ranked Home data, Settings/device enumeration and EQ
+  apply/restore, 760×520 layout, native fullscreen entry/F11 exit, PlayerBar
+  suppression in fullscreen, available native controls, LRCLIB synchronized
+  line controls, manual-follow recovery, rate-limit/partial states, account
+  restore, and runtime log inspection.
 - Track and album states were read, toggled, re-read, restored, and re-read;
   results were `false→true→false` and `true→false→true` respectively.
 - Setup geometry: usable center and card center both 383 px at 1100×720;

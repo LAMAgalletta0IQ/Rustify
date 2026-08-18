@@ -6,7 +6,7 @@ use crate::webapi::WebApi;
 
 /// Flattened shape the UI renders. Keeping the Web API's nested envelopes out
 /// of the frontend keeps serialisation cheap and the Svelte components dumb.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistSummary {
     pub uri: String,
@@ -25,6 +25,10 @@ pub struct AlbumSummary {
     pub name: String,
     pub artists: Vec<String>,
     pub image_url: Option<String>,
+    pub album_type: String,
+    pub release_date: Option<String>,
+    pub release_date_precision: Option<String>,
+    pub total_tracks: Option<u32>,
 }
 
 /// A page of followed artists plus the cursor for the next one, since
@@ -45,6 +49,16 @@ pub struct AlbumPage {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FollowedReleasePage {
+    pub items: Vec<AlbumSummary>,
+    pub next_artist: Option<String>,
+    /// A page can remain useful when one artist request is unavailable or
+    /// rate-limited. The UI presents this as partial, never exhaustive.
+    pub partial_errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecentActivityItem {
     /// `track`, `album`, `playlist`, or `artist`.
     pub kind: String,
@@ -56,6 +70,13 @@ pub struct RecentActivityItem {
     pub last_played_at: String,
     /// Track to start at when the item represents a playable context.
     pub track_uri: Option<String>,
+    /// Number of occurrences in the Web API history window.
+    #[serde(default = "one")]
+    pub frequency: u32,
+}
+
+const fn one() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,9 +86,11 @@ pub struct TrackSummary {
     pub id: String,
     pub name: String,
     pub artists: Vec<String>,
+    pub artist_ids: Vec<String>,
     pub album: String,
     pub image_url: Option<String>,
     pub duration_ms: u32,
+    pub explicit: bool,
 }
 
 // ---- Web API wire types -------------------------------------------------
@@ -115,6 +138,8 @@ struct WireImage {
 
 #[derive(Debug, Deserialize)]
 struct WireArtist {
+    #[serde(default)]
+    id: Option<String>,
     name: String,
 }
 
@@ -125,6 +150,14 @@ struct WireAlbum {
     name: String,
     artists: Vec<WireArtist>,
     images: Vec<WireImage>,
+    #[serde(default)]
+    album_type: String,
+    #[serde(default)]
+    release_date: Option<String>,
+    #[serde(default)]
+    release_date_precision: Option<String>,
+    #[serde(default)]
+    total_tracks: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,6 +168,8 @@ struct WireTrack {
     artists: Vec<WireArtist>,
     album: Option<WireAlbum>,
     duration_ms: u32,
+    #[serde(default)]
+    explicit: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -208,14 +243,17 @@ fn pick_image(images: &[WireImage]) -> Option<String> {
 
 impl From<WireTrack> for TrackSummary {
     fn from(t: WireTrack) -> Self {
+        let artist_ids = t.artists.iter().filter_map(|a| a.id.clone()).collect();
         TrackSummary {
             id: t.id.unwrap_or_default(),
             uri: t.uri,
             name: t.name,
             artists: t.artists.into_iter().map(|a| a.name).collect(),
+            artist_ids,
             album: t.album.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
             image_url: t.album.as_ref().and_then(|a| pick_image(&a.images)),
             duration_ms: t.duration_ms,
+            explicit: t.explicit,
         }
     }
 }
@@ -228,6 +266,10 @@ impl From<WireAlbum> for AlbumSummary {
             uri: a.uri,
             name: a.name,
             artists: a.artists.into_iter().map(|x| x.name).collect(),
+            album_type: a.album_type,
+            release_date: a.release_date,
+            release_date_precision: a.release_date_precision,
+            total_tracks: a.total_tracks,
         }
     }
 }
@@ -377,6 +419,18 @@ pub async fn set_albums_saved(
     set_library_saved(api, token, ids, "album", saved).await
 }
 
+pub async fn set_artists_saved(
+    api: &WebApi,
+    token: &str,
+    ids: &[String],
+    saved: bool,
+) -> AppResult<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    set_library_saved(api, token, ids, "artist", saved).await
+}
+
 async fn set_library_saved(
     api: &WebApi,
     token: &str,
@@ -410,6 +464,32 @@ pub async fn tracks_saved(api: &WebApi, token: &str, ids: &[String]) -> AppResul
 
 pub async fn albums_saved(api: &WebApi, token: &str, ids: &[String]) -> AppResult<Vec<bool>> {
     library_saved(api, token, ids, "album").await
+}
+
+pub async fn artists_saved(api: &WebApi, token: &str, ids: &[String]) -> AppResult<Vec<bool>> {
+    library_saved(api, token, ids, "artist").await
+}
+
+pub async fn liked_tracks_by_artist(
+    api: &WebApi,
+    token: &str,
+    artist_id: &str,
+) -> AppResult<Vec<TrackSummary>> {
+    let mut result = Vec::new();
+    // Bound the walk so an enormous library cannot monopolize the API quota.
+    // The UI describes the result as the checked portion when this cap is hit.
+    for offset in (0..500).step_by(50) {
+        let page = saved_tracks(api, token, 50, offset).await?;
+        let count = page.len();
+        result.extend(
+            page.into_iter()
+                .filter(|track| track.artist_ids.iter().any(|id| id == artist_id)),
+        );
+        if count < 50 {
+            break;
+        }
+    }
+    Ok(result)
 }
 
 async fn library_saved(
@@ -577,6 +657,100 @@ pub async fn followed_artists(
     })
 }
 
+/// Recent catalog releases for a cursor page of followed artists. Spotify has
+/// no aggregate endpoint, so pagination is deliberately by followed-artist
+/// cursor and every partial failure is surfaced.
+pub async fn followed_releases(
+    api: &WebApi,
+    token: &str,
+    after: Option<&str>,
+) -> AppResult<FollowedReleasePage> {
+    let artists = followed_artists(api, token, 8, after).await?;
+    let mut items = Vec::new();
+    let mut partial_errors = Vec::new();
+    // Sequential requests deliberately avoid an eight-request burst against
+    // Spotify's per-client rolling quota. A page is small enough that this
+    // remains responsive, and partial results survive any one failure.
+    for artist in &artists.items {
+        match artist_albums(api, token, &artist.id, 10, 0).await {
+            Ok(page) => items.extend(page.items),
+            Err(error @ crate::error::AppError::RateLimited { .. })
+            | Err(error @ crate::error::AppError::SessionExpired) => return Err(error),
+            Err(error) => partial_errors.push(format!("{}: {error}", artist.name)),
+        }
+    }
+    let items = deduplicate_releases(items);
+    Ok(FollowedReleasePage {
+        items,
+        next_artist: artists.next,
+        partial_errors,
+    })
+}
+
+fn edition_key(album: &AlbumSummary) -> String {
+    let mut title = album.name.to_lowercase();
+    for suffix in [
+        "(deluxe edition)",
+        "(deluxe)",
+        "[deluxe edition]",
+        "- deluxe edition",
+        "(remastered)",
+        "(remaster)",
+    ] {
+        title = title.replace(suffix, "");
+    }
+    let year = album
+        .release_date
+        .as_deref()
+        .unwrap_or("")
+        .get(..4)
+        .unwrap_or("");
+    format!(
+        "{}|{}|{}|{}",
+        album
+            .artists
+            .first()
+            .map(|name| name.to_lowercase())
+            .unwrap_or_default(),
+        title.trim(),
+        album.album_type,
+        year
+    )
+}
+
+fn deduplicate_releases(items: Vec<AlbumSummary>) -> Vec<AlbumSummary> {
+    let mut chosen = std::collections::HashMap::<String, AlbumSummary>::new();
+    for album in items {
+        let key = edition_key(&album);
+        chosen
+            .entry(key)
+            .and_modify(|existing| {
+                // Prefer the fuller edition, then a record with artwork/date.
+                let candidate = (
+                    album.total_tracks.unwrap_or(0),
+                    album.image_url.is_some(),
+                    album.release_date.is_some(),
+                );
+                let current = (
+                    existing.total_tracks.unwrap_or(0),
+                    existing.image_url.is_some(),
+                    existing.release_date.is_some(),
+                );
+                if candidate > current {
+                    *existing = album.clone();
+                }
+            })
+            .or_insert(album);
+    }
+    let mut result = chosen.into_values().collect::<Vec<_>>();
+    result.sort_by(|a, b| {
+        b.release_date
+            .cmp(&a.release_date)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    result
+}
+
 /// The 50 most recently played tracks, newest first.
 ///
 /// History contains one entry per *play*, so a track on repeat fills the whole
@@ -621,6 +795,7 @@ fn collapse_history(history_items: Vec<PlayHistoryItem>) -> Vec<RecentActivityIt
                     image_url: track.image_url.clone(),
                     last_played_at: history.played_at,
                     track_uri: Some(track_uri),
+                    frequency: 1,
                 }
             }
             Some(context) if context.kind == "artist" => {
@@ -643,6 +818,7 @@ fn collapse_history(history_items: Vec<PlayHistoryItem>) -> Vec<RecentActivityIt
                     image_url: None,
                     last_played_at: history.played_at,
                     track_uri: Some(track_uri),
+                    frequency: 1,
                 }
             }
             // Playlist context metadata is not embedded in playback history.
@@ -664,6 +840,7 @@ fn collapse_history(history_items: Vec<PlayHistoryItem>) -> Vec<RecentActivityIt
                     image_url: track.image_url.clone(),
                     last_played_at: history.played_at,
                     track_uri: Some(track_uri),
+                    frequency: 1,
                 }
             }
             _ => RecentActivityItem {
@@ -675,10 +852,13 @@ fn collapse_history(history_items: Vec<PlayHistoryItem>) -> Vec<RecentActivityIt
                 image_url: track.image_url.clone(),
                 last_played_at: history.played_at,
                 track_uri: None,
+                frequency: 1,
             },
         };
         if seen.insert(activity.uri.clone()) {
             result.push(activity);
+        } else if let Some(existing) = result.iter_mut().find(|item| item.uri == activity.uri) {
+            existing.frequency = existing.frequency.saturating_add(1);
         }
     }
     result
@@ -705,6 +885,7 @@ mod tests {
             uri: format!("spotify:track:{id}"),
             name: name.into(),
             artists: vec![WireArtist {
+                id: Some("artist".into()),
                 name: "Artist".into(),
             }],
             album: Some(WireAlbum {
@@ -712,11 +893,17 @@ mod tests {
                 uri: format!("spotify:album:{album_id}"),
                 name: "Album".into(),
                 artists: vec![WireArtist {
+                    id: Some("artist".into()),
                     name: "Artist".into(),
                 }],
                 images: vec![],
+                album_type: "album".into(),
+                release_date: Some("2026-01-01".into()),
+                release_date_precision: Some("day".into()),
+                total_tracks: Some(10),
             }),
             duration_ms: 180_000,
+            explicit: false,
         }
     }
 
@@ -757,5 +944,28 @@ mod tests {
         assert_eq!(result[0].track_uri.as_deref(), Some("spotify:track:one"));
         assert_eq!(result[1].kind, "track");
         assert_eq!(result[1].uri, "spotify:track:loose");
+    }
+
+    #[test]
+    fn release_editions_are_deduplicated_but_distinct_years_remain() {
+        let release = |id: &str, name: &str, date: &str, tracks| AlbumSummary {
+            uri: format!("spotify:album:{id}"),
+            id: id.into(),
+            name: name.into(),
+            artists: vec!["Artist".into()],
+            image_url: None,
+            album_type: "album".into(),
+            release_date: Some(date.into()),
+            release_date_precision: Some("day".into()),
+            total_tracks: Some(tracks),
+        };
+        let result = deduplicate_releases(vec![
+            release("a", "Record", "2026-01-01", 10),
+            release("b", "Record (Deluxe Edition)", "2026-02-01", 14),
+            release("c", "Record", "2018-01-01", 10),
+        ]);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|album| album.id == "b"));
+        assert!(result.iter().any(|album| album.id == "c"));
     }
 }

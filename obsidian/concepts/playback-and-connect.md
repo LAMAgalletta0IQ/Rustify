@@ -177,6 +177,25 @@ UI display        ◄──volumeToPercent────  PlaybackState.volume
 Volume is seeded from `mixer.volume()` at startup so the slider is correct
 before the first `VolumeChanged` event.
 
+## Native output selection and DSP
+
+`audio.rs` wraps librespot's `Sink` before rodio/CPAL receives each decoded
+stereo 44.1 kHz packet. Six peaking biquads plus preamp/headroom run on the
+audio thread, never the WebView thread. Direct Form I filters retain state
+while coefficients and wet gain move toward new values over roughly 35 ms.
+Disabled-and-settled bypass is sample-exact.
+
+The wrapper also selects a CPAL 0.16 output by reported name. A change rebuilds
+only the underlying rodio sink on the next packet, preserving Session, Player,
+Spirc, queue, position, shuffle, and repeat. A disconnected or failed device
+falls back to the current system default and publishes an actionable error.
+CPAL 0.16 does not provide stable cross-reboot IDs in this stack, so persisted
+names are always revalidated.
+
+Quality is fixed when the local Player starts: Automatic/Normal = 160 kbps,
+Data saver = 96 kbps, and Very high = 320 kbps. EQ and output changes reach the
+live sink after Save; quality changes begin with the next local session.
+
 ## See also
 
 [[architecture]] · [[data-flow]] · [[state-and-events]] · [[player.rs]] ·

@@ -90,7 +90,7 @@
         {/if}
         <span class="meta">
           <span class="name truncate">{t.name}</span>
-          <span class="artist muted truncate">{t.artists.join(", ")}</span>
+          <span class="artist muted truncate">{#if t.explicit}<span class="explicit" title="Explicit">E</span>{/if}{t.artists.join(", ")}</span>
         </span>
         <!-- Singles name the album after the track, which just prints the
              title twice on the same row. Show it only when it adds something. -->
@@ -196,4 +196,5 @@
   .empty {
     padding: 16px 8px;
   }
+  .explicit { display:inline-grid;place-items:center;width:14px;height:14px;margin-right:5px;border-radius:3px;background:rgba(255,241,224,.16);font-size:9px;color:var(--fg); }
 </style>

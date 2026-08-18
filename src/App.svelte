@@ -18,12 +18,15 @@
   import Settings from "./lib/views/Settings.svelte";
   import Profile from "./lib/views/Profile.svelte";
   import Setup from "./lib/views/Setup.svelte";
+  import Releases from "./lib/views/Releases.svelte";
+  import ForYou from "./lib/views/ForYou.svelte";
 
-  type Tab = "home" | "search" | "library" | "settings";
+  type Tab = "home" | "search" | "releases" | "library" | "forYou" | "settings";
 
   let tab = $state<Tab>("home");
   let nowPlayingOpen = $state(false);
   let profileOpen = $state(false);
+  let playerFullscreen = $state(false);
   let main: HTMLElement | null = $state(null);
 
   const appWindow = getCurrentWindow();
@@ -73,7 +76,7 @@
       {/if}
     </div>
   {:else}
-    <div class="shell">
+    <div class="shell" class:fullscreen-player={playerFullscreen}>
       <header class="titlebar" data-tauri-drag-region>
         <div class="mark" data-tauri-drag-region>
           <img class="logo" src={iconUrl} alt="" width="20" height="20" draggable="false" />
@@ -85,6 +88,7 @@
           <button class:on={tab === "search"} aria-current={tab === "search" ? "page" : undefined} onclick={() => go("search")}>
             Search
           </button>
+          <button class:on={tab === "releases"} aria-current={tab === "releases" ? "page" : undefined} onclick={() => go("releases")}>Releases</button>
           <button class:on={tab === "library"} aria-current={tab === "library" ? "page" : undefined} onclick={() => go("library")}>
             Library
           </button>
@@ -129,15 +133,19 @@
         </div>
       {/if}
 
-      <main bind:this={main}>
+      <main bind:this={main} class:player-view={nowPlayingOpen}>
         {#if profileOpen}
           <Profile onBack={() => (profileOpen = false)} />
         {:else if nowPlayingOpen}
-          <NowPlaying onClose={() => (nowPlayingOpen = false)} />
+          <NowPlaying onClose={() => (nowPlayingOpen = false)} onFullscreenChange={(value) => (playerFullscreen = value)} />
         {:else if tab === "home"}
-          <Home onBrowseLibrary={() => go("library")} />
+          <Home onBrowseLibrary={() => go("library")} onOpenForYou={() => go("forYou")} onOpenReleases={() => go("releases")} />
         {:else if tab === "search"}
           <Search />
+        {:else if tab === "releases"}
+          <Releases />
+        {:else if tab === "forYou"}
+          <ForYou />
         {:else if tab === "library"}
           <Library />
         {:else}
@@ -145,7 +153,7 @@
         {/if}
       </main>
 
-      <PlayerBar onOpenNowPlaying={() => (nowPlayingOpen = !nowPlayingOpen)} />
+      {#if !playerFullscreen}<PlayerBar onOpenNowPlaying={() => (nowPlayingOpen = !nowPlayingOpen)} />{/if}
     </div>
   {/if}
 </div>
@@ -387,4 +395,7 @@
     min-height: 0;
     padding: 0 30px 8px;
   }
+  .shell.fullscreen-player > .titlebar,
+  .shell.fullscreen-player > .banner { display: none; }
+  main.player-view { padding: 0; overflow: hidden; }
 </style>

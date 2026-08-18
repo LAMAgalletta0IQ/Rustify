@@ -5,6 +5,8 @@ use librespot::core::session::Session;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::audio::{AudioRuntime, StreamQuality};
+
 /// Event names emitted to the webview. Keep in sync with `src/lib/events.ts`.
 pub mod events {
     pub const PLAYBACK: &str = "playback:changed";
@@ -42,6 +44,10 @@ pub struct PlaybackState {
     pub shuffle: bool,
     pub repeat_context: bool,
     pub repeat_track: bool,
+    /// Requested local-session quality. `audio_quality_label` is the concrete
+    /// bitrate librespot 0.8 maps it to; remote-device quality is unknowable.
+    pub audio_quality: StreamQuality,
+    pub audio_quality_label: String,
 
     /// Position as of [`Self::position_at`], and when that reading was taken.
     ///
@@ -132,6 +138,9 @@ pub struct AppState {
     /// Held outside `spotify` so the event pump can read it without taking a
     /// lock on the whole session.
     pub tokens: TokenStore,
+    /// Synchronous audio-thread controls. This is separate from the Tokio
+    /// state so the sink never blocks on an async runtime lock.
+    pub audio: AudioRuntime,
 }
 
 impl AppState {

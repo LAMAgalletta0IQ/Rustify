@@ -45,6 +45,10 @@
   --r-sm: 10px;
   --r-md: 16px;
   --r-lg: 22px;
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-slow: 320ms;
+  --ease-standard: cubic-bezier(.2,.8,.2,1);
 
   color-scheme: dark;
   font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
@@ -96,6 +100,8 @@ input {
   border: none;
   outline: none;
 }
+button { transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard); }
+button:active:not(:disabled) { transform: scale(.97); }
 
 button:focus-visible,
 input:focus-visible {
@@ -195,6 +201,16 @@ input:focus-visible {
   background: var(--glass-hover);
   border-color: rgba(255, 241, 224, 0.16);
   transform: translateY(-3px);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-fast: 0ms; --motion-normal: 0ms; --motion-slow: 0ms; }
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+  scroll-behavior: auto !important;
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
 }
 
 /* Artwork inside a card is a block-level square. Without `display: block` a

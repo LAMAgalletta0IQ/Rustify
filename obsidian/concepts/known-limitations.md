@@ -70,6 +70,21 @@ Home provides two truthful alternatives: a mix built from `/me/top/tracks`,
 and recent releases from `/me/top/artists`. Neither is presented as a
 Spotify-authored Daily Mix or recommendation shelf.
 
+The current complete “For you” view makes the distinction explicit: it uses
+authenticated `/me/top` data arranged by Rustify and never labels results as
+Daily Mix, Discover Weekly, Release Radar, DJ, or other official content.
+
+### Friend activity
+Spotify exposes no friend presence endpoint through the public Web API.
+librespot 0.8 contains only an unimplemented buddy-list TODO, not a stable
+authenticated interface. Home therefore shows an accurate unavailable state
+and never infers or fabricates listening activity.
+
+### Lossless playback
+The pinned librespot 0.8 track loader selects only 96, 160, and 320 kbps lossy
+files. Its metadata enum recognizes FLAC, but the player does not request those
+files. Settings omits Lossless instead of presenting a cosmetic toggle.
+
 ### Album rows have no cover art
 `/albums/{id}/tracks` returns *simplified* track objects with no nested album,
 so `imageUrl` is null on every row. [[AlbumView.svelte]] shows the art in the
@@ -129,8 +144,10 @@ side effect of `tauri icon` — they are unused. See [[icons]].
 Library and artist releases append pages on demand. Very large libraries can
 therefore accumulate DOM nodes.
 
-### Search results are not paginated
-[[Search.svelte]] requests a single page (10 per type, the API maximum).
+### Search pages are 10 results per type
+[[Search.svelte]] uses the API maximum of 10 per type and incrementally loads
+further offset pages. Spotify provides no comparable cross-type score, so the
+top result preserves the first API-ranked artist (or track).
 
 ### No offline mode
 librespot caches audio (a configurable 128–8192 MB cap, 2 GB by default), but

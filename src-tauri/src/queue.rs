@@ -70,9 +70,11 @@ impl From<WireTrack> for TrackSummary {
             uri: t.uri,
             name: t.name,
             artists: t.artists.into_iter().map(|a| a.name).collect(),
+            artist_ids: Vec::new(),
             album: t.album.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
             image_url: t.album.as_ref().and_then(|a| pick_image(&a.images)),
             duration_ms: t.duration_ms,
+            explicit: false,
         }
     }
 }

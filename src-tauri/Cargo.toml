@@ -28,6 +28,11 @@ env_logger = "0.11"
 
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 futures-util = "0.3"
+biquad = "0.6"
+# Keep this aligned with the version used by librespot's rodio backend. It is
+# used only for device discovery; decoded samples still flow through
+# librespot's Sink contract.
+cpal = "0.16"
 
 reqwest = { version = "0.12", default-features = false, features = [
     "json",

@@ -1,0 +1,12 @@
+# 2026-08 follow-up parity architecture
+
+- Home quick access is ranked in `src-tauri/src/relevance.rs`: Spotify recent-play order/frequency plus account-scoped persisted navigation/play events. Files are `relevance-{sanitized_user_id}.json`, capped at 100, and never mixed across users. No arbitrary playlist fallback.
+- Followed releases are aggregated in `library::followed_releases` from documented followed-artist cursor pages and `/artists/{id}/albums`. Pagination is by eight artists; partial failures are returned; editions dedupe by primary artist + normalized title + album type + release year, preferring fuller/dated/arted editions.
+- Personalized UI is explicitly Rustify-arranged `/me/top` data. No public Spotify Home/Made For feed and no hardcoded names/IDs.
+- Spotify public API has no friend presence endpoint. Installed librespot 0.8 only has an unimplemented buddy-list TODO; UI must remain an honest unavailable state.
+- `src-tauri/src/audio.rs` wraps librespot `Sink`. It switches only the inner rodio/CPAL sink to preserve Player/Spirc/queue; device names are CPAL 0.16 identifiers and must fall back to system default on disconnect. Six DirectForm1 peaking filters + preamp run on the audio thread, with ~35ms coefficient/wet smoothing and auto headroom. Disabled settled bypass is sample-exact.
+- Installed librespot 0.8 player loader requests only 96/160/320 kbps lossy streams. Settings maps Low=96, Automatic/Normal=160, VeryHigh=320 and omits lossless. Quality applies at next local session; device/EQ after Save on next packet.
+- `NowPlaying.svelte` stays mounted across native `setFullscreen`, uses F11/Escape, and hides the separate PlayerBar only while fullscreen. Lyrics use LRCLIB line timestamps only, manual scroll suspends follow, resume is explicit, and line click seeks.
+- New OAuth grant includes `user-follow-modify`; existing accounts may need one sign-out/in. Artist follow/check uses generic `/me/library` artist URIs. Liked tracks are matched by artist ID across up to 500 saved tracks.
+- Search offset pagination respects Spotify's 10-per-type ceiling. Artist popularity/monthly listeners/verification are never invented.
+- Obsidian summary: `obsidian/concepts/2026-08-parity-pass.md`; see also `mem:backend/core`, `mem:backend/spotify_2026`.

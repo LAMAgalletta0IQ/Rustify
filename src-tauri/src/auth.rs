@@ -7,6 +7,7 @@ use librespot_oauth::{OAuthClientBuilder, OAuthToken};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
+use crate::audio::{EqualizerSettings, StreamQuality};
 use crate::error::{AppError, AppResult};
 use crate::state::{events, AppState, AuthState, PlaybackState, TokenStore};
 use crate::webapi::WebApi;
@@ -44,6 +45,7 @@ pub const STREAMING_SCOPES: &[&str] = &[
     "playlist-modify-private",
     "playlist-modify-public",
     "user-follow-read",
+    "user-follow-modify",
     "user-top-read",
     "user-read-recently-played",
 ];
@@ -64,6 +66,7 @@ pub const WEBAPI_SCOPES: &[&str] = &[
     "playlist-modify-private",
     "playlist-modify-public",
     "user-follow-read",
+    "user-follow-modify",
     "user-top-read",
     "user-read-recently-played",
 ];
@@ -117,6 +120,14 @@ pub struct Settings {
     pub reduce_motion: bool,
     #[serde(default = "default_cache_limit_mb")]
     pub cache_limit_mb: u32,
+    #[serde(default)]
+    pub audio_quality: StreamQuality,
+    /// None follows the operating-system default. Names are the stable handle
+    /// exposed by CPAL 0.16/rodio 0.21 on this pinned stack.
+    #[serde(default)]
+    pub output_device: Option<String>,
+    #[serde(default)]
+    pub equalizer: EqualizerSettings,
 }
 
 const fn default_volume_percent() -> u8 {
@@ -134,6 +145,9 @@ impl Default for Settings {
             default_volume_percent: default_volume_percent(),
             reduce_motion: false,
             cache_limit_mb: default_cache_limit_mb(),
+            audio_quality: StreamQuality::default(),
+            output_device: None,
+            equalizer: EqualizerSettings::default(),
         }
     }
 }
