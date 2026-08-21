@@ -1,0 +1,15 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.vscode/
+*.log
+
+# Local Spotify credentials + audio cache written at runtime.
+src-tauri/.cache/
+
+# Local config. `.env.example` is the committed template.
+.env
+
+# Local visual references; keep them out of repository changes.
+/screenshots/

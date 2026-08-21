@@ -1,0 +1,281 @@
+---
+tags: [concept, auth]
+---
+# Authentication and tokens
+
+Two logins, two client IDs, one session.
+
+## The core idea
+
+librespot needs credentials to stream. The Web API needs a bearer token for
+metadata. These are served by **two separate OAuth authorizations**, because the
+client ID that can stream and the client ID that should carry Web API traffic
+are not the same one:
+
+```
+                Spotify desktop client ID              your own client ID
+                (SessionConfig::default)               (RUSTIFY_CLIENT_ID)
+                        │                                      │
+                   STREAMING_SCOPES                      WEBAPI_SCOPES
+                        │                                      │
+                        ▼                                      ▼
+        Credentials::with_access_token()          Authorization: Bearer …
+             (librespot Session)                    (Spotify Web API)
+```
+
+This mirrors [ncspot](https://github.com/hrkfdn/ncspot), which uses the same
+split for the same reason — see `SPOTIFY_CLIENT_ID` / `NCSPOT_CLIENT_ID` in its
+`authentication.rs`.
+
+**Cost:** the browser opens twice on an interactive login. [[Login.svelte]] says
+so explicitly.
+
+**A Web API client ID is required before Login is even reachable.** On first
+launch, `get_login_info` reports whether one is configured; if not, the UI
+shows a Setup screen ([[Setup.svelte]]) instead of Login, which walks the user
+through registering their own Spotify app and saves the ID via `set_client_id`
+([[commands.rs]]). See *Configuring the Client ID* below.
+
+> Until 2026-08 an unconfigured ID fell back to a client ID baked into the
+> binary, so a single login served both roles and the browser opened once.
+> That meant every user who skipped configuration shared *the app author's*
+> quota — see *The shared fallback* below for what still uses this
+> single-login shape today (it is now reached only via a refresh failure, not
+> via missing configuration).
+
+## Why the split
+
+The desktop client ID's Web API quota is pooled across **every librespot-based
+client in the world**, so a 429 can land on a first request the user never made.
+Moving Web API traffic onto a self-registered app gives it a private quota. See
+[[rate-limiting]].
+
+The reverse move is not available: self-registered apps are generally refused the
+`streaming` scope, so playback must stay on the desktop ID. That is why
+`streaming_client_id()` is a hardcoded constant while `webapi_client_id()` is
+configurable.
+
+## Client IDs and redirects
+
+| Role | Client ID | Redirect | Configurable |
+| --- | --- | --- | --- |
+| Streaming | `SessionConfig::default().client_id` | `http://127.0.0.1:8898/login`, falling back to an ephemeral port if busy | No |
+| Web API | saved via Setup / `RUSTIFY_CLIENT_ID` override | `http://127.0.0.1:8899/login`, fixed | Yes — required |
+
+The asymmetry in the redirect ports is deliberate. The desktop ID accepts any
+loopback port, so a port held by a stale process is recoverable. A
+self-registered app must declare its redirect URI **exactly** in the Spotify
+dashboard, so that one cannot be chosen at random.
+
+### Configuring the Client ID
+
+Two sources, in priority order, read by `auth::webapi_client_id(data_dir)`:
+
+1. **`RUSTIFY_CLIENT_ID` env var** — a packager/dev override (see
+   `.env.example`), not the path normal users take.
+2. **`settings.json`** in the app data dir, written by the `set_client_id`
+   command when the user submits [[Setup.svelte]]'s form.
+
+If neither resolves, `webapi_client_id` returns `Err`, which
+`get_login_info`/`restore_session` in [[commands.rs]] interpret as "Setup
+still needed" rather than a hard failure — the UI simply shows Setup instead
+of Login.
+
+Registering the app: dashboard → Create app → add `http://127.0.0.1:8899/login`
+→ paste the Client ID into the app's Setup screen (or `.env`, for the override
+path). A Client ID is not a secret; this flow is PKCE and uses no client
+secret.
+
+## Scopes
+
+`STREAMING_SCOPES` is deliberately the **full union**, not just `streaming`.
+
+That looks redundant when the split is active, and it is — but this token is the
+fallback whenever a private Web API token is unavailable. Narrowing it to the
+playback scopes made that fallback silently under-privileged: search still
+worked (it needs no scope) while every library and player call returned a bare
+403. ncspot requests the same broad set against this client ID.
+
+| Group | Scopes |
+| --- | --- |
+| Playback | `streaming` (streaming login only) |
+| Profile | `user-read-private`, `user-read-email` |
+| Connect | `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing` |
+| Library | `user-library-read`, `user-library-modify`, `playlist-read-private`, `playlist-read-collaborative`, `playlist-modify-private`, `playlist-modify-public`, `user-follow-read`, `user-top-read`, `user-read-recently-played` |
+
+`WEBAPI_SCOPES` is the same list minus `streaming`.
+
+Some scopes are requested ahead of the features that need them
+(`playlist-modify-*`, `user-follow-read`, `user-read-recently-played` are
+currently unused), so adding those features later needs no re-consent.
+
+## The shared fallback
+
+`SessionTokens::shared()` points both roles at the streaming token. Reached when:
+
+- a Client ID is configured but no Web API refresh token is stored yet for it
+  (e.g. it was just changed via Setup/"Use a different Client ID") — logged at
+  `warn`; or
+- the Web API refresh fails during a restore (logged at `warn`).
+
+A missing Client ID no longer reaches this path — it is caught earlier,
+before `restore_login`/`interactive_login` are even called (see *Configuring
+the Client ID* above).
+
+That third case must **not** propagate as an error. The streaming refresh has
+already succeeded by then, and Spotify rotates refresh tokens on use — so the
+stored streaming token is dead and its replacement exists only in memory.
+Failing there would drop the rotation and lock the user out on the next launch.
+
+## The Premium gate
+
+librespot cannot play the free, ad-supported tier. Rather than let that fail
+somewhere deep in the audio pipeline, `fetch_profile_require_premium`
+([[auth.rs]]) reads `GET /v1/me` and checks `product`:
+
+- present `"premium"` → proceed.
+- present non-premium value → `AppError::PremiumRequired(product)`.
+- absent field → proceed to librespot, because Spotify removed `product` from
+  `/me` for some newer Development Mode apps.
+
+This runs **before** librespot starts, so a free account gets a clear message
+instead of silence. [[Login.svelte]] branches on the `kind` field to show a
+dedicated explanation.
+
+> **The gate is the app's most rate-limit-exposed call** — one `GET /v1/me` per
+> login. A 429 there once failed a login whose OAuth had already succeeded,
+> which is why refresh tokens are persisted *before* the gate: a retry can then
+> go through `restore_session` with no browser. See [[rate-limiting]].
+
+This is a plain read of the account's own stated plan. Nothing is spoofed or
+bypassed — it exists to produce a good error message, not to gate anything.
+
+## Token lifecycle
+
+```
+                 ┌──────────────────────────────┐
+   first run ──► │ interactive_login()          │  browser opens ×2
+                 │  1. streaming (desktop ID)   │  (only reachable once
+                 │  2. web api  (private ID)    │   Setup has saved an ID)
+                 └──────────────┬───────────────┘
+                                ▼
+                 ┌──────────────────────────────┐
+                 │ establish()                  │
+                 │  1. save both refresh tokens │
+                 │  2. Premium check (web token)│
+                 │  3. tokens.set(web access)   │
+                 │  4. start_session (streaming)│
+                 │  5. spawn_refresher          │
+                 │  6. spawn_remote_poller      │
+                 │  7. tear down old session    │
+                 └──────────────┬───────────────┘
+                                ▼
+                 ┌──────────────────────────────┐
+                 │ spawn_refresher (loop)       │
+                 │  sleep → refresh → set →     │
+                 │  persist if rotated          │
+                 └──────────────────────────────┘
+
+  later runs ──► restore_session() → restore_login() → establish()
+                 (no browser; refreshes both tokens)
+```
+
+### The refresher
+
+Access tokens last ~1 hour. Without renewal, every Web API call — library,
+search, devices, queue, and the metadata behind the now-playing bar — would
+start returning 401 after an hour of uptime.
+
+- Wakes `REFRESH_MARGIN` (5 min) before `expires_at`, floored at
+  `MIN_REFRESH_DELAY` (30 s) so an already-expired token cannot spin.
+- Refreshes whichever token is serving the Web API role, under the client ID
+  that issued it.
+- Persists a rotated refresh token into the correct field, preserving the other.
+- Retries transient network/provider failures.
+- Treats `invalid_grant`/`invalid_client` as terminal: Spotify refresh tokens
+  now expire after six months, so the task clears the rejected file/token,
+  shuts down the session, resets auth/playback, emits logged-out state, and
+  stops rather than looping forever.
+- Aborted on logout via the `JoinHandle` stored in `SpotifySession`.
+
+Only the *Web API* token is on this schedule. librespot's `Session` maintains its
+own connection and internal token provider once connected.
+
+## Storage
+
+`tokens.json` in the Tauri app data dir holds only refresh tokens — access
+tokens are never written to disk.
+
+```jsonc
+{
+  "refresh_token": "…",            // streaming (desktop ID)
+  "webapi_refresh_token": "…"      // absent unless the split is active
+}
+```
+
+`webapi_refresh_token` is `#[serde(default)]`, so files written before the split
+still load. An empty string is stored as **absent**, never as `Some("")` —
+Spotify rejects a blank refresh token with `invalid_request: refresh_token must
+be supplied`, which would fail every restore until the file was deleted by hand.
+
+**Writing is a merge, not a replacement.** `save_stored_tokens` reads the
+existing file first and keeps the stored `webapi_refresh_token` whenever the
+session being saved has none. A session that fell back to the shared token
+legitimately carries `None`, and writing that through would delete a valid
+credential. Deliberate clearing goes through `clear_stored_tokens`, which
+deletes the file, so preserving on `None` cannot strand a dead token.
+
+**Spotify only sends `refresh_token` back when it rotates one.** An omitted
+field means "keep the one you have", not "you have none" — but it deserialises
+to the empty string, which reads as the latter. `restore_login` copies the
+outgoing token back over an empty response field before building
+`SessionTokens`; without that, `stored()` reported the session as having no Web
+API credential at all.
+
+librespot separately caches its own credentials and up to 2 GB of audio under
+`<app data>/cache`. The Web API Client ID itself lives in a sibling file,
+`settings.json` (`{ "webapi_client_id": "…" }`), written by `set_client_id` and
+read by `webapi_client_id`. It is deliberately separate from `tokens.json`:
+the Client ID belongs to the Spotify app the user registered and survives
+logout, whereas `tokens.json` is cleared on logout.
+
+> The Tauri `identifier` feeds the app data dir path, so changing it orphans
+> `tokens.json` and forces one fresh login. See [[build-and-config]].
+
+## Deleting stored tokens
+
+Only `invalid_grant` / `invalid_client` — Spotify saying the grant itself is
+dead — justifies deleting `tokens.json` (`auth::is_grant_rejected`). Everything
+else is transient.
+
+Clearing on *any* restore failure meant a network blip at startup logged the
+user out, which fired intermittently whenever the app started faster than the
+network came up.
+
+## Failure modes
+
+| Situation | Behaviour |
+| --- | --- |
+| No stored token | Logged-out state, login screen. Not an error |
+| Stored token rejected (`invalid_grant`) | File deleted, login screen. Logged as a warning |
+| Restore fails transiently | **Tokens kept**, login screen, retried next launch |
+| Web API refresh fails mid-restore | Degrades to the shared token; rotation preserved |
+| Background refresh grant expires | Live session ends, stored token cleared, login screen shown |
+| Free account | `PremiumRequired` with the plan name |
+| **Rate limited on `/me`** | `RateLimited` with `Retry-After`; UI counts down and silently retries |
+| Logout | Spirc shut down, refresher + poller aborted, token cleared, file deleted |
+| Re-login without logout | Old session shut down, its tasks aborted first |
+
+## Not supported: username and password
+
+Spotify removed password authentication server-side at the end of July 2024.
+`Credentials::with_password` still exists in librespot 0.8's API and compiles
+fine, but the server answers `Bad credentials` every time. OAuth is the only
+route; the user still types their password, into Spotify's own page. ncspot has
+no password path either. See [[known-limitations]].
+
+## See also
+
+[[architecture]] · [[data-flow]] · [[state-and-events]] · [[rate-limiting]] ·
+[[known-limitations]] · [[auth.rs]] · [[commands.rs]] · [[lib.rs]] ·
+[[Login.svelte]] · [[Setup.svelte]] · [[error.rs]] · [[MOC]]

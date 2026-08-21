@@ -1,0 +1,10 @@
+# Spotify and librespot capability map (verified 2026-08-18)
+- librespot 0.8 supports local streaming/Spirc/Connect/session/player/cache/mixer. It does not implement supported public Web API library, Home, recommendations, artist catalog, profile, or lyrics features.
+- Supported Web API used: /me, /me/playlists, /playlists/{id}/items, /me/tracks and /me/albums reads, /albums/{id}/tracks, /me/following, /me/player/recently-played, /me/top/{tracks|artists}, /artists/{id}, /artists/{id}/albums, search/devices/player/queue.
+- Library mutations/checks must use generic /me/library?uris=... and /me/library/contains?uris=..., max 40. Content-specific /me/tracks and /me/albums save/contains paths are deprecated/removed for 2026 Development Mode. Spotify's edge requires Content-Length: 0 on query-only PUT/DELETE.
+- /artists/{id}/top-tracks was removed in Feb 2026. Rustify uses and labels a release-derived track sample; artist albums limit max is 10 with pagination.
+- Recommendations, related artists, audio analysis/features, and Spotify-owned algorithmic/editorial playlists are unavailable to newer Development Mode apps. Home uses top items and artist releases with honest copy.
+- Recent history items include track, played_at, nullable context. Group/dedup album/playlist/artist by context URI; null contexts remain track items; preserve newest order/start track.
+- Spotify has no public lyrics API and librespot has none. LRCLIB documented /api/get is used with identifying UA, exact metadata/duration, synchronized LRC + plain fallback, and honest external-provider states.
+- /me.product may be omitted for new Development Mode apps; enforce Premium only if present, otherwise librespot is authoritative. Development Mode is Premium-owner/5-user/reduced endpoints.
+- 429 carries Retry-After; July 2026 may include QUOTA_EXCEEDED. Refresh tokens expire after six months (June 2026).

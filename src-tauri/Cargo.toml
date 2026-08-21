@@ -1,0 +1,75 @@
+[package]
+name = "rustify"
+version = "0.1.0"
+description = "Lightweight native Spotify client"
+edition = "2021"
+rust-version = "1.82"
+
+[lib]
+name = "rustify_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+# Debug-only automation bridge; gated behind `cfg(debug_assertions)` in lib.rs.
+tauri-plugin-mcp-bridge = "0.12"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenvy = "0.15"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+futures-util = "0.3"
+biquad = "0.6"
+# Keep this aligned with the version used by librespot's rodio backend. It is
+# used only for device discovery; decoded samples still flow through
+# librespot's Sink contract.
+cpal = "0.16"
+
+# Experimental Spotify Jams module (src/jams/). Self-contained; these only
+# exist to serve it. tokio-tungstenite is required by dealer.rs; the rest are
+# client-token minting, persisted-query config, and tracing.
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+# The "log" feature makes `tracing` events fall through to the `log` crate when
+# no tracing subscriber is installed. The app installs env_logger, not a
+# subscriber, so without this every warn!/debug! in `jams/` is silently
+# discarded — including the one line that says which URL returned the 400.
+tracing = { version = "0.1", features = ["log"] }
+uuid = { version = "1", features = ["v4"] }
+toml = "0.8"
+
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "native-tls",
+] }
+
+# `with-libmdns` (a librespot default feature) is deliberately OFF: zeroconf
+# discovery is only needed for the "log in from another device" flow. We
+# authenticate via OAuth, and a logged-in Spirc advertises itself through
+# Spotify's dealer/websocket, not mDNS. Dropping it removes a dependency tree
+# we never execute.
+librespot = { version = "0.8.0", default-features = false, features = [
+    "native-tls",
+    "rodio-backend",
+] }
+librespot-oauth = { version = "0.8.0", default-features = false, features = [
+    "native-tls",
+] }
+
+[dev-dependencies]
+# Only used by examples/jam_demo.rs to show the module's tracing output.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
