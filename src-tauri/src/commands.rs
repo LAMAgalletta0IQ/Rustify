@@ -1486,10 +1486,26 @@ pub async fn get_jam_status(app: AppHandle, state: State<'_, AppState>) -> AppRe
         });
     };
     let config = ctrl.config();
+    let mut session = ctrl.session().await;
+    if let Some(session) = &mut session {
+        let queue = state.queue.read().await;
+        session.queue = queue
+            .queue
+            .iter()
+            .chain(queue.autoplay.iter())
+            .map(|track| crate::jams::JamTrack {
+                uri: track.uri.clone(),
+                name: Some(track.name.clone()),
+                artists: track.artists.clone(),
+                added_by: None,
+                added_at: None,
+            })
+            .collect();
+    }
     Ok(JamStatus {
         spclient_endpoints: config.spclient_endpoints.len(),
         pathfinder_hashes: config.pathfinder_hashes.len(),
-        session: ctrl.session().await,
+        session,
     })
 }
 

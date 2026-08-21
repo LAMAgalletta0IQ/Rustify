@@ -85,22 +85,9 @@ fn session_update_event(raw: Value) -> Result<JamEvent, JamError> {
         .get("reason")
         .and_then(|value| {
             value.as_str().map(str::to_owned).or_else(|| {
-                value.as_i64().map(|number| {
-                    match number {
-                        1 => "NEW_SESSION",
-                        2 => "USER_JOINED",
-                        3 => "USER_LEFT",
-                        4 => "SESSION_DELETED",
-                        5 => "YOU_LEFT",
-                        6 => "YOU_WERE_KICKED",
-                        7 => "YOU_JOINED",
-                        8 => "PARTICIPANT_PROMOTED_TO_HOST",
-                        9 => "DISCOVERABILITY_CHANGED",
-                        10 => "USER_KICKED",
-                        _ => "UNKNOWN_UPDATE_TYPE",
-                    }
-                    .to_owned()
-                })
+                value
+                    .as_i64()
+                    .map(|number| session_update_reason(number).to_owned())
             })
         })
         .unwrap_or_else(|| "UNKNOWN_UPDATE_TYPE".to_owned());
@@ -130,8 +117,103 @@ fn session_update_event(raw: Value) -> Result<JamEvent, JamError> {
     })
 }
 
+fn session_update_reason(number: i64) -> &'static str {
+    match number {
+        1 => "NEW_SESSION",
+        2 => "USER_JOINED",
+        3 => "USER_LEFT",
+        4 => "SESSION_DELETED",
+        5 => "YOU_LEFT",
+        6 => "YOU_WERE_KICKED",
+        7 => "YOU_JOINED",
+        // Present in librespot's Spotify 1.2.52 schema. Keep them for older
+        // servers while also accepting the expanded current libspot enum.
+        8 => "PARTICIPANT_PROMOTED_TO_HOST",
+        9 => "DISCOVERABILITY_CHANGED",
+        10 => "USER_KICKED",
+        11 => "VOLUME_CONTROL_PERMISSIONS_CHANGED",
+        12 => "QUEUE_ONLY_MODE_CONTROL_CHANGED",
+        13 => "WIFI_BROADCAST_CHANGED",
+        14 => "ACTIVE_DEVICE_CHANGED",
+        16 => "SESSION_MEMBER_UPDATED",
+        17 => "SESSION_ACTIVATED",
+        _ => "UNKNOWN_UPDATE_TYPE",
+    }
+}
+
 fn terminal_update(reason: &str) -> bool {
     matches!(reason, "SESSION_DELETED" | "YOU_LEFT" | "YOU_WERE_KICKED")
+}
+
+fn has_field(value: &Value, names: &[&str]) -> bool {
+    names.iter().any(|name| value.get(*name).is_some())
+}
+
+/// Dealer `Session` payloads are frequently sparse and the newest extracted
+/// schema has even reserved fields still present in the richer HTTP response.
+/// Replacing the cache wholesale would make the invite link, host and
+/// permissions disappear whenever somebody joined. Only fields explicitly
+/// carried by the push are authoritative; everything else survives.
+fn merge_session(previous: Option<JamSession>, mut incoming: JamSession) -> JamSession {
+    let Some(previous) = previous.filter(|session| session.id == incoming.id) else {
+        return incoming;
+    };
+    let raw = &incoming.active_state;
+    if incoming.timestamp.is_none() {
+        incoming.timestamp = previous.timestamp;
+    }
+    if incoming.owner_id.is_none() {
+        incoming.owner_id = previous.owner_id;
+    }
+    if incoming.host.is_none() {
+        incoming.host = previous.host;
+    }
+    if incoming.members.is_empty() {
+        incoming.members = previous.members;
+    }
+    if incoming.queue.is_empty() {
+        incoming.queue = previous.queue;
+    }
+    if incoming.join_token.is_none() {
+        incoming.join_token = previous.join_token;
+    }
+    if incoming.join_url.is_none() {
+        incoming.join_url = previous.join_url;
+    }
+    if incoming.join_uri.is_none() {
+        incoming.join_uri = previous.join_uri;
+    }
+    if incoming.session_type.is_none() {
+        incoming.session_type = previous.session_type;
+    }
+    if incoming.host_active_device_id.is_none() {
+        incoming.host_active_device_id = previous.host_active_device_id;
+    }
+    if incoming.max_member_count.is_none() {
+        incoming.max_member_count = previous.max_member_count;
+    }
+    if incoming.host_device_info.is_none() {
+        incoming.host_device_info = previous.host_device_info;
+    }
+
+    macro_rules! preserve_bool {
+        ($field:ident, [$($name:literal),+]) => {
+            if !has_field(raw, &[$($name),+]) {
+                incoming.$field = previous.$field;
+            }
+        };
+    }
+    preserve_bool!(is_session_owner, ["is_session_owner", "isSessionOwner"]);
+    preserve_bool!(is_listening, ["is_listening", "isListening"]);
+    preserve_bool!(is_controlling, ["is_controlling", "isControlling"]);
+    preserve_bool!(is_discoverable, ["is_discoverable", "isDiscoverable"]);
+    preserve_bool!(active, ["active"]);
+    preserve_bool!(queue_only_mode, ["queue_only_mode", "queueOnlyMode"]);
+    if !has_field(raw, &["queue_only_mode", "queueOnlyMode"]) {
+        incoming.queue_control_allowed = previous.queue_control_allowed;
+    }
+    preserve_bool!(wifi_broadcast, ["wifi_broadcast", "wifiBroadcast"]);
+    incoming
 }
 
 pub struct JamController {
@@ -241,13 +323,12 @@ impl JamController {
                         Some(message) => match dealer_json(message).and_then(session_update_event) {
                             Ok(event) => {
                                 if let JamEvent::SessionUpdate { reason, session, .. } = &event {
-                                    let next = if terminal_update(reason) {
-                                        None
-                                    } else {
-                                        session.as_deref().cloned()
-                                    };
-                                    if terminal_update(reason) || next.is_some() {
-                                        *state_for_updates.write().await = next;
+                                    if terminal_update(reason) {
+                                        *state_for_updates.write().await = None;
+                                    } else if let Some(incoming) = session.as_deref().cloned() {
+                                        let previous = state_for_updates.read().await.clone();
+                                        *state_for_updates.write().await =
+                                            Some(merge_session(previous, incoming));
                                     }
                                 }
                                 let _ = app.emit(events::JAMS, &event);
@@ -424,5 +505,43 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn maps_current_and_legacy_reason_schemas() {
+        assert_eq!(session_update_reason(8), "PARTICIPANT_PROMOTED_TO_HOST");
+        assert_eq!(session_update_reason(12), "QUEUE_ONLY_MODE_CONTROL_CHANGED");
+        assert_eq!(session_update_reason(17), "SESSION_ACTIVATED");
+        assert_eq!(session_update_reason(15), "UNKNOWN_UPDATE_TYPE");
+    }
+
+    #[test]
+    fn sparse_realtime_update_preserves_http_only_session_fields() {
+        let previous = session_from_value(json!({
+            "session_id":"jam-1",
+            "join_session_token":"invite",
+            "session_owner_id":"host",
+            "session_members":[{"id":"host","display_name":"Host"}],
+            "is_session_owner":true,
+            "queue_only_mode":true,
+            "wifi_broadcast":true
+        }))
+        .unwrap();
+        let incoming = session_from_value(json!({
+            "session_id":"jam-1",
+            "active":true,
+            "session_members":[{}, {"id":"guest","display_name":"Guest"}]
+        }))
+        .unwrap();
+        let merged = merge_session(Some(previous), incoming);
+        assert_eq!(merged.join_token.as_deref(), Some("invite"));
+        assert_eq!(merged.owner_id.as_deref(), Some("host"));
+        assert!(merged.is_session_owner);
+        assert!(merged.queue_only_mode);
+        assert!(!merged.queue_control_allowed);
+        assert!(merged.wifi_broadcast);
+        assert!(merged.active);
+        assert_eq!(merged.members.len(), 1);
+        assert_eq!(merged.members[0].id, "guest");
     }
 }

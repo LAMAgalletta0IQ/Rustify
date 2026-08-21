@@ -482,6 +482,7 @@ pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
             items
                 .iter()
                 .map(|item| member_from_value(item, owner_id.as_deref()))
+                .filter(|member| !member.id.trim().is_empty())
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -596,5 +597,19 @@ mod tests {
             session_from_value(json!({"active": true})),
             Err(JamError::DecodeMessage(_))
         ));
+    }
+
+    #[test]
+    fn extracts_join_tokens_from_every_supported_invite_shape() {
+        assert_eq!(join_token("bare-token"), "bare-token");
+        assert_eq!(join_token("spotify:socialsession:uri-token"), "uri-token");
+        assert_eq!(
+            join_token("https://open.spotify.com/socialsession/web-token?si=ignored"),
+            "web-token"
+        );
+        assert_eq!(
+            join_token("https://open.spotify.com/intl-it/jam/new-shape#fragment"),
+            "new-shape"
+        );
     }
 }

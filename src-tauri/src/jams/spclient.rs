@@ -77,7 +77,7 @@ impl JamApiClient {
     pub async fn post<B: Serialize>(&self, endpoint: &str, body: &B) -> Result<Value, JamError> {
         let url = self.absolute(endpoint);
         let url_for_log = url.clone();
-        debug!("spclient POST {url}");
+        debug!("spclient POST {}", safe_url(&url));
         let resp = self
             .http
             .post(url)
@@ -103,7 +103,7 @@ impl JamApiClient {
             Some(_) => "json body",
             None => "empty body, content-length: 0",
         };
-        debug!("spclient POST {url} {query:?} ({shape})");
+        debug!("spclient POST {} {query:?} ({shape})", safe_url(&url));
         let mut req = self
             .http
             .post(url)
@@ -135,7 +135,7 @@ impl JamApiClient {
     pub async fn get(&self, endpoint: &str, query: &[(&str, String)]) -> Result<Value, JamError> {
         let url = self.absolute(endpoint);
         let url_for_log = url.clone();
-        debug!("spclient GET {url}");
+        debug!("spclient GET {}", safe_url(&url));
         let mut req = self
             .http
             .get(url)
@@ -152,7 +152,7 @@ impl JamApiClient {
     pub async fn put_empty(&self, endpoint: &str) -> Result<Value, JamError> {
         let url = self.absolute(endpoint);
         let url_for_log = url.clone();
-        debug!("spclient PUT {url} (content-length: 0)");
+        debug!("spclient PUT {} (content-length: 0)", safe_url(&url));
         let resp = self
             .http
             .put(url)
@@ -168,7 +168,7 @@ impl JamApiClient {
     pub async fn delete(&self, endpoint: &str) -> Result<Value, JamError> {
         let url = self.absolute(endpoint);
         let url_for_log = url.clone();
-        debug!("spclient DELETE {url}");
+        debug!("spclient DELETE {}", safe_url(&url));
         let resp = self
             .http
             .delete(url)
@@ -189,7 +189,7 @@ impl JamApiClient {
         })?;
         let mut path = template.clone();
         for (key, value) in vars {
-            path = path.replace(&format!("{{{key}}}"), value);
+            path = path.replace(&format!("{{{key}}}"), &path_segment(value));
         }
         Ok(self.absolute(&path))
     }
@@ -244,6 +244,18 @@ impl JamApiClient {
         let client_token = self.client_token.get_token().await?;
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static("application/json"),
+        );
+        // The spotify-jam 0.2 capture identifies the caller as the desktop
+        // surface. This is not a fabricated entitlement or credential: it is
+        // the protocol's platform discriminator, paired with the genuine
+        // Login5 bearer/client-token from this librespot desktop session.
+        headers.insert(
+            "app-platform",
+            reqwest::header::HeaderValue::from_static("Win32_x86_64"),
+        );
+        headers.insert(
             reqwest::header::AUTHORIZATION,
             reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| {
                 JamError::Config("OAuth token contains invalid header bytes".into())
@@ -288,16 +300,18 @@ impl JamApiClient {
             }
             return Ok(serde_json::from_str(&text)?);
         }
+        let safe_url = safe_url(url);
+        let safe_body = safe_body(&text);
         warn!(
-            "spclient {method} {url} -> {status}: {}",
+            "spclient {method} {safe_url} -> {status}: {}",
             match text.trim().is_empty() {
                 true => "<empty body>",
-                false => text.trim(),
+                false => &safe_body,
             }
         );
         let detail = match text.trim().is_empty() {
-            true => format!("{method} {url} (no response body)"),
-            false => format!("{method} {url}: {text}"),
+            true => format!("{method} {safe_url} (no response body)"),
+            false => format!("{method} {safe_url}: {safe_body}"),
         };
         match status.as_u16() {
             401 | 403 => Err(JamError::PermissionDenied(detail)),
@@ -308,6 +322,73 @@ impl JamApiClient {
             }),
         }
     }
+}
+
+fn path_segment(value: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
+fn safe_url(value: &str) -> String {
+    const JOIN: &str = "/sessions/join/";
+    let Some(marker) = value.find(JOIN) else {
+        return value.to_owned();
+    };
+    let start = marker + JOIN.len();
+    let end = value[start..]
+        .find(['?', '#'])
+        .map(|offset| start + offset)
+        .unwrap_or(value.len());
+    let mut redacted = value.to_owned();
+    redacted.replace_range(start..end, "<redacted>");
+    redacted
+}
+
+fn safe_body(value: &str) -> String {
+    fn redact(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                for (key, child) in object {
+                    let key = key.to_ascii_lowercase();
+                    if key.contains("authorization")
+                        || key.contains("access_token")
+                        || key.contains("refresh_token")
+                        || key.contains("client_token")
+                        || key.contains("join_session_token")
+                        || key.contains("cookie")
+                    {
+                        *child = Value::String("<redacted>".into());
+                    } else {
+                        redact(child);
+                    }
+                }
+            }
+            Value::Array(values) => values.iter_mut().for_each(redact),
+            _ => {}
+        }
+    }
+
+    let mut output = match serde_json::from_str::<Value>(value) {
+        Ok(mut json) => {
+            redact(&mut json);
+            json.to_string()
+        }
+        Err(_) => value.to_owned(),
+    };
+    if output.len() > 2_000 {
+        output.truncate(2_000);
+        output.push('…');
+    }
+    output
 }
 
 // ---------------------------------------------------------------------------
@@ -335,14 +416,11 @@ impl JamApiClient {
             debug!("create_jam ignoring context_uri {uri}: the jam adopts current playback");
         }
         let url = self.resolve("create_jam", &[])?;
-        self.get(
-            &url,
-            &[
-                ("local_device_id", self.device_id()?),
-                ("type", "REMOTE".to_owned()),
-            ],
-        )
-        .await
+        // Exact spotify-jam 0.2 `startJam` request. `activate=true` is the
+        // state-changing switch; omitting it can merely return an inactive
+        // current session. Device/Dealer binding is carried by the real
+        // connection header, not by undocumented query parameters.
+        self.get(&url, &[("activate", "true".to_owned())]).await
     }
 
     /// The session this device is in, if any. 404 surfaces as
@@ -439,5 +517,231 @@ impl JamApiClient {
     pub async fn end_jam(&self, jam_id: &str) -> Result<Value, JamError> {
         let url = self.resolve("end_jam", &[("jam_id", jam_id)])?;
         self.delete(&url).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn capture_once(status: &str, body: &str) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let status = status.to_owned();
+        let body = body.to_owned();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0_u8; 2048];
+            while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = stream.read(&mut chunk).unwrap();
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+            }
+            tx.send(String::from_utf8_lossy(&bytes).into_owned())
+                .unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        (format!("http://{address}"), rx)
+    }
+
+    fn client(base_url: String) -> JamApiClient {
+        let http = Client::builder().build().unwrap();
+        let config = JamConfig {
+            spclient_base_url: base_url,
+            ..JamConfig::default()
+        };
+        let identity = ClientIdentity {
+            device_id: "device-1".into(),
+            ..ClientIdentity::default()
+        };
+        let connection = ConnectionId::new();
+        connection.set("connection-1");
+        JamApiClient::new(
+            http.clone(),
+            &config,
+            &identity,
+            connection,
+            Arc::new(super::super::token::AccessToken::new("first-party")),
+            None,
+            ClientTokenManager::supplied(
+                http,
+                identity.clone(),
+                super::super::token::AccessToken::new("client-token-1"),
+            ),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_matches_captured_start_jam_request() {
+        let (base, request) = capture_once(
+            "200 OK",
+            r#"{"session_id":"jam-1","join_session_uri":"spotify:socialsession:token"}"#,
+        );
+        let response = client(base).create_jam(None).await.unwrap();
+        assert_eq!(response["session_id"], "jam-1");
+        let request = request.recv_timeout(Duration::from_secs(2)).unwrap();
+        let lower = request.to_ascii_lowercase();
+        assert!(request
+            .starts_with("GET /social-connect/v2/sessions/current_or_new?activate=true HTTP/1.1"));
+        assert!(!request.contains("local_device_id"));
+        assert!(!request.contains("type=REMOTE"));
+        assert!(lower.contains("authorization: bearer first-party"));
+        assert!(lower.contains("client-token: client-token-1"));
+        assert!(lower.contains("spotify-connection-id: connection-1"));
+        assert!(lower.contains("app-platform: win32_x86_64"));
+    }
+
+    #[tokio::test]
+    async fn current_and_permissions_use_the_expected_v2_routes() {
+        let (base, request) = capture_once("200 OK", r#"{"session_id":"jam-1"}"#);
+        client(base).current_jam().await.unwrap();
+        assert!(request
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .starts_with("GET /social-connect/v2/sessions/current?local_device_id=device-1"));
+
+        let (base, request) = capture_once("200 OK", "");
+        client(base).set_queue_control(false).await.unwrap();
+        let request = request.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(request.starts_with(
+            "PUT /social-connect/v2/sessions/current/queue_only_mode/enabled HTTP/1.1"
+        ));
+        assert!(request.to_ascii_lowercase().contains("content-length: 0"));
+    }
+
+    #[tokio::test]
+    async fn host_moderation_uses_v3_and_classifies_not_found() {
+        let (base, request) = capture_once("200 OK", r#"{"session_id":"jam-1"}"#);
+        client(base).kick_member("jam-1", "member-2").await.unwrap();
+        assert!(request
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .starts_with("POST /social-connect/v3/sessions/jam-1/member/member-2/kick HTTP/1.1"));
+
+        let (base, request) = capture_once("404 Not Found", r#"{"error":"gone"}"#);
+        let error = client(base).end_jam("jam-1").await.unwrap_err();
+        assert!(matches!(error, JamError::JamNotFound(_)));
+        assert!(request
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .starts_with("DELETE /social-connect/v3/sessions/jam-1 HTTP/1.1"));
+    }
+
+    #[tokio::test]
+    async fn join_and_leave_bind_the_live_connect_device() {
+        let (base, request) = capture_once("200 OK", r#"{"session_id":"jam-1"}"#);
+        client(base).join_jam("invite-token").await.unwrap();
+        let request = request.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(request.starts_with(
+            "POST /social-connect/v2/sessions/join/invite-token?local_device_id=device-1&playback_control=listen_and_control HTTP/1.1"
+        ));
+        assert!(request.to_ascii_lowercase().contains("content-length: 0"));
+
+        let (base, request) = capture_once("200 OK", "");
+        client(base).leave("jam-1").await.unwrap();
+        assert!(request
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .starts_with(
+                "POST /social-connect/v2/sessions/leave?local_device_id=device-1 HTTP/1.1"
+            ));
+    }
+
+    #[test]
+    fn path_parameters_cannot_escape_their_segment() {
+        assert_eq!(
+            path_segment("member/../?admin=true"),
+            "member%2F..%2F%3Fadmin%3Dtrue"
+        );
+        assert_eq!(path_segment("ordinary-token"), "ordinary-token");
+    }
+
+    #[test]
+    fn failure_diagnostics_redact_join_credentials() {
+        assert_eq!(
+            safe_url("https://spclient/social-connect/v2/sessions/join/secret?x=1"),
+            "https://spclient/social-connect/v2/sessions/join/<redacted>?x=1"
+        );
+        let body = safe_body(
+            r#"{"join_session_token":"secret","nested":{"access_token":"also-secret"},"error":"bad"}"#,
+        );
+        assert!(!body.contains("also-secret"));
+        assert!(!body.contains("\"secret\""));
+        assert!(body.contains("<redacted>"));
+        assert!(body.contains("bad"));
+    }
+
+    /// Opt-in destructive integration test for a dedicated Spotify test
+    /// account/device. It creates and always attempts to end a real Jam.
+    /// CI never runs it, and credentials are read only from the process
+    /// environment so they cannot enter fixtures or Git.
+    #[tokio::test]
+    #[ignore = "requires an explicitly provisioned live Spotify test session"]
+    async fn live_host_lifecycle_when_explicitly_enabled() {
+        fn required(name: &str) -> String {
+            std::env::var(name).unwrap_or_else(|_| panic!("missing {name}"))
+        }
+        assert_eq!(required("SPOTIFY_RUN_JAM_LIVE"), "1");
+        let http = Client::builder().build().unwrap();
+        let identity = ClientIdentity {
+            device_id: required("SPOTIFY_TEST_ACCOUNT_1_DEVICE_ID"),
+            ..ClientIdentity::default()
+        };
+        let connection = ConnectionId::new();
+        connection.set(required("SPOTIFY_TEST_ACCOUNT_1_CONNECTION_ID"));
+        let api = JamApiClient::new(
+            http.clone(),
+            &JamConfig::default(),
+            &identity,
+            connection,
+            Arc::new(super::super::token::AccessToken::new(required(
+                "SPOTIFY_TEST_ACCOUNT_1_ACCESS_TOKEN",
+            ))),
+            None,
+            ClientTokenManager::supplied(
+                http,
+                identity.clone(),
+                super::super::token::AccessToken::new(required(
+                    "SPOTIFY_TEST_ACCOUNT_1_CLIENT_TOKEN",
+                )),
+            ),
+        )
+        .unwrap();
+
+        let session =
+            super::super::session::session_from_value(api.create_jam(None).await.unwrap()).unwrap();
+        assert!(!session.id.is_empty());
+        assert!(session.join_uri.is_some() || session.join_url.is_some());
+        let session_id = session.id.clone();
+        let lifecycle = async {
+            let current = super::super::session::session_from_value(api.current_jam().await?)?;
+            assert_eq!(current.id, session_id);
+            api.set_queue_control(false).await?;
+            let denied = super::super::session::session_from_value(api.current_jam().await?)?;
+            assert!(denied.queue_only_mode);
+            api.set_queue_control(true).await?;
+            Result::<(), JamError>::Ok(())
+        }
+        .await;
+        let cleanup = api.end_jam(&session_id).await;
+        lifecycle.unwrap();
+        cleanup.unwrap();
     }
 }
