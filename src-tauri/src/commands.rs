@@ -1153,6 +1153,36 @@ pub async fn get_friend_activity(
     Ok(state.friend_activity.read().await.clone())
 }
 
+#[tauri::command]
+pub async fn get_user_profile(
+    state: State<'_, AppState>,
+    username: Option<String>,
+) -> AppResult<crate::profiles::UserProfile> {
+    let session = {
+        let spotify = state.spotify.read().await;
+        spotify
+            .as_ref()
+            .map(|spotify| spotify.session.clone())
+            .ok_or(AppError::NotLoggedIn)?
+    };
+    let authenticated_username = state.auth.read().await.user_id.clone();
+    let username = match username.filter(|value| !value.trim().is_empty()) {
+        Some(username) => username,
+        None => authenticated_username
+            .clone()
+            .ok_or_else(|| AppError::Auth("Spotify session has no username".to_string()))?,
+    };
+    let mut profile = crate::profiles::fetch(&session, &username).await?;
+    // Older responses omit `is_current_user`. The authenticated username is
+    // authoritative and prevents the UI treating the owner's profile as a
+    // public visitor view when that optional response field is absent.
+    if authenticated_username.is_some_and(|current| current.eq_ignore_ascii_case(&profile.username))
+    {
+        profile.is_current_user = true;
+    }
+    Ok(profile)
+}
+
 // ---- search -------------------------------------------------------------
 
 #[tauri::command]

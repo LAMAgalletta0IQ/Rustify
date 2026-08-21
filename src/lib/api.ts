@@ -27,6 +27,7 @@ import type {
   TrackSummary,
   EqualizerPreset,
   FriendFeed,
+  UserProfile,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -197,6 +198,8 @@ export const getLyrics = (
   });
 export const getFriendActivity = () =>
   invoke<FriendFeed>("get_friend_activity");
+export const getUserProfile = (username?: string) =>
+  invoke<UserProfile>("get_user_profile", { username });
 
 // ---- search -------------------------------------------------------------
 export const searchSpotify = (query: string, limit?: number, offset?: number) =>

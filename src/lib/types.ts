@@ -309,6 +309,40 @@ export interface FriendFeed {
   updatedAtMs: number | null;
 }
 
+export interface ProfileArtist {
+  uri: string;
+  name: string;
+  imageUrl: string | null;
+  followersCount: number | null;
+  isFollowing: boolean | null;
+}
+
+export interface ProfilePlaylist {
+  uri: string;
+  name: string;
+  imageUrl: string | null;
+  ownerName: string | null;
+  ownerUri: string | null;
+  isFollowing: boolean | null;
+}
+
+export interface UserProfile {
+  username: string;
+  uri: string;
+  displayName: string;
+  imageUrl: string | null;
+  followingCount: number | null;
+  totalPublicPlaylistsCount: number | null;
+  isCurrentUser: boolean;
+  allowFollows: boolean;
+  showFollows: boolean;
+  color: number | null;
+  recentlyPlayedArtists: ProfileArtist[];
+  publicPlaylists: ProfilePlaylist[];
+  followers: ProfileArtist[];
+  following: ProfileArtist[];
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

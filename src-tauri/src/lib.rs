@@ -14,6 +14,7 @@ mod library;
 mod lyrics;
 mod media_keys;
 mod player;
+mod profiles;
 mod queue;
 mod relevance;
 mod remote_state;
@@ -167,6 +168,7 @@ pub fn run() {
             commands::start_dj,
             commands::get_lyrics,
             commands::get_friend_activity,
+            commands::get_user_profile,
             // search
             commands::search_spotify,
             // queue
