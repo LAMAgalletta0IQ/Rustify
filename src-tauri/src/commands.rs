@@ -48,6 +48,33 @@ where
     f(&s.spirc).map_err(AppError::from)
 }
 
+fn configured_crossfade(app: &AppHandle) -> bool {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| auth::settings_or_default(&dir).crossfade_seconds > 0)
+        .unwrap_or(false)
+}
+
+fn should_clear_crossfade(enabled: bool, local_active: bool, playing: bool) -> bool {
+    enabled && local_active && playing
+}
+
+/// Pause is the public seam that makes the pinned librespot crossfade PR drop
+/// its outgoing decoder. Return true when callers must restore playback after
+/// their transition command.
+async fn clear_crossfade_before_transition(app: &AppHandle, state: &AppState) -> AppResult<bool> {
+    let (local_active, playing) = {
+        let playback = state.playback.read().await;
+        (playback.is_active_device, playback.is_playing)
+    };
+    let clear = should_clear_crossfade(configured_crossfade(app), local_active, playing);
+    if clear {
+        with_spirc(state, |spirc| spirc.pause()).await?;
+    }
+    Ok(clear)
+}
+
 async fn remote_put(state: &AppState, path: &str, query: &[(&str, String)]) -> AppResult<()> {
     WebApi::new()
         .put_query(&token(state).await?, path, query)
@@ -130,7 +157,7 @@ pub async fn get_dj_status(
 /// track window. librespot 0.8 cannot resolve empty dynamic context pages on
 /// its own, so passing the recovered URIs is the compatibility path.
 #[tauri::command]
-pub async fn start_dj(state: State<'_, AppState>) -> AppResult<DjSession> {
+pub async fn start_dj(app: AppHandle, state: State<'_, AppState>) -> AppResult<DjSession> {
     let session = state
         .spotify
         .read()
@@ -155,7 +182,8 @@ pub async fn start_dj(state: State<'_, AppState>) -> AppResult<DjSession> {
     let uris: Vec<_> = dj.tracks.iter().map(|track| track.uri.clone()).collect();
     let first = uris.first().cloned();
     let activate = !state.playback.read().await.is_active_device;
-    with_spirc(&state, move |spirc| {
+    let resume_on_error = clear_crossfade_before_transition(&app, &state).await?;
+    let load_result = with_spirc(&state, move |spirc| {
         if activate {
             spirc.activate()?;
         }
@@ -168,7 +196,11 @@ pub async fn start_dj(state: State<'_, AppState>) -> AppResult<DjSession> {
             },
         ))
     })
-    .await?;
+    .await;
+    if load_result.is_err() && resume_on_error {
+        let _ = with_spirc(&state, |spirc| spirc.play()).await;
+    }
+    load_result?;
     state
         .internal_spotify
         .dj
@@ -628,18 +660,32 @@ pub async fn play_pause(state: State<'_, AppState>) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn next_track(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn next_track(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     if state.playback.read().await.is_active_device {
-        with_spirc(&state, |s| s.next()).await
+        let resume = clear_crossfade_before_transition(&app, &state).await?;
+        let transition = with_spirc(&state, |s| s.next()).await;
+        if resume {
+            let resumed = with_spirc(&state, |s| s.play()).await;
+            transition.and(resumed)
+        } else {
+            transition
+        }
     } else {
         remote_post(&state, "/me/player/next", &[]).await
     }
 }
 
 #[tauri::command]
-pub async fn previous_track(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn previous_track(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     if state.playback.read().await.is_active_device {
-        with_spirc(&state, |s| s.prev()).await
+        let resume = clear_crossfade_before_transition(&app, &state).await?;
+        let transition = with_spirc(&state, |s| s.prev()).await;
+        if resume {
+            let resumed = with_spirc(&state, |s| s.play()).await;
+            transition.and(resumed)
+        } else {
+            transition
+        }
     } else {
         remote_post(&state, "/me/player/previous", &[]).await
     }
@@ -649,12 +695,7 @@ pub async fn previous_track(state: State<'_, AppState>) -> AppResult<()> {
 pub async fn seek(app: AppHandle, state: State<'_, AppState>, position_ms: u32) -> AppResult<()> {
     if state.playback.read().await.is_active_device {
         let was_playing = state.playback.read().await.is_playing;
-        let crossfade_enabled = app
-            .path()
-            .app_data_dir()
-            .ok()
-            .map(|dir| auth::settings_or_default(&dir).crossfade_seconds > 0)
-            .unwrap_or(false);
+        let crossfade_enabled = configured_crossfade(&app);
 
         // The reviewed librespot PR clears an in-flight fade on Pause but not
         // on Seek. Bracket an explicit local seek so an outgoing decoder can
@@ -770,6 +811,7 @@ pub async fn cancel_sleep_timer(
 /// context lets playback continue through the rest of it.
 #[tauri::command]
 pub async fn load_context(
+    app: AppHandle,
     state: State<'_, AppState>,
     context_uri: String,
     track_uri: Option<String>,
@@ -808,7 +850,8 @@ pub async fn load_context(
         0
     };
 
-    with_spirc(&state, move |s| {
+    let resume_on_error = clear_crossfade_before_transition(&app, &state).await?;
+    let load_result = with_spirc(&state, move |s| {
         if activate {
             s.activate()?;
         }
@@ -822,7 +865,11 @@ pub async fn load_context(
             },
         ))
     })
-    .await
+    .await;
+    if load_result.is_err() && resume_on_error {
+        let _ = with_spirc(&state, |spirc| spirc.play()).await;
+    }
+    load_result
 }
 
 /// Loads an explicit list of track URIs as an ad-hoc context.
@@ -831,6 +878,7 @@ pub async fn load_context(
 /// an entry out of the queue.
 #[tauri::command]
 pub async fn load_tracks(
+    app: AppHandle,
     state: State<'_, AppState>,
     uris: Vec<String>,
     start_uri: Option<String>,
@@ -864,7 +912,8 @@ pub async fn load_tracks(
         0
     };
 
-    with_spirc(&state, move |s| {
+    let resume_on_error = clear_crossfade_before_transition(&app, &state).await?;
+    let load_result = with_spirc(&state, move |s| {
         if activate {
             s.activate()?;
         }
@@ -878,7 +927,11 @@ pub async fn load_tracks(
             },
         ))
     })
-    .await
+    .await;
+    if load_result.is_err() && resume_on_error {
+        let _ = with_spirc(&state, |spirc| spirc.play()).await;
+    }
+    load_result
 }
 
 // ---- connect ------------------------------------------------------------
@@ -1603,5 +1656,9 @@ mod settings_validation_tests {
         assert!(validate_crossfade(0).is_ok());
         assert!(validate_crossfade(12).is_ok());
         assert!(validate_crossfade(13).is_err());
+        assert!(should_clear_crossfade(true, true, true));
+        assert!(!should_clear_crossfade(false, true, true));
+        assert!(!should_clear_crossfade(true, false, true));
+        assert!(!should_clear_crossfade(true, true, false));
     }
 }
