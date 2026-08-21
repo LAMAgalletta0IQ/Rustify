@@ -5,6 +5,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import * as api from "../../api";
   import { store } from "../../store.svelte";
+  import SelectMenu, { type SelectOption } from "../../ui/SelectMenu.svelte";
   import {
     formatMs,
     type AudioCapability,
@@ -245,8 +246,7 @@
     seekDraft = null;
   }
 
-  async function chooseSleep(event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value;
+  async function chooseSleep(value: string | null) {
     if (!value) return;
     await store.run(async () => {
       sleepTimer =
@@ -256,8 +256,24 @@
             ? await api.cancelSleepTimer()
             : await api.startSleepTimer(Number(value) * 60);
     });
-    (event.currentTarget as HTMLSelectElement).value = "";
   }
+
+  const sleepTimerLabel = $derived(
+    sleepTimer?.active
+      ? sleepTimer.mode === "endOfTrack"
+        ? "Sleep · end of track"
+        : `Sleep · ${Math.floor((sleepRemainingSeconds ?? 0) / 60)}:${String((sleepRemainingSeconds ?? 0) % 60).padStart(2, "0")}`
+      : "Sleep timer"
+  );
+  const sleepTimerOptions = $derived<SelectOption[]>([
+    { value: "15", label: "15 minutes" },
+    { value: "30", label: "30 minutes" },
+    { value: "60", label: "1 hour" },
+    { value: "end", label: "End of track" },
+    ...(sleepTimer?.active
+      ? [{ value: "cancel", label: "Cancel timer", tone: "warning" as const }]
+      : []),
+  ]);
 
   $effect(() => {
     if (mounted && startFullscreen && !fullscreen && !fullscreenChanging) {
@@ -383,21 +399,65 @@
 
   <main>
     <section class="track-pane">
-      <button
-        class="artwork"
-        onclick={onNavigateArtwork}
-        disabled={!pb.track}
-        title="Open album or track details"
-      >
-        {#if pb.track?.coverUrl}
-          <img
-            src={pb.track.coverUrl}
-            alt={`Artwork for ${pb.track.name}`}
-          />
-        {:else}
-          <span class="art-placeholder"></span>
-        {/if}
-      </button>
+      <div class="artwork-wrap" role="group" aria-label="Artwork and playback controls">
+        <button
+          class="artwork"
+          onclick={onNavigateArtwork}
+          disabled={!pb.track}
+          title="Open album or track details"
+        >
+          {#if pb.track?.coverUrl}
+            <img
+              src={pb.track.coverUrl}
+              alt={`Artwork for ${pb.track.name}`}
+            />
+          {:else}
+            <span class="art-placeholder"></span>
+          {/if}
+        </button>
+        <div class="artwork-overlay">
+          <button
+            onclick={(event) => {
+              event.stopPropagation();
+              void store.run(api.previousTrack);
+            }}
+            disabled={!pb.track}
+            title="Previous"
+            aria-label="Previous track"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z" /></svg>
+          </button>
+          <button
+            class="play"
+            onclick={(event) => {
+              event.stopPropagation();
+              void store.run(api.playPause);
+            }}
+            disabled={!pb.track}
+            title={pb.isPlaying ? "Pause" : "Play"}
+            aria-label={pb.isPlaying ? "Pause" : "Play"}
+          >
+            {#if pb.isLoading}
+              <span class="dots">…</span>
+            {:else if pb.isPlaying}
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4h4v16H7zM13 4h4v16h-4z" /></svg>
+            {:else}
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>
+            {/if}
+          </button>
+          <button
+            onclick={(event) => {
+              event.stopPropagation();
+              void store.run(api.nextTrack);
+            }}
+            disabled={!pb.track}
+            title="Next"
+            aria-label="Next track"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
+          </button>
+        </div>
+      </div>
       <div class="track-copy">
         <h1>{pb.track?.name ?? "Nothing playing"}</h1>
         <p>{pb.track?.artists.join(", ") ?? ""}</p>
@@ -473,22 +533,14 @@
           class:on={panel === "queue"}
           onclick={() => (panel = "queue")}>Queue</button
         >
-        <select aria-label="Sleep timer" onchange={chooseSleep}>
-          <option value=""
-            >{sleepTimer?.active
-              ? sleepTimer.mode === "endOfTrack"
-                ? "Sleep · end of track"
-                : `Sleep · ${Math.floor((sleepRemainingSeconds ?? 0) / 60)}:${String((sleepRemainingSeconds ?? 0) % 60).padStart(2, "0")}`
-              : "Sleep timer"}</option
-          >
-          <option value="15">15 minutes</option>
-          <option value="30">30 minutes</option>
-          <option value="60">1 hour</option>
-          <option value="end">End of track</option>
-          {#if sleepTimer?.active}
-            <option value="cancel">Cancel timer</option>
-          {/if}
-        </select>
+        <SelectMenu
+          value={null}
+          options={sleepTimerOptions}
+          triggerLabel={sleepTimerLabel}
+          label="Sleep timer"
+          compact
+          onChange={chooseSleep}
+        />
         {#if panel === "lyrics" && lyrics?.provider}
           <span class="provider">{lyrics.provider}{lyrics.language ? ` · ${lyrics.language}` : ""}</span>
         {/if}
@@ -656,10 +708,15 @@
     flex-direction: column;
     justify-content: center;
   }
-  .artwork {
+  .artwork-wrap {
+    position: relative;
     align-self: center;
     width: min(100%, 53vh);
     aspect-ratio: 1;
+  }
+  .artwork {
+    width: 100%;
+    height: 100%;
     padding: 0;
     overflow: hidden;
     border-radius: var(--r-lg);
@@ -668,7 +725,7 @@
       transform var(--motion-fast),
       filter var(--motion-fast);
   }
-  .artwork:hover:not(:disabled),
+  .artwork-wrap:hover .artwork:not(:disabled),
   .artwork:focus-visible {
     transform: translateY(-2px);
     filter: brightness(1.08);
@@ -682,6 +739,56 @@
   }
   .art-placeholder {
     background: rgba(255, 241, 224, 0.07);
+  }
+  .artwork-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    border-radius: var(--r-lg);
+    background: rgba(13, 9, 5, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-fast);
+  }
+  .artwork-wrap:hover .artwork-overlay,
+  .artwork-wrap:focus-within .artwork-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .artwork-overlay button {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    color: var(--fg);
+    background: rgba(15, 10, 6, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    transition: color var(--motion-fast), transform var(--motion-fast);
+  }
+  .artwork-overlay button:hover:not(:disabled) {
+    color: var(--accent);
+    transform: scale(1.06);
+  }
+  .artwork-overlay button:disabled {
+    opacity: 0.4;
+  }
+  .artwork-overlay .play {
+    width: 54px;
+    height: 54px;
+    color: var(--ink);
+    background: var(--fg);
+  }
+  .artwork-overlay .play:hover:not(:disabled) {
+    color: var(--ink);
+  }
+  .artwork-overlay .dots {
+    font-size: 18px;
+    line-height: 1;
   }
   .track-copy {
     margin-top: 20px;
@@ -886,7 +993,7 @@
       padding: 14px 20px;
       overflow-y: auto;
     }
-    .artwork {
+    .artwork-wrap {
       width: min(64vw, 36vh);
     }
     .track-copy {
@@ -903,7 +1010,7 @@
     main {
       padding-block: 10px;
     }
-    .artwork {
+    .artwork-wrap {
       width: min(36vw, 47vh);
     }
     .track-copy {
@@ -915,6 +1022,8 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .artwork,
+    .artwork-overlay,
+    .artwork-overlay button,
     .lyric-line {
       transition: none;
     }

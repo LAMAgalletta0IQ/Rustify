@@ -17,6 +17,11 @@
     label,
     disabled = false,
     compact = false,
+    // For transient action menus (sleep timer, "add to playlist"…) where no
+    // option represents a persisted current value — the trigger shows this
+    // instead of falling back to the first option's label. `value` in that
+    // mode is just "which item last fired", not a selection to redisplay.
+    triggerLabel,
     onChange = (_value: string | null) => {},
   }: {
     value?: string | null;
@@ -24,6 +29,7 @@
     label: string;
     disabled?: boolean;
     compact?: boolean;
+    triggerLabel?: string;
     onChange?: (value: string | null) => void;
   } = $props();
 
@@ -41,6 +47,7 @@
   const selected = $derived(
     options.find((option) => option.value === value) ?? options[0],
   );
+  const displayLabel = $derived(triggerLabel ?? selected?.label ?? "Select");
 
   function enabledIndex(start: number, direction: 1 | -1) {
     if (!options.length) return -1;
@@ -160,9 +167,9 @@
     <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M5 9v6h4l5 4V5L9 9z" /><path d="M18 9.5a4 4 0 0 1 0 5" />
     </svg>
-    <span class="compact-label truncate">{selected?.label ?? "Select"}</span>
+    <span class="compact-label truncate">{displayLabel}</span>
   {:else}
-    <span class="truncate">{selected?.label ?? "Select"}</span>
+    <span class="truncate">{displayLabel}</span>
   {/if}
   <svg class="chevron" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
     <path d="m7 10 5 5 5-5" />
