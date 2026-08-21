@@ -62,6 +62,17 @@
     return () => { disposed = true; unlisten?.(); window.clearInterval(clock); };
   });
 
+  // Tracks image URLs that failed to *load* (wrong field, CSP block, expired
+  // link…), as opposed to items with no URL at all — which already fall back
+  // to the plain .art placeholder via the {#if item.imageUrl} check below.
+  // Without this the WebView's native broken-image icon stays on screen.
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    console.debug("[home] artwork failed to load", url);
+    brokenImages = new Set(brokenImages).add(url);
+  }
+
   let openPlaylist = $state<PlaylistSummary | null>(null);
   let openAlbum = $state<AlbumSummary | null>(null);
   let openArtist = $state<ArtistSummary | null>(null);
@@ -314,8 +325,8 @@
       <div class="jump" aria-label="Quick access">
         {#each quickAccess as item (item.uri)}
           <button class="pill" onclick={() => openActivity(item)}>
-            {#if item.imageUrl}
-              <img src={item.imageUrl} alt="" loading="lazy" />
+            {#if item.imageUrl && !brokenImages.has(item.imageUrl)}
+              <img src={item.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(item.imageUrl)} />
             {:else}
               <span class="art"></span>
             {/if}
@@ -382,7 +393,7 @@
               <div class="grid">
                 {#each section.items as item (item.uri)}
                   <button class="card" onclick={() => openPersonalized(item)}>
-                    {#if item.imageUrl}<img src={item.imageUrl} alt="" loading="lazy" />{:else}<span class="art"></span>{/if}
+                    {#if item.imageUrl && !brokenImages.has(item.imageUrl)}<img src={item.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(item.imageUrl)} />{:else}<span class="art"></span>{/if}
                     <span class="eyebrow">{personalizationLabel(item)}</span>
                     <span class="truncate title">{item.name}</span>
                     <span class="truncate sub">{item.subtitle ?? item.description ?? "Spotify"}</span>
@@ -412,7 +423,7 @@
         <div class="grid">
           {#each recent as item (item.uri)}
             <button class="card" onclick={() => playRecent(item)}>
-              {#if item.imageUrl}<img src={item.imageUrl} alt="" loading="lazy" />{:else}<span class="art"></span>{/if}
+              {#if item.imageUrl && !brokenImages.has(item.imageUrl)}<img src={item.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(item.imageUrl)} />{:else}<span class="art"></span>{/if}
               <span class="eyebrow">{item.kind}</span>
               <span class="truncate title">{item.name}</span>
               <span class="truncate sub">{item.subtitle}</span>
@@ -436,7 +447,7 @@
         <div class="grid">
           {#each topTracks as track (track.uri)}
             <button class="card" onclick={() => playMix(track)}>
-              {#if track.imageUrl}<img src={track.imageUrl} alt="" loading="lazy" />{:else}<span class="art"></span>{/if}
+              {#if track.imageUrl && !brokenImages.has(track.imageUrl)}<img src={track.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(track.imageUrl)} />{:else}<span class="art"></span>{/if}
               <span class="truncate title">{track.name}</span>
               <span class="truncate sub">{track.artists.join(", ")}</span>
             </button>
@@ -457,7 +468,7 @@
         <div class="grid">
           {#each discovery as album (album.uri)}
             <button class="card" onclick={() => (openAlbum = album)}>
-              {#if album.imageUrl}<img src={album.imageUrl} alt="" loading="lazy" />{:else}<span class="art"></span>{/if}
+              {#if album.imageUrl && !brokenImages.has(album.imageUrl)}<img src={album.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(album.imageUrl)} />{:else}<span class="art"></span>{/if}
               <span class="truncate title">{album.name}</span>
               <span class="truncate sub">{album.artists.join(", ")}</span>
             </button>
