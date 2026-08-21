@@ -198,6 +198,7 @@
       <AudioOutputSelector
         value={store.settings.outputDevice}
         compact
+        iconOnly
         onChange={(value) => void changeOutput(value)}
       />
       <svg class="vicon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -476,16 +477,14 @@
      (lyrics button, Connect menu, output selector, volume) can add up to
      more natural width than the grid's minmax(170px, 1fr) floor guarantees,
      so on a merely-narrow (not yet phone-narrow) window they overlapped the
-     center transport controls instead of shrinking. Trim the two widest,
-     least essential pieces — the output selector's device-name label and the
-     lyrics button's text — before that happens, rather than jumping straight
-     to hiding volume entirely at 920px. */
+     center transport controls instead of shrinking. The output selector is
+     now a fixed-size icon button (no device-name label to trim — see
+     SelectMenu's `iconOnly`), so only the lyrics button's text needs
+     trimming here before that happens, rather than jumping straight to
+     hiding volume entirely at 920px. */
   @media (max-width: 1180px) {
     .lyrics-button span {
       display: none;
-    }
-    :global(.output-selector.compact .compact-label) {
-      max-width: 64px;
     }
   }
   @media (max-width: 920px) {

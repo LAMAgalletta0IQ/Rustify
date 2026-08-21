@@ -6,11 +6,13 @@
   let {
     value = $bindable<string | null>(),
     compact = false,
+    iconOnly = false,
     disabled = false,
     onChange,
   }: {
     value?: string | null;
     compact?: boolean;
+    iconOnly?: boolean;
     disabled?: boolean;
     onChange: (value: string | null) => void | Promise<void>;
   } = $props();
@@ -58,10 +60,19 @@
     bind:value
     {options}
     {compact}
+    {iconOnly}
     disabled={disabled || audioDevices.loading && options.length === 1}
     label="Audio output device"
     onChange={(next) => void select(next)}
-  />
+  >
+    {#snippet icon()}
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 13v-1a8 8 0 0 1 16 0v1" />
+        <rect x="2" y="13" width="5" height="7" rx="1.5" />
+        <rect x="17" y="13" width="5" height="7" rx="1.5" />
+      </svg>
+    {/snippet}
+  </SelectMenu>
   {#if !compact && audioDevices.error}
     <p class="device-error" role="status">{audioDevices.error}</p>
   {/if}

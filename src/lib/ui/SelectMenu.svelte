@@ -30,6 +30,13 @@
     // sitting right next to each other). The icon is now purely opt-in per
     // caller: no icon prop means no icon, just label + chevron.
     icon,
+    // Drops the label and chevron entirely, leaving a fixed-size icon
+    // button (the caller must pass `icon`). For triggers whose label text
+    // has no upper bound (a device name) and sits in a row with no spare
+    // width to give it — truncating still leaves a variable-width element
+    // fighting its neighbors; a fixed-size icon button doesn't. The full
+    // value is still reachable via the native tooltip and accessible name.
+    iconOnly = false,
   }: {
     value?: string | null;
     options: SelectOption[];
@@ -39,6 +46,7 @@
     triggerLabel?: string;
     onChange?: (value: string | null) => void;
     icon?: Snippet;
+    iconOnly?: boolean;
   } = $props();
 
   let open = $state(false);
@@ -163,23 +171,29 @@
   bind:this={trigger}
   class="select-trigger"
   class:compact
+  class:icon-only={iconOnly}
   type="button"
-  aria-label={label}
+  aria-label={iconOnly ? `${label}: ${displayLabel}` : label}
+  title={iconOnly ? displayLabel : undefined}
   aria-haspopup="listbox"
   aria-expanded={open}
   {disabled}
   onclick={() => (open ? hide() : void show())}
   onkeydown={onTriggerKeydown}
 >
-  {#if compact}
+  {#if iconOnly}
+    {#if icon}{@render icon()}{/if}
+  {:else if compact}
     {#if icon}{@render icon()}{/if}
     <span class="compact-label truncate">{displayLabel}</span>
   {:else}
     <span class="truncate">{displayLabel}</span>
   {/if}
-  <svg class="chevron" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-    <path d="m7 10 5 5 5-5" />
-  </svg>
+  {#if !iconOnly}
+    <svg class="chevron" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+      <path d="m7 10 5 5 5-5" />
+    </svg>
+  {/if}
 </button>
 
 {#if open}
@@ -255,6 +269,26 @@
   .select-trigger.compact:hover,
   .select-trigger.compact[aria-expanded="true"] { color: var(--fg); }
   .compact-label { min-width: 0; max-width: 130px; font-size: 11px; }
+  /* Fixed-size icon button, matching the flat (no fill, no border) icon
+     buttons already sitting next to it in a PlayerBar-style row (jam,
+     lyrics) rather than the boxed .compact look — this trigger has no label
+     to set off from its surroundings, so the boxed treatment just reads as
+     an odd swatch of control-bg among transparent siblings. */
+  .select-trigger.icon-only {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    min-height: 30px;
+    padding: 0;
+    justify-content: center;
+    background: transparent;
+    border-color: transparent;
+  }
+  .select-trigger.icon-only:hover:not(:disabled),
+  .select-trigger.icon-only[aria-expanded="true"] {
+    background: var(--glass-hover);
+    border-color: transparent;
+  }
   .select-trigger svg { flex: none; }
   .select-trigger .chevron { transition: transform var(--motion-fast); }
   .select-trigger[aria-expanded="true"] .chevron { transform: rotate(180deg); }
