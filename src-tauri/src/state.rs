@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use librespot::connect::Spirc;
 use librespot::core::session::Session;
@@ -198,6 +198,10 @@ pub struct AppState {
     /// Last queue snapshot, hydrated first from Dealer and then (when needed)
     /// by a single Web API request for display metadata.
     pub queue: RwLock<crate::queue::QueueView>,
+    /// Small session-local cache: playback events replace frontend snapshots,
+    /// but must not trigger another internal lyrics request for the same URI.
+    /// The command enforces a fixed upper bound before inserting.
+    pub lyrics_cache: RwLock<HashMap<String, crate::lyrics::LyricsResult>>,
     pub auth: RwLock<AuthState>,
     pub device_auth: crate::auth::DeviceAuthStore,
     pub sleep_timer: crate::sleep_timer::SleepTimerController,

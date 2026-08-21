@@ -180,12 +180,14 @@ export const getDjStatus = (refresh = false) =>
   invoke<DjSession | null>("get_dj_status", { refresh });
 export const startDj = () => invoke<DjSession>("start_dj");
 export const getLyrics = (
+  trackUri: string,
   trackName: string,
   artistName: string,
   albumName: string,
   durationMs: number,
 ) =>
   invoke<LyricsResult>("get_lyrics", {
+    trackUri,
     trackName,
     artistName,
     albumName,

@@ -265,12 +265,23 @@ export interface DjSession {
 
 export interface LyricsLine {
   startMs: number;
+  endMs: number | null;
   text: string;
 }
 
+export interface LyricsColors {
+  background: number;
+  text: number;
+  highlightText: number;
+}
+
 export interface LyricsResult {
-  provider: "LRCLIB";
+  provider: string;
   status: "available" | "instrumental" | "unavailable";
+  syncType: "lineSynced" | "unsynced" | null;
+  language: string | null;
+  isRtl: boolean;
+  colors: LyricsColors | null;
   plain: string | null;
   synced: LyricsLine[];
 }

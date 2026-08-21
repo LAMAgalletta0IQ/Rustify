@@ -540,6 +540,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
     *state.auth.write().await = AuthState::default();
     *state.playback.write().await = PlaybackState::default();
     *state.queue.write().await = QueueView::default();
+    state.lyrics_cache.write().await.clear();
 
     if let Ok(dir) = app.path().app_data_dir() {
         auth::clear_stored_tokens(&dir);
@@ -1076,18 +1077,46 @@ pub async fn get_top_artists(
 #[tauri::command]
 pub async fn get_lyrics(
     state: State<'_, AppState>,
+    track_uri: String,
     track_name: String,
     artist_name: String,
     album_name: String,
     duration_ms: u32,
 ) -> AppResult<LyricsResult> {
+    if let Some(cached) = state.lyrics_cache.read().await.get(&track_uri).cloned() {
+        return Ok(cached);
+    }
+
     // Lyrics are a separate, read-only integration. Requiring an active
     // session prevents stale track details from making background requests
     // after logout.
-    if state.spotify.read().await.is_none() {
-        return Err(AppError::NotLoggedIn);
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    let result = crate::lyrics::fetch(
+        &session,
+        &track_uri,
+        &track_name,
+        &artist_name,
+        &album_name,
+        duration_ms,
+    )
+    .await?;
+
+    let mut cache = state.lyrics_cache.write().await;
+    const MAX_LYRICS_CACHE_ENTRIES: usize = 64;
+    if cache.len() >= MAX_LYRICS_CACHE_ENTRIES && !cache.contains_key(&track_uri) {
+        // Lyrics are immutable enough for a session; clearing at the hard
+        // bound is cheap and keeps memory use deterministic without another
+        // cache dependency.
+        cache.clear();
     }
-    crate::lyrics::fetch(&track_name, &artist_name, &album_name, duration_ms).await
+    cache.insert(track_uri, result.clone());
+    Ok(result)
 }
 
 // ---- search -------------------------------------------------------------
