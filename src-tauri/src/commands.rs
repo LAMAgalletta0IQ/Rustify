@@ -547,6 +547,7 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
 pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     state.device_auth.cancel().await;
     state.sleep_timer.cancel(None).await;
+    state.telemetry.finish_all("logout").await;
     let episode_checkpoint = {
         let mut playback = state.playback.write().await;
         playback.refresh_position();
@@ -1212,6 +1213,13 @@ pub async fn set_episode_completed(
         .map(|spotify| spotify.session.clone())
         .ok_or(AppError::NotLoggedIn)?;
     crate::podcasts::set_completed(&session, &episode_uri, completed).await
+}
+
+#[tauri::command]
+pub async fn get_telemetry_status(
+    state: State<'_, AppState>,
+) -> AppResult<crate::telemetry::TelemetryStatus> {
+    Ok(state.telemetry.status().await)
 }
 
 #[tauri::command]

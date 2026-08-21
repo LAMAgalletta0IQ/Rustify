@@ -383,6 +383,25 @@ export interface EpisodeResume {
   hasState: boolean;
 }
 
+export interface PlaybackAudit {
+  uri: string;
+  startedAtMs: number;
+  endedAtMs: number;
+  playedMs: number;
+  finalPositionMs: number;
+  completed: boolean;
+  endReason: string;
+}
+
+export interface TelemetryStatus {
+  deliveryAvailable: boolean;
+  deliveryTransport: string | null;
+  deliveryBlocker: string;
+  activePlaybacks: number;
+  locallyRecorded: number;
+  recent: PlaybackAudit[];
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

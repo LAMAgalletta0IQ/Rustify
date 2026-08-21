@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import * as api from "../api";
   import { store } from "../store.svelte";
-  import type { AppSettings, AudioDevice, AudioStatus, EqualizerPreset, LoginInfo } from "../types";
+  import type { AppSettings, AudioDevice, AudioStatus, EqualizerPreset, LoginInfo, TelemetryStatus } from "../types";
 
   let { onReconfigure }: { onReconfigure: () => Promise<void> } = $props();
 
@@ -12,6 +12,7 @@
   let devices = $state<AudioDevice[]>([]);
   let audioStatus = $state<AudioStatus | null>(null);
   let builtins = $state<EqualizerPreset[]>([]);
+  let telemetry = $state<TelemetryStatus | null>(null);
   let presetName = $state("");
   let loadingDevices = $state(false);
   let saving = $state(false);
@@ -44,10 +45,11 @@
   }
 
   $effect(() => {
-    Promise.all([api.getLoginInfo(), api.getEqualizerPresets()])
-      .then(([info, presets]) => {
+    Promise.all([api.getLoginInfo(), api.getEqualizerPresets(), api.getTelemetryStatus()])
+      .then(([info, presets, telemetryStatus]) => {
         loginInfo = info;
         builtins = presets;
+        telemetry = telemetryStatus;
       })
       .catch(() => {});
   });
@@ -203,6 +205,7 @@
   <section>
     <h2>Spotify integration</h2>
     <div class="field"><span><strong>{loginInfo?.privateClientId ? "Client ID configured" : "Client ID missing"}</strong><small>Web API requests use the Spotify app configured during setup. The client ID is not a secret.</small></span><button class="secondary" onclick={onReconfigure}>Replace integration</button></div>
+    <div class="field"><span><strong>Playback history delivery {telemetry?.deliveryAvailable ? "available" : "unavailable"}</strong><small>{telemetry?.deliveryAvailable ? `Using ${telemetry.deliveryTransport}.` : telemetry?.deliveryBlocker ?? "Checking Spotify telemetry capability…"}</small></span><span class="audit">{telemetry?.activePlaybacks ?? 0} active · {telemetry?.locallyRecorded ?? 0} audited</span></div>
     <p class="notice">Replacing the integration signs out the current session so the new Spotify app can request its own OAuth grant.</p>
   </section>
 
@@ -246,6 +249,6 @@
   .custom-list button:first-of-type { margin-left: auto; }
   .custom-list button { padding: 5px 8px; font-size: 11px; }
   .actions { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
-  .ok { color: var(--accent); } .error { color: #ff9a9a; }
+  .ok { color: var(--accent); } .error { color: #ff9a9a; } .audit { flex:none;color:var(--fg-dim);font-size:11px;font-variant-numeric:tabular-nums; }
   @media (max-width: 620px) { .field { align-items: flex-start; flex-direction: column; gap: 14px; } .bands { grid-template-columns: repeat(3, 1fr); } .preset-tools { flex-wrap: wrap; } }
 </style>

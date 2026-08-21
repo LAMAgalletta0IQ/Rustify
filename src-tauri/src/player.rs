@@ -173,6 +173,7 @@ fn spawn_event_pump(
 
         while let Some(event) = rx.recv().await {
             let state = app.state::<AppState>();
+            state.telemetry.observe(&event).await;
             let mut pb = state.playback.write().await;
 
             let mut track_to_resolve: Option<SpotifyUri> = None;

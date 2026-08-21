@@ -207,6 +207,9 @@ pub struct AppState {
     /// The command enforces a fixed upper bound before inserting.
     pub lyrics_cache: RwLock<HashMap<String, crate::lyrics::LyricsResult>>,
     pub friend_activity: RwLock<crate::friends::FriendFeed>,
+    /// Bounded in-memory ledger of genuine local playback. It never invents
+    /// plays and deliberately has no first-party-impersonating Gabo sender.
+    pub telemetry: crate::telemetry::TelemetryTracker,
     pub auth: RwLock<AuthState>,
     pub device_auth: crate::auth::DeviceAuthStore,
     pub sleep_timer: crate::sleep_timer::SleepTimerController,

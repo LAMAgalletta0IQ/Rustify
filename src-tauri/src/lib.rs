@@ -23,6 +23,7 @@ mod search;
 mod sleep_timer;
 mod spotify;
 mod state;
+mod telemetry;
 mod webapi;
 
 use std::path::{Path, PathBuf};
@@ -166,6 +167,7 @@ pub fn run() {
             commands::get_track_credits,
             commands::get_episode_resume,
             commands::set_episode_completed,
+            commands::get_telemetry_status,
             commands::get_top_tracks,
             commands::get_top_artists,
             commands::get_personalized_home,

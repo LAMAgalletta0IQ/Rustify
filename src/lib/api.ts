@@ -31,6 +31,7 @@ import type {
   ConcertFeed,
   TrackCredits,
   EpisodeResume,
+  TelemetryStatus,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -184,6 +185,8 @@ export const getEpisodeResume = (episodeUri: string) =>
   invoke<EpisodeResume>("get_episode_resume", { episodeUri });
 export const setEpisodeCompleted = (episodeUri: string, completed: boolean) =>
   invoke<void>("set_episode_completed", { episodeUri, completed });
+export const getTelemetryStatus = () =>
+  invoke<TelemetryStatus>("get_telemetry_status");
 export const getTopTracks = (limit?: number) =>
   invoke<TrackSummary[]>("get_top_tracks", { limit });
 export const getTopArtists = (limit?: number) =>
