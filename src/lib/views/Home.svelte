@@ -328,19 +328,36 @@
 
     <section aria-labelledby="dj-heading">
       <div class="dj-card">
+        <span class="dj-mark" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 13a8 8 0 0 1 16 0" />
+            <rect x="2.5" y="13" width="4" height="7" rx="1.5" />
+            <rect x="17.5" y="13" width="4" height="7" rx="1.5" />
+          </svg>
+        </span>
         <div class="dj-copy">
-          <span class="eyebrow">dynamic session</span>
-          <h2 id="dj-heading">DJ X</h2>
-          {#if dj}
-            <p>{dj.tracks.length} tracks resolved from Lexicon{dj.dynamicRefillSupported ? " with queue refill" : ""}{dj.narrationPlaybackSupported ? "; narration playback is ready" : dj.narrationResolved ? "; narration synthesis is reachable (audio insertion awaits player support)" : dj.tracks.some((track) => track.narrationKinds.length) ? ", with narration metadata" : ""}.</p>
+          <h2 id="dj-heading">DJ</h2>
+          {#if dj?.active && store.playback.track}
+            <p class="truncate">Now playing · {store.playback.track.name}</p>
+          {:else if dj}
+            <p>Your personalized mix, picked and introduced for you.</p>
+            {#if dj.narrationResolved && !dj.narrationPlaybackSupported}
+              <p class="dj-note">Voice intros aren’t available in this app yet — the music still plays.</p>
+            {/if}
           {:else if djError}
             <p>{djError}</p>
           {:else}
-            <p>Spotify’s personalized, continuously refreshed DJ context.</p>
+            <p>Your personalized mix, picked and introduced for you.</p>
           {/if}
         </div>
-        <button class="dj-action" disabled={loadingDj || !dj} onclick={startDj}>
-          {loadingDj ? "Checking…" : dj?.active ? "Restart DJ" : "Start DJ"}
+        <button class="btn-primary dj-action" disabled={loadingDj || !dj} onclick={startDj}>
+          {loadingDj
+            ? "Checking…"
+            : dj?.active
+              ? dj.interactivityEnabled && dj.jumpButtonLabel
+                ? dj.jumpButtonLabel
+                : "Restart"
+              : "Play"}
         </button>
       </div>
     </section>
@@ -488,11 +505,13 @@
   .eyebrow { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
   .personalized-sections { display: grid; gap: 22px; }
   .shelf h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
-  .dj-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px; border-radius: var(--r-md); border: 1px solid rgba(126, 95, 255, .32); background: linear-gradient(120deg, rgba(72, 38, 150, .32), var(--glass)); }
-  .dj-copy h2 { margin: 3px 0 5px; font-size: 22px; }
-  .dj-copy p { margin: 0; color: var(--fg-dim); }
-  .dj-action { flex: none; padding: 10px 16px; border-radius: 999px; color: #fff; background: rgba(126, 95, 255, .75); }
-  .dj-action:disabled { opacity: .45; cursor: default; }
+  .dj-card { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border-radius: var(--r-md); border: 1px solid var(--hairline); background: var(--glass); }
+  .dj-mark { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 50%; color: var(--accent); background: var(--glass-raised); border: 1px solid var(--hairline); }
+  .dj-copy { flex: 1; min-width: 0; }
+  .dj-copy h2 { margin: 0 0 3px; font-size: 17px; }
+  .dj-copy p { margin: 0; color: var(--fg-dim); font-size: 13px; }
+  .dj-copy p.dj-note { margin-top: 2px; font-size: 11px; color: var(--fg-faint); }
+  .dj-action { flex: none; }
   .state { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--glass); border: 1px solid var(--hairline); border-radius: var(--r-md); color: var(--fg-dim); }
   .friends { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
   .friend { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 11px; text-align: left; border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--glass); }
