@@ -1,4 +1,5 @@
 mod audio;
+mod audio_capabilities;
 mod auth;
 mod commands;
 mod connect;
@@ -170,6 +171,7 @@ pub fn run() {
             commands::set_episode_completed,
             commands::get_telemetry_status,
             commands::get_music_video_capability,
+            commands::get_audio_capability,
             commands::get_top_tracks,
             commands::get_top_artists,
             commands::get_personalized_home,

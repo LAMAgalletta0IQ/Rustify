@@ -33,6 +33,7 @@ import type {
   EpisodeResume,
   TelemetryStatus,
   MusicVideoCapability,
+  AudioCapability,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -190,6 +191,8 @@ export const getTelemetryStatus = () =>
   invoke<TelemetryStatus>("get_telemetry_status");
 export const getMusicVideoCapability = (trackUri: string) =>
   invoke<MusicVideoCapability>("get_music_video_capability", { trackUri });
+export const getAudioCapability = (trackUri: string) =>
+  invoke<AudioCapability>("get_audio_capability", { trackUri });
 export const getTopTracks = (limit?: number) =>
   invoke<TrackSummary[]>("get_top_tracks", { limit });
 export const getTopArtists = (limit?: number) =>

@@ -420,6 +420,37 @@ export interface MusicVideoCapability {
   playbackBlocker: string | null;
 }
 
+export interface AudioFormatCapability {
+  id: number;
+  name: string;
+  codec: string;
+  nominalKbps: number | null;
+  lossless: boolean;
+  bitDepth: number | null;
+  decoderSupported: boolean;
+  currentPlayerSelectable: boolean;
+}
+
+export interface StorageCapability {
+  endpointVersion: string;
+  attempted: boolean;
+  available: boolean;
+  result: string | null;
+  cdnUrlCount: number;
+  error: string | null;
+}
+
+export interface AudioCapability {
+  trackUri: string;
+  formats: AudioFormatCapability[];
+  preferredFormat: AudioFormatCapability | null;
+  storage: StorageCapability;
+  losslessMetadataAvailable: boolean;
+  losslessDecoderAvailable: boolean;
+  losslessPlaybackAvailable: boolean;
+  losslessBlocker: string | null;
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

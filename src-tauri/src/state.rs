@@ -206,6 +206,9 @@ pub struct AppState {
     /// but must not trigger another internal lyrics request for the same URI.
     /// The command enforces a fixed upper bound before inserting.
     pub lyrics_cache: RwLock<HashMap<String, crate::lyrics::LyricsResult>>,
+    /// Per-session format/storage capability snapshots. Storage URLs are never
+    /// retained, only safe booleans/counts, so this can have a long TTL.
+    pub audio_capability_cache: RwLock<HashMap<String, crate::audio_capabilities::AudioCapability>>,
     pub friend_activity: RwLock<crate::friends::FriendFeed>,
     /// Bounded in-memory ledger of genuine local playback. It never invents
     /// plays and deliberately has no first-party-impersonating Gabo sender.

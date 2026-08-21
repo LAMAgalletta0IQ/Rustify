@@ -577,6 +577,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
     *state.playback.write().await = PlaybackState::default();
     *state.queue.write().await = QueueView::default();
     state.lyrics_cache.write().await.clear();
+    state.audio_capability_cache.write().await.clear();
     *state.friend_activity.write().await = crate::friends::FriendFeed::default();
 
     if let Ok(dir) = app.path().app_data_dir() {
@@ -1235,6 +1236,38 @@ pub async fn get_music_video_capability(
         .map(|spotify| spotify.session.clone())
         .ok_or(AppError::NotLoggedIn)?;
     crate::music_videos::capability(&session, &track_uri).await
+}
+
+#[tauri::command]
+pub async fn get_audio_capability(
+    state: State<'_, AppState>,
+    track_uri: String,
+) -> AppResult<crate::audio_capabilities::AudioCapability> {
+    if let Some(cached) = state
+        .audio_capability_cache
+        .read()
+        .await
+        .get(&track_uri)
+        .cloned()
+    {
+        return Ok(cached);
+    }
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    let capability = crate::audio_capabilities::inspect(&session, &track_uri).await?;
+    let mut cache = state.audio_capability_cache.write().await;
+    if cache.len() >= 128 {
+        if let Some(key) = cache.keys().next().cloned() {
+            cache.remove(&key);
+        }
+    }
+    cache.insert(track_uri, capability.clone());
+    Ok(capability)
 }
 
 #[tauri::command]
