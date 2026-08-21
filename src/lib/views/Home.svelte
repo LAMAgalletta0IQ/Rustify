@@ -299,6 +299,7 @@
     onOpenAlbum={(album) => (openAlbum = album)}
   />
 {:else}
+  <div class="home-layout">
   <div class="home">
     <h1 class="greet">{greeting}</h1>
     <p class="greet-sub muted">
@@ -464,27 +465,28 @@
         </div>
       {:else}<p class="muted">No supported release suggestions are available yet.</p>{/if}
     </section>
-    <section aria-labelledby="friends-heading">
-      <div class="section-head"><div><h2 id="friends-heading">Friend activity</h2><p>Live updates from your Spotify presence feed.</p></div></div>
-      {#if friendsLoading || friends?.status === "connecting"}
-        <div class="state"><span>Connecting to friend activity…</span></div>
-      {:else if friends?.entries.length}
-        {#if friends.status === "stale"}<p class="muted">Showing the latest cached activity while presence reconnects.</p>{/if}
-        <div class="friends">
-          {#each friends.entries as entry (entry.userUri)}
-            <button class="friend" onclick={() => playFriend(entry)}>
-              <span class="friend-avatar">{#if entry.userImageUrl}<img src={entry.userImageUrl} alt="" loading="lazy" />{:else}{entry.userName.slice(0,1).toUpperCase()}{/if}<i class:live={friendIsLive(entry)}></i></span>
-              <span class="friend-copy"><strong class="truncate">{entry.userName}</strong><span class="truncate">{entry.trackName}{entry.artistName?` · ${entry.artistName}`:""}</span><small class="truncate">{entry.contextName??entry.albumName??"Spotify"}</small></span>
-              <time>{friendTime(entry)}</time>
-            </button>
-          {/each}
-        </div>
-      {:else if friends?.status === "empty"}
-        <div class="state"><span>No visible friend listening activity right now.</span></div>
-      {:else}
-        <div class="state"><span>Friend activity is not available for this account or region. Rustify does not infer or fabricate presence.</span></div>
-      {/if}
-    </section>
+  </div>
+  <aside class="friends-rail" aria-labelledby="friends-heading">
+    <div class="section-head"><div><h2 id="friends-heading">Friends</h2></div></div>
+    {#if friendsLoading || friends?.status === "connecting"}
+      <div class="state compact"><span>Connecting…</span></div>
+    {:else if friends?.entries.length}
+      {#if friends.status === "stale"}<p class="muted rail-note">Showing cached activity while presence reconnects.</p>{/if}
+      <div class="friends">
+        {#each friends.entries as entry (entry.userUri)}
+          <button class="friend" onclick={() => playFriend(entry)}>
+            <span class="friend-avatar">{#if entry.userImageUrl}<img src={entry.userImageUrl} alt="" loading="lazy" />{:else}{entry.userName.slice(0,1).toUpperCase()}{/if}<i class:live={friendIsLive(entry)}></i></span>
+            <span class="friend-copy"><strong class="truncate">{entry.userName}</strong><span class="truncate">{entry.trackName}{entry.artistName?` · ${entry.artistName}`:""}</span><small class="truncate">{entry.contextName??entry.albumName??"Spotify"}</small></span>
+            <time>{friendTime(entry)}</time>
+          </button>
+        {/each}
+      </div>
+    {:else if friends?.status === "empty"}
+      <div class="state compact"><span>No visible friend activity right now.</span></div>
+    {:else}
+      <div class="state compact"><span>Friend activity isn’t available for this account or region.</span></div>
+    {/if}
+  </aside>
   </div>
 {/if}
 
@@ -513,7 +515,13 @@
   .dj-copy p.dj-note { margin-top: 2px; font-size: 11px; color: var(--fg-faint); }
   .dj-action { flex: none; }
   .state { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--glass); border: 1px solid var(--hairline); border-radius: var(--r-md); color: var(--fg-dim); }
-  .friends { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .home-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 260px); align-items: start; gap: 22px; }
+  .friends-rail { position: sticky; top: 0; padding-top: 18px; }
+  .friends-rail .section-head { margin-bottom: 10px; }
+  .friends-rail .section-head h2 { font-size: 15px; }
+  .rail-note { margin: 0 0 8px; font-size: 11px; }
+  .state.compact { flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; font-size: 12px; }
+  .friends { display: flex; flex-direction: column; gap: 8px; }
   .friend { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 11px; text-align: left; border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--glass); }
   .friend:hover { background: var(--glass-hover); }
   .friend-avatar { position: relative; display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 50%; overflow: visible; background: var(--glass-strong); color: var(--fg-dim); }
@@ -524,6 +532,14 @@
   .friend-copy span,.friend-copy small,.friend time { color: var(--fg-dim); font-size: 11px; }
   .friend time { flex: none; align-self: flex-start; }
   .state button, .link { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
-  @media (max-width: 900px) { .jump,.friends { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-  @media (max-width: 600px) { .jump,.friends { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .jump { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (max-width: 600px) { .jump { grid-template-columns: 1fr; } }
+  /* Below this the rail has no room to sit beside main content without
+     squeezing it; stack instead of shrinking the rail into uselessness. */
+  @media (max-width: 860px) {
+    .home-layout { display: block; }
+    .friends-rail { position: static; margin-top: 24px; padding-top: 0; }
+    .friends { flex-direction: row; flex-wrap: wrap; }
+    .friend { flex: 1 1 260px; }
+  }
 </style>

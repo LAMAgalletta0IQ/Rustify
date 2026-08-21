@@ -9,10 +9,12 @@
     onOpenNowPlaying,
     onOpenArtwork,
     onOpenLyrics,
+    onOpenJams,
   }: {
     onOpenNowPlaying: () => void;
     onOpenArtwork: () => void;
     onOpenLyrics: () => void;
+    onOpenJams: () => void;
   } = $props();
 
   const pb = $derived(store.playback);
@@ -175,6 +177,11 @@
           <circle cx="6" cy="18" r="3" /><circle cx="16" cy="16" r="3" />
         </svg>
         <span>Lyrics</span>
+      </button>
+      <button class="jam-button" onclick={onOpenJams} title="Spotify Jam" aria-label="Open Spotify Jam">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M17 20c0-3-2-5-5-5s-5 2-5 5" /><circle cx="12" cy="8" r="4" />
+        </svg>
       </button>
       <SpotifyConnectMenu />
       <AudioOutputSelector
@@ -422,6 +429,19 @@
   }
   .lyrics-button:hover:not(:disabled),
   .lyrics-button:focus-visible {
+    color: var(--fg);
+    background: var(--glass-hover);
+  }
+  .jam-button {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--control-radius);
+    color: var(--fg-dim);
+  }
+  .jam-button:hover,
+  .jam-button:focus-visible {
     color: var(--fg);
     background: var(--glass-hover);
   }

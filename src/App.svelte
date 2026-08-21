@@ -123,12 +123,8 @@
           <button class:on={tab === "search"} aria-current={tab === "search" ? "page" : undefined} onclick={() => go("search")}>
             Search
           </button>
-          <button class:on={tab === "releases"} aria-current={tab === "releases" ? "page" : undefined} onclick={() => go("releases")}>Releases</button>
           <button class:on={tab === "library"} aria-current={tab === "library" ? "page" : undefined} onclick={() => go("library")}>
             Library
-          </button>
-          <button class:on={tab === "jams"} aria-current={tab === "jams" ? "page" : undefined} onclick={() => go("jams")}>
-            Jams
           </button>
           <button class:on={tab === "settings"} aria-current={tab === "settings" ? "page" : undefined} onclick={() => go("settings")}>
             Settings
@@ -214,6 +210,7 @@
             nowPlayingOpen ? (nowPlayingOpen = false) : openNowPlaying(false)}
           onOpenArtwork={openArtworkDestination}
           onOpenLyrics={() => openNowPlaying(true)}
+          onOpenJams={() => go("jams")}
         />
       {/if}
     </div>
