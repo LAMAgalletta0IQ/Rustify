@@ -248,6 +248,7 @@ pub struct DeviceAuthorization {
     pub verification_uri_complete: Option<String>,
     pub url: String,
     pub expires_in: u64,
+    pub expires_at_ms: u64,
     pub interval: u64,
 }
 
@@ -258,6 +259,8 @@ struct PendingDeviceAuthorization {
     scopes: Vec<String>,
     started: Instant,
     cancelled: AtomicBool,
+    polling: AtomicBool,
+    wake: tokio::sync::Notify,
 }
 
 /// One pending pairing per application. Starting or cancelling a flow signals
@@ -271,6 +274,10 @@ impl DeviceAuthStore {
     pub async fn cancel(&self) {
         if let Some(pending) = self.pending.write().await.take() {
             pending.cancelled.store(true, Ordering::Release);
+            // One completion poller is permitted; notify_one stores a permit
+            // even if cancellation wins the tiny race before `notified()` is
+            // registered.
+            pending.wake.notify_one();
         }
     }
 
@@ -506,11 +513,18 @@ pub async fn start_device_authorization(store: &DeviceAuthStore) -> AppResult<De
     let wire: DeviceCodeResponse = serde_json::from_slice(&body).map_err(|error| {
         AppError::Auth(format!("invalid device authorization response: {error}"))
     })?;
-    if wire.device_code.is_empty() || wire.user_code.is_empty() || wire.verification_uri.is_empty()
+    if wire.device_code.trim().is_empty()
+        || !valid_user_code(&wire.user_code)
+        || wire.expires_in == 0
+        || wire.interval == 0
     {
         return Err(AppError::Auth(
-            "device authorization response omitted a required field".to_string(),
+            "device authorization response contained invalid required fields".to_string(),
         ));
+    }
+    validate_pairing_url(&wire.verification_uri)?;
+    if let Some(url) = wire.verification_uri_complete.as_deref() {
+        validate_pairing_url(url)?;
     }
     let url = wire
         .verification_uri_complete
@@ -522,7 +536,8 @@ pub async fn start_device_authorization(store: &DeviceAuthStore) -> AppResult<De
         verification_uri_complete: wire.verification_uri_complete,
         url,
         expires_in: wire.expires_in,
-        interval: wire.interval.max(1),
+        expires_at_ms: unix_time_ms().saturating_add(wire.expires_in.saturating_mul(1_000)),
+        interval: wire.interval,
     };
     let pending = Arc::new(PendingDeviceAuthorization {
         public: public.clone(),
@@ -534,9 +549,44 @@ pub async fn start_device_authorization(store: &DeviceAuthStore) -> AppResult<De
             .collect(),
         started: Instant::now(),
         cancelled: AtomicBool::new(false),
+        polling: AtomicBool::new(false),
+        wake: tokio::sync::Notify::new(),
     });
     store.replace(pending).await;
     Ok(public)
+}
+
+fn valid_user_code(code: &str) -> bool {
+    (4..=32).contains(&code.len())
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn validate_pairing_url(raw: &str) -> AppResult<()> {
+    let url = reqwest::Url::parse(raw)
+        .map_err(|_| AppError::Auth("Spotify returned an invalid pairing URL".into()))?;
+    let trusted_host = url
+        .host_str()
+        .is_some_and(|host| host == "spotify.com" || host.ends_with(".spotify.com"));
+    if url.scheme() != "https"
+        || !trusted_host
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(AppError::Auth(
+            "Spotify returned an untrusted pairing URL".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn unix_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| {
+            duration.as_millis().min(u64::MAX as u128) as u64
+        })
 }
 
 enum PollResponse {
@@ -570,7 +620,22 @@ async fn poll_device_token(pending: &PendingDeviceAuthorization) -> AppResult<OA
         // RFC 8628 says not to exceed the server's interval. Waiting before
         // the first request also gives the UI time to present the code and
         // avoids an unnecessary guaranteed `authorization_pending` response.
-        tokio::time::sleep(interval).await;
+        if pending.cancelled.load(Ordering::Acquire) {
+            return Err(AppError::Auth(
+                "device authorization was cancelled".to_string(),
+            ));
+        }
+        if pending.started.elapsed() >= Duration::from_secs(pending.public.expires_in) {
+            return Err(AppError::Auth(
+                "device authorization code expired".to_string(),
+            ));
+        }
+        let remaining = Duration::from_secs(pending.public.expires_in)
+            .saturating_sub(pending.started.elapsed());
+        tokio::select! {
+            _ = tokio::time::sleep(interval.min(remaining)) => {}
+            _ = pending.wake.notified() => {}
+        }
         if pending.cancelled.load(Ordering::Acquire) {
             return Err(AppError::Auth(
                 "device authorization was cancelled".to_string(),
@@ -597,17 +662,28 @@ async fn poll_device_token(pending: &PendingDeviceAuthorization) -> AppResult<OA
                 let body = response.bytes().await?;
                 match decode_poll_response(status, &body)? {
                     PollResponse::Pending => {}
-                    PollResponse::SlowDown => interval += Duration::from_secs(5),
+                    PollResponse::SlowDown => {
+                        interval = interval.saturating_add(Duration::from_secs(5));
+                    }
                     PollResponse::Token(token) => {
-                        if token.access_token.is_empty() || token.refresh_token.is_empty() {
+                        if token.access_token.trim().is_empty()
+                            || token.refresh_token.trim().is_empty()
+                            || token.expires_in == 0
+                            || !token.token_type.eq_ignore_ascii_case("bearer")
+                        {
                             return Err(AppError::Auth(
-                                "device token response omitted access or refresh token".to_string(),
+                                "device token response contained invalid token fields".to_string(),
                             ));
                         }
                         let scopes = token.scope.map_or_else(
                             || pending.scopes.clone(),
                             |scope| scope.split_whitespace().map(str::to_string).collect(),
                         );
+                        if !scopes.iter().any(|scope| scope == "streaming") {
+                            return Err(AppError::Auth(
+                                "device authorization did not grant Spotify streaming".into(),
+                            ));
+                        }
                         return Ok(OAuthToken {
                             access_token: token.access_token,
                             refresh_token: token.refresh_token,
@@ -629,6 +705,11 @@ async fn poll_device_token(pending: &PendingDeviceAuthorization) -> AppResult<OA
 
 pub async fn complete_device_authorization(store: &DeviceAuthStore) -> AppResult<SessionTokens> {
     let pending = store.current().await?;
+    if pending.polling.swap(true, Ordering::AcqRel) {
+        return Err(AppError::BadRequest(
+            "device authorization is already being completed".into(),
+        ));
+    }
     let result = poll_device_token(&pending).await.map(SessionTokens::shared);
     store.clear_if(&pending).await;
     result
@@ -937,12 +1018,64 @@ mod settings_tests {
             verification_uri_complete: None,
             url: "https://spotify.com/pair".to_string(),
             expires_in: 600,
+            expires_at_ms: 1_000_000,
             interval: 5,
         };
         let json = serde_json::to_string(&public).expect("serialize public view");
         assert!(!json.contains("device_code"));
         assert!(!json.contains("access"));
         assert!(!json.contains("refresh"));
+    }
+
+    #[test]
+    fn validates_pairing_urls_and_codes() {
+        assert!(validate_pairing_url("https://spotify.com/pair").is_ok());
+        assert!(validate_pairing_url("https://accounts.spotify.com/pair?code=ABCD").is_ok());
+        assert!(validate_pairing_url("http://spotify.com/pair").is_err());
+        assert!(validate_pairing_url("https://spotify.com.evil.test/pair").is_err());
+        assert!(validate_pairing_url("https://spotify.com@evil.test/pair").is_err());
+        assert!(valid_user_code("ABCD-EFGH"));
+        assert!(!valid_user_code("<script>"));
+    }
+
+    #[tokio::test]
+    async fn cancellation_wakes_poll_immediately_and_duplicate_poll_is_rejected() {
+        let store = DeviceAuthStore::default();
+        let pending = Arc::new(PendingDeviceAuthorization {
+            public: DeviceAuthorization {
+                user_code: "ABCD-EFGH".into(),
+                verification_uri: "https://spotify.com/pair".into(),
+                verification_uri_complete: None,
+                url: "https://spotify.com/pair".into(),
+                expires_in: 600,
+                expires_at_ms: unix_time_ms() + 600_000,
+                interval: 300,
+            },
+            device_code: "backend-only".into(),
+            client_id: "client".into(),
+            scopes: vec!["streaming".into()],
+            started: Instant::now(),
+            cancelled: AtomicBool::new(false),
+            polling: AtomicBool::new(false),
+            wake: tokio::sync::Notify::new(),
+        });
+        store.replace(pending).await;
+
+        let first = complete_device_authorization(&store);
+        tokio::pin!(first);
+        tokio::select! {
+            _ = &mut first => panic!("long poll unexpectedly completed"),
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+        }
+        assert!(matches!(
+            complete_device_authorization(&store).await,
+            Err(AppError::BadRequest(_))
+        ));
+        store.cancel().await;
+        let cancelled = tokio::time::timeout(Duration::from_millis(100), first)
+            .await
+            .expect("cancellation should wake the poll");
+        assert!(matches!(cancelled, Err(AppError::Auth(message)) if message.contains("cancelled")));
     }
 
     #[tokio::test]

@@ -17,7 +17,16 @@
   let loginInfo = $state<LoginInfo | null>(null);
   let pairing = $state<DeviceAuthorization | null>(null);
   let pairingBusy = $state(false);
+  let pairingSeconds = $state(0);
+  let pairingTimer: number | null = null;
   let pairRun = 0;
+
+  function stopPairingTimer() {
+    if (pairingTimer !== null) {
+      clearInterval(pairingTimer);
+      pairingTimer = null;
+    }
+  }
 
   /** Seconds left on a rate-limit window; null when not waiting. */
   let cooldown = $state<number | null>(null);
@@ -90,6 +99,12 @@
     errMsg = null;
     try {
       pairing = await api.startDeviceAuthorization();
+      pairingSeconds = Math.max(0, Math.ceil((pairing.expiresAtMs - Date.now()) / 1000));
+      if (pairingTimer !== null) clearInterval(pairingTimer);
+      pairingTimer = window.setInterval(() => {
+        if (!pairing) return;
+        pairingSeconds = Math.max(0, Math.ceil((pairing.expiresAtMs - Date.now()) / 1000));
+      }, 1000);
       try {
         await openUrl(pairing.url);
       } catch {
@@ -101,12 +116,15 @@
       if (run === pairRun) {
         store.auth = authorized;
         pairing = null;
+        stopPairingTimer();
       }
     } catch (e) {
       if (run === pairRun) {
         const err = api.asAppError(e);
         errKind = err.kind;
         errMsg = err.message;
+        pairing = null;
+        stopPairingTimer();
       }
     } finally {
       if (run === pairRun) {
@@ -120,6 +138,7 @@
     pairRun += 1;
     pairing = null;
     pairingBusy = false;
+    stopPairingTimer();
     await api.cancelDeviceAuthorization().catch(() => {});
   }
 
@@ -128,6 +147,7 @@
   });
   onDestroy(() => {
     stopCooldown();
+    stopPairingTimer();
     if (pairing) void api.cancelDeviceAuthorization();
   });
 </script>
@@ -165,7 +185,7 @@
 
     {#if pairing}
       <div class="pairing">
-        <span class="muted small">Enter this code at <strong>{pairing.verificationUri}</strong></span>
+        <span class="muted small">Enter this code at <strong>{pairing.verificationUri}</strong> · expires in {pairingSeconds}s</span>
         <code>{pairing.userCode}</code>
         <div class="pair-actions">
           <button class="secondary" onclick={() => openUrl(pairing!.url)}>Open pairing page</button>

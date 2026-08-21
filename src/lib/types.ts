@@ -78,6 +78,7 @@ export interface DeviceAuthorization {
   verificationUriComplete: string | null;
   url: string;
   expiresIn: number;
+  expiresAtMs: number;
   interval: number;
 }
 
