@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use reqwest::{Client, StatusCode};
@@ -25,7 +26,13 @@ pub struct DjSession {
     pub lexicon_expiration_time: Option<String>,
     pub reason: String,
     pub active: bool,
+    /// The TTS endpoint accepted at least one real narration script.
     pub narration_resolved: bool,
+    /// The pinned librespot player cannot yet wrap its decoder with arbitrary
+    /// narration audio. Keep this separate from endpoint reachability.
+    pub narration_playback_supported: bool,
+    /// Rustify can replenish music URIs through Lexicon as the queue drains.
+    pub dynamic_refill_supported: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -45,6 +52,7 @@ pub struct DjClient {
     http: Client,
     tts_http: Client,
     cached: RwLock<Option<DjSession>>,
+    refill_in_flight: AtomicBool,
 }
 
 impl Default for DjClient {
@@ -60,6 +68,7 @@ impl Default for DjClient {
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             cached: RwLock::new(None),
+            refill_in_flight: AtomicBool::new(false),
         }
     }
 }
@@ -127,6 +136,16 @@ impl DjClient {
         }
     }
 
+    pub fn begin_refill(&self) -> bool {
+        self.refill_in_flight
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    pub fn finish_refill(&self) {
+        self.refill_in_flight.store(false, Ordering::Release);
+    }
+
     /// Resolves the first narration clip to its short-lived signed audio URL.
     /// The URL never leaves this backend method and is not cached or logged.
     /// Audio injection consumes this same seam in the hardening pass.
@@ -190,6 +209,27 @@ impl DjClient {
     }
 }
 
+pub(crate) fn refill_uris(
+    previous: &DjSession,
+    refreshed: &DjSession,
+    queued: impl IntoIterator<Item = String>,
+    limit: usize,
+) -> Vec<String> {
+    let mut known: HashSet<_> = previous
+        .tracks
+        .iter()
+        .map(|track| track.uri.clone())
+        .chain(queued)
+        .collect();
+    refreshed
+        .tracks
+        .iter()
+        .map(|track| track.uri.clone())
+        .filter(|uri| known.insert(uri.clone()))
+        .take(limit)
+        .collect()
+}
+
 fn parse_session(value: &Value, fallback_uri: &str, reason: &str) -> AppResult<DjSession> {
     let metadata = string_map(value.get("metadata"));
     let mut tracks = Vec::new();
@@ -232,6 +272,8 @@ fn parse_session(value: &Value, fallback_uri: &str, reason: &str) -> AppResult<D
         reason: reason.to_owned(),
         active: false,
         narration_resolved: false,
+        narration_playback_supported: false,
+        dynamic_refill_supported: true,
     })
 }
 
@@ -252,8 +294,9 @@ fn parse_track(value: &Value) -> Option<DjTrack> {
     let narration_kinds = ["intro", "jump", "outro"]
         .into_iter()
         .filter(|kind| {
-            metadata.contains_key(&format!("narration.{kind}.ssml"))
-                || metadata.contains_key(&format!("narration.{kind}.commentary_id"))
+            metadata
+                .get(&format!("narration.{kind}.ssml"))
+                .is_some_and(|script| !script.trim().is_empty())
         })
         .map(str::to_owned)
         .collect();
@@ -314,6 +357,10 @@ fn tts_request(
         Some("POLLY") => 3,
         Some("WELL_SAID") => 4,
         Some("SONANTIC_DEPRECATED") => 5,
+        Some("OPENAI") => 7,
+        Some("SONANTIC_LARGE") => 8,
+        Some("ELEVEN_LABS_DEPRECATED") => 9,
+        Some("ADS_PUBLIC") => 10,
         _ => 6, // SONANTIC_FAST
     };
     protobuf_varint(&mut body, 6, provider);
@@ -386,6 +433,20 @@ mod tests {
     }
 
     #[test]
+    fn ignores_commentary_metadata_without_a_narration_script() {
+        let track = parse_track(&json!({
+            "uri": "spotify:track:abc",
+            "metadata": {
+                "narration.intro.commentary_id": "not-a-script",
+                "narration.jump.ssml": "   ",
+                "narration.outro.ssml": "<speak>Goodbye</speak>"
+            }
+        }))
+        .unwrap();
+        assert_eq!(track.narration_kinds, ["outro"]);
+    }
+
+    #[test]
     fn encodes_client_tts_request_without_generated_proto_dependency() {
         let body = tts_request(
             "<speak>Hi</speak>",
@@ -399,5 +460,45 @@ mod tests {
             .any(|window| window == b"<speak>Hi</speak>"));
         assert!(body.windows(5).any(|window| window == b"en-US"));
         assert!(body.ends_with(&[0x38, 0xc4, 0xd8, 0x02]));
+
+        let modern = tts_request(
+            "<speak>Hi</speak>",
+            None,
+            None,
+            Some(&"OPENAI".to_owned()),
+            None,
+        );
+        assert!(modern.windows(2).any(|window| window == [0x30, 0x07]));
+    }
+
+    #[test]
+    fn refill_is_bounded_and_excludes_previous_queued_and_duplicate_tracks() {
+        let track = |uri: &str| DjTrack {
+            uri: uri.to_owned(),
+            ..Default::default()
+        };
+        let previous = DjSession {
+            tracks: vec![track("spotify:track:old")],
+            ..Default::default()
+        };
+        let refreshed = DjSession {
+            tracks: vec![
+                track("spotify:track:old"),
+                track("spotify:track:queued"),
+                track("spotify:track:new1"),
+                track("spotify:track:new1"),
+                track("spotify:track:new2"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            refill_uris(
+                &previous,
+                &refreshed,
+                ["spotify:track:queued".to_owned()],
+                1
+            ),
+            ["spotify:track:new1"]
+        );
     }
 }

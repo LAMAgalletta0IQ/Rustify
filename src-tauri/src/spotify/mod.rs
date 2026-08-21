@@ -11,6 +11,7 @@ mod users;
 
 pub use concerts::ConcertFeed;
 pub use credits::TrackCredits;
+pub(crate) use dj::refill_uris as dj_refill_uris;
 pub use dj::DjSession;
 pub use home::HomeFeed;
 pub use users::UserSearchPage;
@@ -154,6 +155,14 @@ impl InternalSpotify {
 
     pub async fn cached_dj(&self) -> Option<DjSession> {
         self.dj.cached().await
+    }
+
+    pub fn begin_dj_refill(&self) -> bool {
+        self.dj.begin_refill()
+    }
+
+    pub fn finish_dj_refill(&self) {
+        self.dj.finish_refill();
     }
 
     pub async fn prepare_dj_narration(&self, session: &Session, dj: &DjSession) -> AppResult<bool> {

@@ -121,7 +121,7 @@ pub async fn get_dj_status(
         .ok_or(AppError::NotLoggedIn)?;
     state
         .internal_spotify
-        .resolve_dj(&session, false)
+        .resolve_dj(&session, refresh.unwrap_or(false))
         .await
         .map(Some)
 }
@@ -138,7 +138,10 @@ pub async fn start_dj(state: State<'_, AppState>) -> AppResult<DjSession> {
         .as_ref()
         .map(|spotify| spotify.session.clone())
         .ok_or(AppError::NotLoggedIn)?;
-    let mut dj = state.internal_spotify.resolve_dj(&session, false).await?;
+    // A fresh session needs the full state_restore metadata (volatile context,
+    // Lexicon clock and session-control fields). The small interactive window
+    // is appropriate only for later queue replenishment.
+    let mut dj = state.internal_spotify.resolve_dj(&session, true).await?;
     match state
         .internal_spotify
         .prepare_dj_narration(&session, &dj)

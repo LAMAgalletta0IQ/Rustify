@@ -291,6 +291,7 @@ fn spawn_event_pump(
                     if track_id.item_type() == "episode" {
                         crate::podcasts::spawn_report(session.clone(), track_id.to_uri(), 0, true);
                     }
+                    spawn_dj_refill(app.clone(), session.clone(), track_id.to_uri());
                     state.sleep_timer.on_end_of_track(&app).await;
                     continue;
                 }
@@ -350,6 +351,71 @@ fn spawn_event_pump(
         }
 
         log::info!("player event pump ended");
+    });
+}
+
+/// Best-effort compatibility bridge until librespot itself understands
+/// Lexicon/hm:// dynamic contexts. It only runs for a track from the active DJ
+/// window and only when the observable queue is low. Failures never interrupt
+/// music playback.
+fn spawn_dj_refill(app: AppHandle, session: Session, ended_uri: String) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let Some(previous) = state.internal_spotify.cached_dj().await else {
+            return;
+        };
+        if !previous.active || !previous.tracks.iter().any(|track| track.uri == ended_uri) {
+            return;
+        }
+        let remaining = {
+            let queue = state.queue.read().await;
+            queue.queue.len() + queue.autoplay.len()
+        };
+        if remaining >= 8 || !state.internal_spotify.begin_dj_refill() {
+            return;
+        }
+
+        let outcome = async {
+            let refreshed = state.internal_spotify.resolve_dj(&session, false).await?;
+            let queued = {
+                let queue = state.queue.read().await;
+                queue
+                    .queue
+                    .iter()
+                    .chain(&queue.autoplay)
+                    .map(|track| track.uri.clone())
+                    .collect::<Vec<_>>()
+            };
+            let additions: Vec<_> =
+                crate::spotify::dj_refill_uris(&previous, &refreshed, queued, 32)
+                    .iter()
+                    .filter_map(|uri| SpotifyUri::from_uri(uri).ok())
+                    .collect();
+            if additions.is_empty() {
+                return Ok::<usize, AppError>(0);
+            }
+            let spotify = state.spotify.read().await;
+            let spotify = spotify.as_ref().ok_or(AppError::NotLoggedIn)?;
+            for uri in &additions {
+                spotify.spirc.add_to_queue(uri.clone())?;
+            }
+            Ok(additions.len())
+        }
+        .await;
+
+        state.internal_spotify.finish_dj_refill();
+        state
+            .internal_spotify
+            .dj
+            .update_status(true, previous.narration_resolved)
+            .await;
+        match outcome {
+            Ok(0) => log::debug!(target: "spotify.dj", "Lexicon refill returned no new tracks"),
+            Ok(count) => {
+                log::debug!(target: "spotify.dj", "added {count} refreshed Lexicon tracks")
+            }
+            Err(error) => log::warn!(target: "spotify.dj", "dynamic queue refill failed: {error}"),
+        }
     });
 }
 

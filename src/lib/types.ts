@@ -272,6 +272,8 @@ export interface DjSession {
   reason: string;
   active: boolean;
   narrationResolved: boolean;
+  narrationPlaybackSupported: boolean;
+  dynamicRefillSupported: boolean;
 }
 
 export interface LyricsLine {

@@ -332,7 +332,7 @@
           <span class="eyebrow">dynamic session</span>
           <h2 id="dj-heading">DJ X</h2>
           {#if dj}
-            <p>{dj.tracks.length} tracks resolved from Lexicon{dj.narrationResolved ? "; narration synthesis is ready" : dj.tracks.some((track) => track.narrationKinds.length) ? ", with narration metadata" : ""}.</p>
+            <p>{dj.tracks.length} tracks resolved from Lexicon{dj.dynamicRefillSupported ? " with queue refill" : ""}{dj.narrationPlaybackSupported ? "; narration playback is ready" : dj.narrationResolved ? "; narration synthesis is reachable (audio insertion awaits player support)" : dj.tracks.some((track) => track.narrationKinds.length) ? ", with narration metadata" : ""}.</p>
           {:else if djError}
             <p>{djError}</p>
           {:else}
