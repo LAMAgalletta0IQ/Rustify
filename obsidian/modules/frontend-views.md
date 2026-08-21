@@ -17,14 +17,18 @@ domain state and shared components rather than acting as independent routes.
 | --- | --- | --- |
 | [[Setup.svelte]] | `store.setupNeeded` (no Web API Client ID configured yet) | `get_login_info`, `set_client_id` |
 | [[Login.svelte]] | `!store.setupNeeded && !store.auth.loggedIn` | `login` command |
-| [[Home.svelte]] | `tab === "home"` | Recent contexts, top tracks/artists, releases, playlist fallback |
+| [[Home.svelte]] | `tab === "home"` | Recent contexts, top tracks/artists, releases, friend activity rail, playlist fallback |
 | [[Search.svelte]] | `tab === "search"` | `search_spotify` |
 | [[Library.svelte]] | `tab === "library"` | Saved collections/followed artists |
+| [[ForYou.svelte]] | `tab === "forYou"` | The user's own top tracks/artists (`get_top_tracks`/`get_top_artists`), explicitly not framed as an editorial mix |
+| [[Releases.svelte]] | `tab === "releases"` | Cursor-paged followed-artist releases (`get_followed_releases`), filterable by type/date |
+| [[Jams.svelte]] | `tab === "jams"`, reached from the player bar's Jam button | Spotify Jam lifecycle — create/join/leave/kick/end, live via dealer events |
 | [[Settings.svelte]] | `tab === "settings"` | Persisted functional settings + integration status |
 | [[Profile.svelte]] | Account button | Current session, top items, playlists |
 | [[NowPlaying.svelte]] | `nowPlayingOpen` (overlay) | Store + queue + LRCLIB lyrics |
-| [[AlbumView.svelte]] | Drill-down from search/artist | `get_album_tracks` |
-| [[ArtistView.svelte]] | Drill-down from search/Home | Artist identity + release-derived tracks + paged releases |
+| [[PlaylistView.svelte]] | Drill-down from Home/Search/Library | `get_playlist_tracks` (with a Pathfinder `fetchPlaylistContents` fallback on 404) |
+| [[AlbumView.svelte]] | Drill-down from search/artist/playlist/releases | `get_album_tracks` |
+| [[ArtistView.svelte]] | Drill-down from search/Home | `get_artist_overview` (stats + top tracks + concerts) + paged discography |
 
 ## Navigation
 
@@ -47,7 +51,10 @@ App.svelte
     ├── Search.svelte
     │   ├── AlbumView.svelte
     │   └── ArtistView.svelte ──► AlbumView.svelte
-    ├── Library.svelte
+    ├── Library.svelte ──► Playlist / Album / Artist views
+    ├── ForYou.svelte ──► ArtistView.svelte
+    ├── Releases.svelte ──► AlbumView.svelte
+    ├── Jams.svelte                 (reached from PlayerBar's Jam button, not the tab bar)
     ├── Settings.svelte
     ├── Profile.svelte              (account area)
     └── NowPlaying.svelte           (overlay with lyrics/queue)
