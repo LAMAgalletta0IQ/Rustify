@@ -219,11 +219,22 @@ export interface HomeItem {
   imageUrl: string | null;
   typeName: string;
   format: string | null;
+  personalization: HomePersonalization | null;
   ownerName: string | null;
   madeForUsername: string | null;
   totalCount: number | null;
   attributes: Record<string, string>;
 }
+
+export type HomePersonalization =
+  | "dailyMix"
+  | "discoverWeekly"
+  | "releaseRadar"
+  | "daylist"
+  | "artistMix"
+  | "topicMix"
+  | "inspiredByMix"
+  | "madeForYou";
 
 export interface HomeSection {
   uri: string;

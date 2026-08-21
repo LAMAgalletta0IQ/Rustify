@@ -264,6 +264,20 @@
     }
   }
 
+  function personalizationLabel(item: HomeItem) {
+    switch (item.personalization) {
+      case "dailyMix": return "daily mix";
+      case "discoverWeekly": return "discover weekly";
+      case "releaseRadar": return "release radar";
+      case "daylist": return "daylist";
+      case "artistMix": return "artist mix";
+      case "topicMix": return "topic mix";
+      case "inspiredByMix": return "inspired mix";
+      case "madeForYou": return "made for you";
+      default: return item.kind;
+    }
+  }
+
   function startDj() {
     loadingDj = true;
     djError = null;
@@ -351,7 +365,7 @@
                 {#each section.items as item (item.uri)}
                   <button class="card" onclick={() => openPersonalized(item)}>
                     {#if item.imageUrl}<img src={item.imageUrl} alt="" loading="lazy" />{:else}<span class="art"></span>{/if}
-                    <span class="eyebrow">{item.madeForUsername ? "made for you" : item.kind}</span>
+                    <span class="eyebrow">{personalizationLabel(item)}</span>
                     <span class="truncate title">{item.name}</span>
                     <span class="truncate sub">{item.subtitle ?? item.description ?? "Spotify"}</span>
                   </button>

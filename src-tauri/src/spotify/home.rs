@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -38,10 +38,26 @@ pub struct HomeItem {
     pub image_url: Option<String>,
     pub type_name: String,
     pub format: Option<String>,
+    pub personalization: Option<HomePersonalization>,
     pub owner_name: Option<String>,
     pub made_for_username: Option<String>,
     pub total_count: Option<u64>,
     pub attributes: BTreeMap<String, String>,
+}
+
+/// Stable, non-localized classification derived from Spotify's format and
+/// attribute fields. Names and section titles are intentionally not used.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum HomePersonalization {
+    DailyMix,
+    DiscoverWeekly,
+    ReleaseRadar,
+    Daylist,
+    ArtistMix,
+    TopicMix,
+    InspiredByMix,
+    MadeForYou,
 }
 
 pub fn home_variables(limit: u32, time_zone: &str) -> Value {
@@ -77,11 +93,13 @@ pub fn parse_home(data: &Value) -> AppResult<HomeFeed> {
 
 fn parse_section(section: &Value) -> Option<HomeSection> {
     let section_items = section.get("sectionItems")?;
+    let mut seen = HashSet::new();
     let items: Vec<_> = section_items
         .get("items")?
         .as_array()?
         .iter()
         .filter_map(parse_item)
+        .filter(|item| seen.insert(item.uri.clone()))
         .collect();
     if items.is_empty() {
         return None;
@@ -106,6 +124,8 @@ fn parse_item(item: &Value) -> Option<HomeItem> {
     let uri = string(data.get("uri")).or_else(|| string(item.get("uri")))?;
     let attributes = attributes(data.get("attributes"));
     let made_for_username = attributes.get("madeFor.username").cloned();
+    let format = string(data.get("format"));
+    let personalization = personalization(format.as_deref(), made_for_username.is_some());
     let kind = wrapper_kind(&type_name, data.get("__typename"));
     let artists = data
         .pointer("/artists/items")
@@ -138,7 +158,8 @@ fn parse_item(item: &Value) -> Option<HomeItem> {
         description: string(data.get("description")),
         image_url: image(data),
         type_name,
-        format: string(data.get("format")),
+        format,
+        personalization,
         owner_name,
         made_for_username,
         total_count: data.pointer("/content/totalCount").and_then(Value::as_u64),
@@ -175,15 +196,42 @@ fn image(data: &Value) -> Option<String> {
     ]
     .iter()
     .find_map(|pointer| data.pointer(pointer).and_then(Value::as_str))
+    .filter(|url| url.starts_with("https://") || url.starts_with("http://"))
     .map(str::to_owned)
 }
 
+fn personalization(format: Option<&str>, made_for_user: bool) -> Option<HomePersonalization> {
+    let semantic = match format.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "daily-mix" => Some(HomePersonalization::DailyMix),
+        "discover-weekly" => Some(HomePersonalization::DiscoverWeekly),
+        "release-radar" => Some(HomePersonalization::ReleaseRadar),
+        "daylist" => Some(HomePersonalization::Daylist),
+        "artist-mix-reader" | "artist-mix" => Some(HomePersonalization::ArtistMix),
+        "topic-mix" => Some(HomePersonalization::TopicMix),
+        "inspiredby-mix" | "inspired-by-mix" => Some(HomePersonalization::InspiredByMix),
+        _ => None,
+    };
+    semantic.or(made_for_user.then_some(HomePersonalization::MadeForYou))
+}
+
 fn attributes(value: Option<&Value>) -> BTreeMap<String, String> {
+    const SEMANTIC_KEYS: [&str; 4] = [
+        "madeFor.username",
+        "nicheMixLinks",
+        "daylist_pretitle",
+        "isAlgotorial",
+    ];
     value
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|entry| Some((string(entry.get("key"))?, string(entry.get("value"))?)))
+        .filter_map(|entry| {
+            let key = string(entry.get("key"))?;
+            if !SEMANTIC_KEYS.contains(&key.as_str()) {
+                return None;
+            }
+            Some((key, string(entry.get("value"))?))
+        })
         .collect()
 }
 
@@ -218,8 +266,11 @@ mod tests {
                     "uri": "spotify:playlist:mix1",
                     "content": {"__typename": "PlaylistResponseWrapper", "data": {
                         "__typename": "Playlist", "uri": "spotify:playlist:mix1", "name": "Mix giornaliero 1",
-                        "format": "format-shows-tracks", "ownerV2": {"data": {"name": "Spotify"}},
-                        "attributes": [{"key": "madeFor.username", "value": "alice"}],
+                        "format": "daily-mix", "ownerV2": {"data": {"name": "Spotify"}},
+                        "attributes": [
+                            {"key": "madeFor.username", "value": "alice"},
+                            {"key": "request-id", "value": "private-correlation-value"}
+                        ],
                         "images": {"items": [{"sources": [{"url": "https://image/1"}]}]},
                         "content": {"totalCount": 50}
                     }}
@@ -229,6 +280,10 @@ mod tests {
         let feed = parse_home(&data).unwrap();
         assert_eq!(feed.sections[0].items[0].kind, "playlist");
         assert_eq!(
+            feed.sections[0].items[0].personalization,
+            Some(HomePersonalization::DailyMix)
+        );
+        assert_eq!(
             feed.sections[0].items[0].made_for_username.as_deref(),
             Some("alice")
         );
@@ -236,5 +291,48 @@ mod tests {
             feed.sections[0].items[0].image_url.as_deref(),
             Some("https://image/1")
         );
+        assert!(!feed.sections[0].items[0]
+            .attributes
+            .contains_key("request-id"));
+    }
+
+    #[test]
+    fn classifies_personalized_formats_without_localized_names() {
+        let cases = [
+            ("daily-mix", HomePersonalization::DailyMix),
+            ("discover-weekly", HomePersonalization::DiscoverWeekly),
+            ("release-radar", HomePersonalization::ReleaseRadar),
+            ("daylist", HomePersonalization::Daylist),
+            ("artist-mix-reader", HomePersonalization::ArtistMix),
+            ("topic-mix", HomePersonalization::TopicMix),
+            ("inspiredby-mix", HomePersonalization::InspiredByMix),
+        ];
+        for (format, expected) in cases {
+            assert_eq!(personalization(Some(format), false), Some(expected));
+        }
+        assert_eq!(
+            personalization(Some("future-personalized-format"), true),
+            Some(HomePersonalization::MadeForYou)
+        );
+        assert_eq!(personalization(Some("editorial"), false), None);
+    }
+
+    #[test]
+    fn removes_duplicate_cards_and_rejects_unsafe_artwork_urls() {
+        let item = json!({
+            "uri": "spotify:playlist:same",
+            "content": {"__typename": "PlaylistResponseWrapper", "data": {
+                "uri": "spotify:playlist:same", "name": "Un nome localizzato",
+                "images": {"items": [{"sources": [{"url": "javascript:alert(1)"}]}]}
+            }}
+        });
+        let data = json!({"home": {"sectionContainer": {"sections": {"items": [{
+            "uri": "spotify:section:test",
+            "data": {"title": {"text": "Qualcosa"}},
+            "sectionItems": {"items": [item.clone(), item]}
+        }]}}}});
+        let feed = parse_home(&data).unwrap();
+        assert_eq!(feed.sections[0].items.len(), 1);
+        assert_eq!(feed.sections[0].items[0].image_url, None);
     }
 }
