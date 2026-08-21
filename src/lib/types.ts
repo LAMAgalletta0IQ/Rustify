@@ -319,7 +319,11 @@ export interface FriendActivity {
 }
 
 export interface FriendFeed {
-  status: "connecting" | "available" | "empty" | "stale" | "unavailable";
+  /** "unavailable" means Spotify actually refused it (403/404) for this
+   * account/region. "failed" is any other, expected-to-recover failure
+   * (expired token, rate limit, dropped connection, unexpected response) —
+   * never worded as a capability limit. */
+  status: "connecting" | "available" | "empty" | "stale" | "unavailable" | "failed";
   available: boolean;
   entries: FriendActivity[];
   updatedAtMs: number | null;

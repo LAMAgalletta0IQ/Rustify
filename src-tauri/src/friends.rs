@@ -42,8 +42,17 @@ pub enum FriendFeedStatus {
     Connecting,
     Available,
     Empty,
+    /// A refresh just failed but there is cached activity to keep showing —
+    /// regardless of *why* it failed, since something is still displayable.
     Stale,
+    /// Spotify answered 403/404: this account or region genuinely does not
+    /// have the capability. Only ever set from that specific evidence.
     Unavailable,
+    /// Any other failure with nothing cached yet — expired token, rate
+    /// limit, server error, dropped Dealer connection, unexpected response
+    /// shape. Distinct from `Unavailable` on purpose: this is expected to
+    /// recover on its own and must not be worded as a capability limit.
+    Failed,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -252,6 +261,39 @@ fn ensure_response_bound(bytes: &[u8]) -> AppResult<()> {
     Ok(())
 }
 
+/// librespot's SpClient maps HTTP status onto a generic `Error { kind, .. }`
+/// (see `librespot_core::http_client`'s `HttpClientError -> Error` impl —
+/// 404/410 -> NotFound, 403/402 -> PermissionDenied, 401 -> Unauthenticated,
+/// 429 -> ResourceExhausted, 5xx -> Unavailable). The blanket
+/// `From<librespot::core::Error> for AppError` throws that away into one
+/// `Playback` variant by design (its own doc comment: "callers pick the
+/// variant") — friends.rs needs the distinction to avoid telling a user
+/// their account/region lacks a feature when the real cause was an
+/// expired token, a rate limit, or a dropped connection.
+fn classify_spclient_error(context: &str, error: librespot::core::Error) -> AppError {
+    use librespot::core::error::ErrorKind;
+    match error.kind {
+        ErrorKind::NotFound => AppError::Unavailable(format!("{context}: {error}")),
+        ErrorKind::PermissionDenied => AppError::Forbidden(format!("{context}: {error}")),
+        ErrorKind::Unauthenticated => AppError::SessionExpired,
+        ErrorKind::ResourceExhausted => AppError::RateLimited { retry_after: None },
+        ErrorKind::Unavailable | ErrorKind::DeadlineExceeded => {
+            AppError::ServiceUnavailable { status: 503 }
+        }
+        _ => AppError::Other(format!("{context}: {error}")),
+    }
+}
+
+/// True only for the specific failures that mean "this account or region
+/// does not have this capability" — a 404 (endpoint doesn't exist for this
+/// client/account) or 403 (exists, refused). Everything else — expired
+/// token, rate limit, server hiccup, a dropped Dealer connection, a JSON
+/// shape change — is transient and must not be reported as a capability
+/// limitation.
+fn is_capability_absent(error: &AppError) -> bool {
+    matches!(error, AppError::Unavailable(_) | AppError::Forbidden(_))
+}
+
 async fn seed(session: &Session, connection_id: &str) -> AppResult<Vec<FriendActivity>> {
     let endpoint = format!(
         "/presence-view/v2/init-friend-feed/{}",
@@ -261,7 +303,7 @@ async fn seed(session: &Session, connection_id: &str) -> AppResult<Vec<FriendAct
         .spclient()
         .request_as_json(&Method::GET, &endpoint, None, None)
         .await
-        .map_err(|error| AppError::Other(format!("friend feed unavailable: {error}")))?;
+        .map_err(|error| classify_spclient_error("friend feed", error))?;
     parse_feed(&bytes)
 }
 
@@ -271,7 +313,7 @@ async fn fetch_user(session: &Session, user_id: &str) -> AppResult<Option<Friend
         .spclient()
         .request_as_json(&Method::GET, &endpoint, None, None)
         .await
-        .map_err(|error| AppError::Other(format!("friend presence unavailable: {error}")))?;
+        .map_err(|error| classify_spclient_error("friend presence", error))?;
     parse_entry(&bytes)
 }
 
@@ -314,15 +356,21 @@ async fn apply_seed(app: &AppHandle, session: &Session, connection_id: &str) -> 
             true
         }
         Err(error) => {
-            log::debug!(target: "spotify.social", "friend feed capability probe failed: {error}");
+            let capability_absent = is_capability_absent(&error);
+            log::debug!(
+                target: "spotify.social",
+                "friend feed seed failed (capability_absent={capability_absent}): {error}"
+            );
             let previous = app.state::<AppState>().friend_activity.read().await.clone();
             emit(
                 app,
                 FriendFeed {
-                    status: if previous.entries.is_empty() {
+                    status: if !previous.entries.is_empty() {
+                        FriendFeedStatus::Stale
+                    } else if capability_absent {
                         FriendFeedStatus::Unavailable
                     } else {
-                        FriendFeedStatus::Stale
+                        FriendFeedStatus::Failed
                     },
                     available: false,
                     entries: previous.entries,
@@ -431,7 +479,9 @@ pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime
                             dirty.clear();
                             let previous = app.state::<AppState>().friend_activity.read().await.clone();
                             emit(&app, FriendFeed {
-                                status: if previous.entries.is_empty() { FriendFeedStatus::Unavailable } else { FriendFeedStatus::Stale },
+                                // Losing the Dealer connection id is never evidence of a
+                                // missing capability — only a 403/404 from Spotify itself is.
+                                status: if previous.entries.is_empty() { FriendFeedStatus::Failed } else { FriendFeedStatus::Stale },
                                 available: false,
                                 entries: previous.entries,
                                 updated_at_ms: previous.updated_at_ms,
@@ -507,6 +557,40 @@ pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime
 #[cfg(test)]
 mod tests {
     use super::*;
+    use librespot::core::error::{Error as CoreError, ErrorKind};
+
+    #[test]
+    fn only_403_and_404_classify_as_capability_absent() {
+        let cases = [
+            (CoreError::not_found("x"), true),
+            (CoreError::permission_denied("x"), true),
+            (CoreError::unauthenticated("x"), false),
+            (CoreError::resource_exhausted("x"), false),
+            (CoreError::unavailable("x"), false),
+            (CoreError::new(ErrorKind::Internal, "x"), false),
+        ];
+        for (error, expect_absent) in cases {
+            let kind = error.kind;
+            let mapped = classify_spclient_error("ctx", error);
+            assert_eq!(
+                is_capability_absent(&mapped),
+                expect_absent,
+                "kind {kind:?} mapped to {mapped:?}, capability_absent should be {expect_absent}"
+            );
+        }
+    }
+
+    #[test]
+    fn expired_token_and_rate_limit_map_to_their_own_app_error_variants() {
+        assert!(matches!(
+            classify_spclient_error("ctx", CoreError::unauthenticated("x")),
+            AppError::SessionExpired
+        ));
+        assert!(matches!(
+            classify_spclient_error("ctx", CoreError::resource_exhausted("x")),
+            AppError::RateLimited { retry_after: None }
+        ));
+    }
 
     #[test]
     fn parses_sorts_and_deduplicates_friend_feed() {

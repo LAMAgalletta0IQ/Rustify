@@ -482,9 +482,11 @@
         {/each}
       </div>
     {:else if friends?.status === "empty"}
-      <div class="state compact"><span>No visible friend activity right now.</span></div>
-    {:else}
+      <div class="state compact"><span>No friends are listening right now.</span></div>
+    {:else if friends?.status === "unavailable"}
       <div class="state compact"><span>Friend activity isn’t available for this account or region.</span></div>
+    {:else}
+      <div class="state compact"><span>Unable to refresh friend activity. Retrying…</span></div>
     {/if}
   </aside>
   </div>

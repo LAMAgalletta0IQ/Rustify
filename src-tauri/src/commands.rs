@@ -509,9 +509,13 @@ async fn establish(
         Err(error) => {
             // Friend presence is an optional capability. A changed/disabled
             // endpoint must not take down authentication or playback.
-            log::debug!(target: "spotify.social", "friend activity unavailable: {error}");
+            log::debug!(target: "spotify.social", "friend activity subscription failed: {error}");
+            // A failure to register the Dealer subscription is a connectivity
+            // problem, not evidence Spotify refused the capability (that only
+            // comes from a 403/404 on the actual presence request, which
+            // hasn't happened yet at this point) — Failed, not Unavailable.
             *state.friend_activity.write().await = crate::friends::FriendFeed {
-                status: crate::friends::FriendFeedStatus::Unavailable,
+                status: crate::friends::FriendFeedStatus::Failed,
                 available: false,
                 entries: Vec::new(),
                 updated_at_ms: None,
