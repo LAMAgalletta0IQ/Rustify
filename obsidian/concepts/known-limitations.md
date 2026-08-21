@@ -53,10 +53,12 @@ message — see [[auth-and-tokens]].
 ## API-limited
 
 ### Search returns at most 10 per type
-`/search` caps `limit` at **10** (default 5) — far below the 50 most other
-endpoints allow, and exceeding it is a hard `400 Invalid limit`, not a silent
-truncation. `search::MAX_SEARCH_LIMIT` encodes the ceiling. Unrelated to the
-50s in [[library.rs]], which those endpoints do accept.
+`/search` caps `limit` at **10**, which is also the default when the frontend
+omits it — far below the 50 most other endpoints allow, and exceeding it is a
+hard `400 Invalid limit`, not a silent truncation. `search::MAX_SEARCH_LIMIT`
+encodes the ceiling and doubles as the default via `limit.unwrap_or(search::MAX_SEARCH_LIMIT)`
+in [[commands.rs]]. Unrelated to the 50s in [[library.rs]], which those
+endpoints do accept.
 
 ### Queue reorder / remove
 `POST /me/player/queue` appends. The Web API offers **no reorder or remove

@@ -3,7 +3,7 @@ tags: [file, backend, webapi, rust]
 ---
 # `src-tauri/src/webapi.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **130 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **~198 lines**
 
 ## Purpose
 
@@ -47,9 +47,8 @@ const MAX_RETRIES: u32 = 2;
   `Retry-After` (or `1 << attempt` when absent), up to `MAX_AUTO_RETRY_SECS`
   and `MAX_RETRIES`. Longer waits return `RateLimited` to the caller. The
   request is rebuilt each attempt, since a `RequestBuilder` is consumed on send.
-- `put`, `post`, `put_query`, `delete_query` — **no retry**. Repeating a
-  `POST /me/player/queue`
-  would double-queue a track.
+- `put`, `post`, `put_query`, `post_query`, `delete_query` — **no retry**.
+  Repeating a `POST /me/player/queue` would double-queue a track.
 - Query-only library mutations send an explicit `Content-Length: 0`; Spotify's
   edge returned 411 for a bodyless PUT during live verification.
 

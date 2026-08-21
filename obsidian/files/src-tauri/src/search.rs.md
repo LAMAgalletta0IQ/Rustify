@@ -3,7 +3,11 @@ tags: [file, backend, webapi, rust]
 ---
 # `src-tauri/src/search.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **192 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **~239 lines**
+
+> Until 2026-08 this note said search was not paginated. It now is —
+> `search()` takes an `offset` and `SearchResults` carries `has_more`. See
+> the corrected paragraph below.
 
 ## Purpose
 
@@ -13,8 +17,12 @@ API request.
 ## Key items
 
 ### Public types
-- `SearchResults` — `tracks`, `albums`, `artists`, `playlists`. Derives
-  `Default`, so an empty query returns empty vectors rather than an error.
+- `SearchResults` — `tracks`, `albums`, `artists`, `playlists`, `has_more`.
+  Derives `Default`, so an empty query returns empty vectors rather than an
+  error. `has_more` is `true` if **any** category's `Wrap<T>` carried a
+  `next` cursor in Spotify's response — [[Search.svelte]]'s "Show more
+  results" button reads this and calls `search()` again with an incremented
+  `offset`.
 - `ArtistSummary` — `uri`, `id`, `name`, `image_url`.
 - `PlaylistHit` — `uri`, `id`, `name`, `owner`, `image_url`.
 
@@ -30,12 +38,15 @@ redefined, so [[TrackList.svelte]] renders search results unchanged.
 > deserialisation fails outright on perfectly ordinary searches. The `null`s
 > are dropped with `.flatten()`.
 
-### `async fn search(api, token, query, limit) -> SearchResults`
+### `async fn search(api, token, query, limit, offset) -> SearchResults`
 - Returns `SearchResults::default()` immediately for a blank query, avoiding a
   request that would 400.
-- `type=track,album,artist,playlist` in one call.
+- `type=track,album,artist,playlist` in one call, with `offset` forwarded so
+  callers can page.
 - `limit` clamped to `1..=MAX_SEARCH_LIMIT` (**10**), and 10 is also the default
   used by `search_spotify`.
+- `has_more` is computed by checking whether **any** of the four wrapped
+  response categories carried a `next` cursor.
 
 > ### `/search` caps `limit` at 10
 > Far below the 50 most endpoints accept, and exceeding it is a hard
@@ -67,8 +78,12 @@ Network only, read-only. One `GET /v1/search` per call.
   playlist or album to continue into, which is why [[Search.svelte]] renders
   [[TrackList.svelte]] *without* `contextUri`, falling back to `load_tracks`.
   See [[playback-and-connect]].
-- **Not paginated.** One page per query (default 20 per type). Listed in
-  [[known-limitations]].
+- **Paginated per-category, but exposed as one `has_more` flag.** If
+  tracks are exhausted but albums still have more, `has_more` is still
+  `true` and the next page re-requests all four categories at the new
+  offset — there is no independent "load more albums only". Acceptable
+  because [[Search.svelte]]'s UI has no per-section pagination control
+  either.
 - The nested `.map(...)` blocks per category are repetitive; the shapes differ
   just enough that a shared helper would need generics over four unrelated
   target types.
