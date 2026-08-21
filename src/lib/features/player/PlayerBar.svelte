@@ -29,6 +29,11 @@
     store.lyrics?.status === "available" &&
       (store.lyrics.synced.length > 0 || Boolean(store.lyrics.plain)),
   );
+  let artworkBroken = $state(false);
+  $effect(() => {
+    pb.track?.uri;
+    artworkBroken = false;
+  });
 
   function previewSeek(e: Event) {
     seekDraft = Number((e.currentTarget as HTMLInputElement).value);
@@ -77,8 +82,14 @@
         title={pb.track?.albumId ? `Open ${pb.track.album}` : "Open track details"}
         aria-label={pb.track?.albumId ? `Open album ${pb.track.album}` : "Open track details"}
       >
-        {#if pb.track?.coverUrl}
-          <img src={pb.track.coverUrl} alt="" width="46" height="46" />
+        {#if pb.track?.coverUrl && !artworkBroken}
+          <img
+            src={pb.track.coverUrl}
+            alt=""
+            width="46"
+            height="46"
+            onerror={() => (artworkBroken = true)}
+          />
         {:else}
           <span class="ph"></span>
         {/if}

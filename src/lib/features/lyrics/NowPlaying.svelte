@@ -76,6 +76,11 @@
   let scrollFrame: number | null = null;
   let mounted = $state(false);
   let queuedTrackUri: string | null | undefined = undefined;
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    brokenImages = new Set(brokenImages).add(url);
+  }
 
   const positionPercent = $derived(
     seekDraft ??
@@ -406,10 +411,11 @@
           disabled={!pb.track}
           title="Open album or track details"
         >
-          {#if pb.track?.coverUrl}
+          {#if pb.track?.coverUrl && !brokenImages.has(pb.track.coverUrl)}
             <img
               src={pb.track.coverUrl}
               alt={`Artwork for ${pb.track.name}`}
+              onerror={() => onArtworkError(pb.track?.coverUrl)}
             />
           {:else}
             <span class="art-placeholder"></span>
@@ -487,8 +493,12 @@
         {/if}
         {#if musicVideo}
           <div class="video-state" title={musicVideo.playbackBlocker ?? undefined}>
-            {#if musicVideo.images[0]}
-              <img src={musicVideo.images[0].url} alt="Music video thumbnail" />
+            {#if musicVideo.images[0] && !brokenImages.has(musicVideo.images[0].url)}
+              <img
+                src={musicVideo.images[0].url}
+                alt="Music video thumbnail"
+                onerror={() => onArtworkError(musicVideo?.images[0]?.url)}
+              />
             {/if}
             <span>Spotify music video available · protected playback</span>
             {#if musicVideo.openUrl}

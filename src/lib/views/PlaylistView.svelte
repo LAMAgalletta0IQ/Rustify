@@ -16,6 +16,11 @@
   let loadingMore = $state(false);
   /** A short page means the server ran out; nothing more to ask for. */
   let exhausted = $state(false);
+  let imageBroken = $state(false);
+  $effect(() => {
+    playlist.id;
+    imageBroken = false;
+  });
 
   $effect(() => {
     const id = playlist.id;
@@ -59,8 +64,8 @@
     <button class="back" onclick={onBack} title="Back">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
-    {#if playlist.imageUrl}
-      <img src={playlist.imageUrl} alt="" />
+    {#if playlist.imageUrl && !imageBroken}
+      <img src={playlist.imageUrl} alt="" onerror={() => (imageBroken = true)} />
     {:else}
       <span class="ph"></span>
     {/if}

@@ -11,6 +11,11 @@
   let busy = $state(false);
   let copied = $state(false);
   let unlisten: UnlistenFn | null = null;
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    brokenImages = new Set(brokenImages).add(url);
+  }
 
   async function refresh() {
     try {
@@ -182,8 +187,12 @@
         <ul class="members">
           {#each status.session.members as member (member.id)}
             <li>
-              {#if member.imageUrl || member.largeImageUrl}
-                <img src={member.imageUrl ?? member.largeImageUrl ?? ""} alt="" />
+              {#if (member.imageUrl || member.largeImageUrl) && !brokenImages.has(member.imageUrl ?? member.largeImageUrl ?? "")}
+                <img
+                  src={member.imageUrl ?? member.largeImageUrl ?? ""}
+                  alt=""
+                  onerror={() => onArtworkError(member.imageUrl ?? member.largeImageUrl)}
+                />
               {/if}
               <span>
                 <strong>{member.displayName ?? member.name ?? member.username ?? member.id}</strong>

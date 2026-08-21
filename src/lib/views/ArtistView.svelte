@@ -10,6 +10,8 @@
   let concerts=$state<ConcertEvent[]>([]); let concertsAvailable=$state(true); let stats=$state<ArtistStats|null>(null);
   let loading=$state(true); let loadingMore=$state(false); let error=$state<string|null>(null); let hasMore=$state(false); let followed=$state(false);
   let showAllTracks=$state(false); let releaseFilter=$state("all"); let reloadKey=$state(0);
+  let brokenImages=$state<Set<string>>(new Set());
+  function onArtworkError(url:string|null|undefined){if(!url||brokenImages.has(url))return;brokenImages=new Set(brokenImages).add(url)}
   const visibleAlbums=$derived(releaseFilter==="all"?albums:albums.filter((album)=>album.albumType===releaseFilter));
   const listenerLabel=$derived(stats?.monthlyListeners!=null?`${new Intl.NumberFormat().format(stats.monthlyListeners)} monthly listeners`:null);
 
@@ -34,7 +36,7 @@
 </script>
 <div class="artist">
   <div class="head" style={details.imageUrl?`--artist-image:url(${details.imageUrl})`:""}>
-    <button class="back" onclick={onBack}>← Back</button>{#if details.imageUrl}<img class="avatar" src={details.imageUrl} alt="" />{:else}<span class="avatar ph"></span>{/if}
+    <button class="back" onclick={onBack}>← Back</button>{#if details.imageUrl && !brokenImages.has(details.imageUrl)}<img class="avatar" src={details.imageUrl} alt="" onerror={() => onArtworkError(details.imageUrl)} />{:else}<span class="avatar ph"></span>{/if}
     <span class="identity"><span class="kind">Artist</span><h1 class="truncate">{details.name}</h1><small>{listenerLabel??(followed?"Following":"")}</small></span>
     <button class="follow" aria-pressed={followed} onclick={toggleFollow}>{followed?"Following":"Follow"}</button><button class="btn-primary" onclick={()=>store.run(()=>api.loadContext(details.uri))}>▶ Play</button><button class="follow" onclick={shuffle}>Shuffle</button>
   </div>
@@ -44,7 +46,7 @@
   {#if concerts.length}<section><h2>On tour</h2><div class="concerts">{#each concerts as event (event.uri)}<article><time datetime={event.startDateIso??undefined}>{concertDate(event)}</time><div><strong>{event.title}</strong><span>{[event.venue,event.city].filter(Boolean).join(" · ")||"Venue TBA"}{event.isFestival?" · Festival":""}</span></div>{#if event.eventUrl}<button onclick={()=>openUrl(event.eventUrl!)}>View event</button>{/if}</article>{/each}</div></section>
   {:else if !concertsAvailable && !loading}<p class="concert-note muted">Concerts are unavailable for this artist or region.</p>{/if}
   <section><div class="release-head"><h2>Discography</h2><div class="filters"><button class:on={releaseFilter==="all"} onclick={()=>releaseFilter="all"}>All</button><button class:on={releaseFilter==="album"} onclick={()=>releaseFilter="album"}>Albums</button><button class:on={releaseFilter==="single"} onclick={()=>releaseFilter="single"}>Singles &amp; EPs</button></div></div>
-    {#if loading}<p class="muted">Loading releases…</p>{:else if visibleAlbums.length}<div class="grid">{#each visibleAlbums as album (album.uri)}<button class="card" onclick={()=>onOpenAlbum(album)}>{#if album.imageUrl}<img src={album.imageUrl} alt="" loading="lazy"/>{:else}<span class="ph cover"></span>{/if}<span class="truncate title">{album.name}</span><span class="truncate sub">{album.releaseDate??album.artists.join(", ")} · {album.albumType||"release"}</span></button>{/each}</div>{:else}<p class="muted">No matching releases are available.</p>{/if}
+    {#if loading}<p class="muted">Loading releases…</p>{:else if visibleAlbums.length}<div class="grid">{#each visibleAlbums as album (album.uri)}<button class="card" onclick={()=>onOpenAlbum(album)}>{#if album.imageUrl && !brokenImages.has(album.imageUrl)}<img src={album.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(album.imageUrl)} />{:else}<span class="ph cover"></span>{/if}<span class="truncate title">{album.name}</span><span class="truncate sub">{album.releaseDate??album.artists.join(", ")} · {album.albumType||"release"}</span></button>{/each}</div>{:else}<p class="muted">No matching releases are available.</p>{/if}
     {#if hasMore}<button class="more" disabled={loadingMore} onclick={loadMore}>{loadingMore?"Loading…":"Load more"}</button>{/if}
   </section>
 </div>

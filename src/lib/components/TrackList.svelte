@@ -17,6 +17,11 @@
   let credits = $state<TrackCredits | null>(null);
   let creditsLoading = $state(false);
   let creditsError = $state<string | null>(null);
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    brokenImages = new Set(brokenImages).add(url);
+  }
 
   // Look up saved state for the visible rows whenever the list changes.
   // Spotify caps the generic library endpoint at 40 URIs per request.
@@ -113,8 +118,15 @@
         title="Play"
       >
         <span class="idx">{i + 1}</span>
-        {#if t.imageUrl}
-          <img src={t.imageUrl} alt="" loading="lazy" width="36" height="36" />
+        {#if t.imageUrl && !brokenImages.has(t.imageUrl)}
+          <img
+            src={t.imageUrl}
+            alt=""
+            loading="lazy"
+            width="36"
+            height="36"
+            onerror={() => onArtworkError(t.imageUrl)}
+          />
         {:else}
           <span class="ph"></span>
         {/if}

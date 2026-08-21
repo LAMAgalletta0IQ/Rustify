@@ -17,6 +17,11 @@
   let error = $state<string | null>(null);
   let offset = $state(0);
   let timer: number | null = null;
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    brokenImages = new Set(brokenImages).add(url);
+  }
 
   /** Debounced so typing doesn't fire a request per keystroke. */
   function onInput() {
@@ -86,7 +91,7 @@
   {:else if results}
     {#if error}<div class="search-error" role="alert">{error}</div>{/if}
     {#if results.artists[0] || results.tracks[0]}
-      <section class="top-result"><span class="eyebrow">Top result</span>{#if results.artists[0]}<button onclick={() => (openArtist=results!.artists[0])}>{#if results.artists[0].imageUrl}<img src={results.artists[0].imageUrl} alt="" />{/if}<strong>{results.artists[0].name}</strong><span>Artist</span></button>{:else}<button onclick={() => store.run(()=>api.loadTracks(results!.tracks.map(t=>t.uri),results!.tracks[0].uri))}><strong>{results.tracks[0].name}</strong><span>{results.tracks[0].artists.join(", ")}</span></button>{/if}</section>
+      <section class="top-result"><span class="eyebrow">Top result</span>{#if results.artists[0]}<button onclick={() => (openArtist=results!.artists[0])}>{#if results.artists[0].imageUrl && !brokenImages.has(results.artists[0].imageUrl)}<img src={results.artists[0].imageUrl} alt="" onerror={() => onArtworkError(results?.artists[0]?.imageUrl)} />{/if}<strong>{results.artists[0].name}</strong><span>Artist</span></button>{:else}<button onclick={() => store.run(()=>api.loadTracks(results!.tracks.map(t=>t.uri),results!.tracks[0].uri))}><strong>{results.tracks[0].name}</strong><span>{results.tracks[0].artists.join(", ")}</span></button>{/if}</section>
     {/if}
     {#if results.tracks.length}
       <h3>Tracks</h3>
@@ -98,7 +103,7 @@
       <div class="grid">
         {#each results.albums as a (a.id)}
           <button class="card" onclick={() => (openAlbum = a)}>
-            {#if a.imageUrl}<img src={a.imageUrl} alt="" loading="lazy" />{/if}
+            {#if a.imageUrl && !brokenImages.has(a.imageUrl)}<img src={a.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(a.imageUrl)} />{/if}
             <span class="truncate title">{a.name}</span>
             <span class="truncate muted sub">{a.artists.join(", ")}</span>
           </button>
@@ -111,7 +116,7 @@
       <div class="grid">
         {#each results.playlists as p (p.id)}
           <button class="card" onclick={() => store.run(() => api.loadContext(p.uri))}>
-            {#if p.imageUrl}<img src={p.imageUrl} alt="" loading="lazy" />{/if}
+            {#if p.imageUrl && !brokenImages.has(p.imageUrl)}<img src={p.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(p.imageUrl)} />{/if}
             <span class="truncate title">{p.name}</span>
             <span class="truncate muted sub">{p.owner}</span>
           </button>
@@ -124,7 +129,7 @@
       <div class="grid">
         {#each results.artists as a (a.id)}
           <button class="card artist" onclick={() => (openArtist = a)}>
-            {#if a.imageUrl}<img src={a.imageUrl} alt="" loading="lazy" />{/if}
+            {#if a.imageUrl && !brokenImages.has(a.imageUrl)}<img src={a.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(a.imageUrl)} />{/if}
             <span class="truncate title">{a.name}</span>
           </button>
         {/each}

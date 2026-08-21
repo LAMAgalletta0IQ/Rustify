@@ -9,6 +9,11 @@
   let playlists = $state<PlaylistSummary[]>([]);
   let profile = $state<UserProfile | null>(null);
   let profileLoading = $state(true);
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    brokenImages = new Set(brokenImages).add(url);
+  }
   let profileError = $state<string | null>(null);
   let profileQuery = $state("");
   let userResults = $state<UserSearchHit[]>([]);
@@ -97,11 +102,11 @@
     <label for="profile-user">Open a Spotify profile</label>
     <div><input id="profile-user" bind:value={profileQuery} oninput={searchProfileInput} autocomplete="off" placeholder="Name, username, user URI, or profile URL" /><button disabled={!profileQuery.trim() || profileLoading}>Open</button></div>
     {#if userSearchLoading}<small class="muted">Searching people…</small>{/if}
-    {#if userResults.length}<div class="user-results" role="listbox" aria-label="Spotify users">{#each userResults as user (user.uri)}<button type="button" onclick={() => loadProfile(user.username)}>{#if user.imageUrl}<img src={user.imageUrl} alt="" loading="lazy" />{:else}<span class="result-avatar"></span>{/if}<span><strong>{user.displayName}</strong><small>{user.username}</small></span></button>{/each}</div>{/if}
+    {#if userResults.length}<div class="user-results" role="listbox" aria-label="Spotify users">{#each userResults as user (user.uri)}<button type="button" onclick={() => loadProfile(user.username)}>{#if user.imageUrl && !brokenImages.has(user.imageUrl)}<img src={user.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(user.imageUrl)} />{:else}<span class="result-avatar"></span>{/if}<span><strong>{user.displayName}</strong><small>{user.username}</small></span></button>{/each}</div>{/if}
   </form>
 
   <header style:background={profileColor()}>
-    {#if profile?.imageUrl ?? store.auth.avatarUrl}<img src={profile?.imageUrl ?? store.auth.avatarUrl ?? undefined} alt="" />{:else}<span class="avatar"></span>{/if}
+    {#if (profile?.imageUrl ?? store.auth.avatarUrl) && !brokenImages.has(profile?.imageUrl ?? store.auth.avatarUrl ?? "")}<img src={profile?.imageUrl ?? store.auth.avatarUrl ?? undefined} alt="" onerror={() => onArtworkError(profile?.imageUrl ?? store.auth.avatarUrl)} />{:else}<span class="avatar"></span>{/if}
     <div><span class="muted label">{profile?.isCurrentUser === false ? "Public profile" : "Your profile"}</span><h1>{profile?.displayName ?? store.auth.displayName ?? store.auth.userId ?? "Spotify account"}</h1><p class="muted">{profile?.username ?? store.auth.userId}{profile?.isCurrentUser !== false && store.auth.product ? ` · ${store.auth.product}` : ""}</p></div>
     {#if profile?.isCurrentUser === false}<button class="mine" onclick={() => loadProfile()}>My profile</button>{/if}
   </header>
@@ -116,8 +121,8 @@
       <div><strong>{profile.followersAvailable ? profile.followers.length : "Private"}</strong><span>Visible followers</span></div>
       <div><strong>{profile.totalPublicPlaylistsCount ?? profile.publicPlaylists.length}</strong><span>Public playlists</span></div>
     </section>
-    {#if profile.recentlyPlayedArtists.length}<section><h2>Recently played artists</h2><div class="tiles">{#each profile.recentlyPlayedArtists as artist (artist.uri)}<button onclick={() => api.loadContext(artist.uri)}>{#if artist.imageUrl}<img src={artist.imageUrl} alt="" loading="lazy" />{:else}<span class="tile-image"></span>{/if}<strong class="truncate">{artist.name}</strong></button>{/each}</div></section>{/if}
-    {#if profile.publicPlaylists.length}<section><h2>Public playlists</h2><div class="tiles">{#each profile.publicPlaylists as playlist (playlist.uri)}<button onclick={() => api.loadContext(playlist.uri)}>{#if playlist.imageUrl}<img src={playlist.imageUrl} alt="" loading="lazy" />{:else}<span class="tile-image square"></span>{/if}<strong class="truncate">{playlist.name}</strong><small class="truncate">{playlist.ownerName ?? profile.displayName}</small></button>{/each}</div></section>{/if}
+    {#if profile.recentlyPlayedArtists.length}<section><h2>Recently played artists</h2><div class="tiles">{#each profile.recentlyPlayedArtists as artist (artist.uri)}<button onclick={() => api.loadContext(artist.uri)}>{#if artist.imageUrl && !brokenImages.has(artist.imageUrl)}<img src={artist.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(artist.imageUrl)} />{:else}<span class="tile-image"></span>{/if}<strong class="truncate">{artist.name}</strong></button>{/each}</div></section>{/if}
+    {#if profile.publicPlaylists.length}<section><h2>Public playlists</h2><div class="tiles">{#each profile.publicPlaylists as playlist (playlist.uri)}<button onclick={() => api.loadContext(playlist.uri)}>{#if playlist.imageUrl && !brokenImages.has(playlist.imageUrl)}<img src={playlist.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(playlist.imageUrl)} />{:else}<span class="tile-image square"></span>{/if}<strong class="truncate">{playlist.name}</strong><small class="truncate">{playlist.ownerName ?? profile.displayName}</small></button>{/each}</div></section>{/if}
     {#if profile.following.length}<section><h2>Following</h2><div class="chips">{#each profile.following as item (item.uri)}<button onclick={() => item.uri.startsWith("spotify:artist:") && api.loadContext(item.uri)} disabled={!item.uri.startsWith("spotify:artist:")}>{item.name}</button>{/each}</div></section>{/if}
     {#if profile.showFollows && profile.followers.length}<section><h2>Followers</h2><div class="chips">{#each profile.followers as item (item.uri)}<button disabled>{item.name}</button>{/each}</div></section>{/if}
     {#if !profile.followingAvailable || (profile.showFollows && !profile.followersAvailable)}<p class="muted relation-note">Some follow lists are private or unavailable for this profile.</p>{/if}

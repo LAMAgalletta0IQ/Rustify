@@ -28,6 +28,11 @@
   let liked = $state<TrackSummary[]>([]);
 
   let loading = $state(false);
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    brokenImages = new Set(brokenImages).add(url);
+  }
   let loadingMore = $state(false);
 
   /**
@@ -204,8 +209,8 @@
         <div class="grid">
           {#each shownPlaylists as p (p.id)}
             <button class="card" onclick={() => (openPlaylist = p)}>
-              {#if p.imageUrl}
-                <img src={p.imageUrl} alt="" loading="lazy" />
+              {#if p.imageUrl && !brokenImages.has(p.imageUrl)}
+                <img src={p.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(p.imageUrl)} />
               {:else}
                 <span class="art"></span>
               {/if}
@@ -220,8 +225,8 @@
         <div class="grid">
           {#each shownAlbums as a (a.id)}
             <button class="card" onclick={() => (openAlbum = a)}>
-              {#if a.imageUrl}
-                <img src={a.imageUrl} alt="" loading="lazy" />
+              {#if a.imageUrl && !brokenImages.has(a.imageUrl)}
+                <img src={a.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(a.imageUrl)} />
               {:else}
                 <span class="art"></span>
               {/if}
@@ -236,8 +241,8 @@
         <div class="grid">
           {#each shownArtists as a (a.id)}
             <button class="card artist" onclick={() => (openArtist = a)}>
-              {#if a.imageUrl}
-                <img src={a.imageUrl} alt="" loading="lazy" />
+              {#if a.imageUrl && !brokenImages.has(a.imageUrl)}
+                <img src={a.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(a.imageUrl)} />
               {:else}
                 <span class="art"></span>
               {/if}

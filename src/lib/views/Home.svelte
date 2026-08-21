@@ -486,7 +486,7 @@
       <div class="friends">
         {#each friends.entries as entry (entry.userUri)}
           <button class="friend" onclick={() => playFriend(entry)}>
-            <span class="friend-avatar">{#if entry.userImageUrl}<img src={entry.userImageUrl} alt="" loading="lazy" />{:else}{entry.userName.slice(0,1).toUpperCase()}{/if}<i class:live={friendIsLive(entry)}></i></span>
+            <span class="friend-avatar">{#if entry.userImageUrl && !brokenImages.has(entry.userImageUrl)}<img src={entry.userImageUrl} alt="" loading="lazy" onerror={() => onArtworkError(entry.userImageUrl)} />{:else}{entry.userName.slice(0,1).toUpperCase()}{/if}<i class:live={friendIsLive(entry)}></i></span>
             <span class="friend-copy"><strong class="truncate">{entry.userName}</strong><span class="truncate">{entry.trackName}{entry.artistName?` · ${entry.artistName}`:""}</span><small class="truncate">{entry.contextName??entry.albumName??"Spotify"}</small></span>
             <time>{friendTime(entry)}</time>
           </button>

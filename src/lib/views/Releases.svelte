@@ -14,6 +14,11 @@
   let type = $state("all");
   let range = $state("90");
   let openAlbum = $state<AlbumSummary | null>(null);
+  let brokenImages = $state<Set<string>>(new Set());
+  function onArtworkError(url: string | null | undefined) {
+    if (!url || brokenImages.has(url)) return;
+    brokenImages = new Set(brokenImages).add(url);
+  }
   const typeOptions: SelectOption[] = [
     { value: "all", label: "All releases" },
     { value: "album", label: "Albums" },
@@ -85,7 +90,7 @@
         {#each visible as release (release.uri)}
           <article class="card">
             <button class="open" onclick={() => (openAlbum = release)}>
-              {#if release.imageUrl}<img src={release.imageUrl} alt="" loading="lazy" />{:else}<span class="art"></span>{/if}
+              {#if release.imageUrl && !brokenImages.has(release.imageUrl)}<img src={release.imageUrl} alt="" loading="lazy" onerror={() => onArtworkError(release.imageUrl)} />{:else}<span class="art"></span>{/if}
               <span class="eyebrow">{release.albumType || "release"}</span><strong class="truncate">{release.name}</strong><span class="truncate">{release.artists.join(", ")}</span><time>{release.releaseDate ?? "Release date unavailable"}</time>
             </button>
             <div class="actions"><button aria-label={`Play ${release.name}`} onclick={() => store.run(() => api.loadContext(release.uri))}>▶ Play</button><button aria-pressed={saved[release.id] ?? false} onclick={() => toggleSaved(release)}>{saved[release.id] ? "Saved" : "Save"}</button></div>

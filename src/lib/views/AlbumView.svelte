@@ -10,6 +10,11 @@
   let loading = $state(true);
   let saved = $state<boolean | null>(null);
   let saving = $state(false);
+  let imageBroken = $state(false);
+  $effect(() => {
+    album.id;
+    imageBroken = false;
+  });
 
   $effect(() => {
     const id = album.id;
@@ -64,8 +69,8 @@
 <div class="album">
   <div class="head">
     <button class="back" onclick={onBack}>← Back</button>
-    {#if album.imageUrl}
-      <img src={album.imageUrl} alt="" />
+    {#if album.imageUrl && !imageBroken}
+      <img src={album.imageUrl} alt="" onerror={() => (imageBroken = true)} />
     {/if}
     <span class="meta">
       <span class="truncate name">{album.name}</span>
