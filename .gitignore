@@ -18,3 +18,10 @@ src-tauri/.cache/
 # reconciling with main; not part of the tracked project.
 Rustify-main/
 Rustify-main.zip
+
+# External reverse-engineering reference repos, cloned on demand. Not part
+# of the tracked project.
+.research/
+
+# Scratch state for long-running agent work sessions.
+.agent-work/
