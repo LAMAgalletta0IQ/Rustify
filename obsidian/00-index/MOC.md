@@ -75,7 +75,7 @@ Native audio: [[audio-mod]] · lyrics: [[mod.rs|lyrics/mod.rs]]
 [[tauri.conf.json]] · [[Cargo.toml]] · [[Cargo.lock]] · [[build.rs]] · [[default.json]]
 
 ### Root configuration `#config`
-[[package.json]] · [[package-lock.json]] · [[vite.config.ts]] · [[svelte.config.js]] · [[tsconfig.json]] · [[index.html]] · [[.gitignore]] · [[.gitattributes]] · [[README.md]] · [[app-icon.png]]
+[[package.json]] · [[package-lock.json]] · [[vite.config.ts]] · [[svelte.config.js]] · [[tsconfig.json]] · [[index.html]] · [[.gitignore]] · [[.gitattributes]] · [[README.md]] · [[icon.svg]]
 
 `.env.example` (template) and `.env` (local, gitignored) are covered in
 [[build-and-config]] and listed in [[project-root]].

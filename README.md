@@ -31,8 +31,8 @@ npm run tauri dev
 npm run tauri build
 ```
 
-Icons are already generated from `app-icon.png` (a placeholder). To replace the
-artwork, drop in any square PNG and re-run `npm run tauri icon <file>.png`.
+Icons are already generated from `icon.svg`. To replace the artwork, drop in
+any SVG or square PNG and re-run `npx tauri icon <file>`.
 
 On first launch the app itself will ask you to register a free Spotify
 Developer app and paste in its Client ID — see "Two logins, first-run Setup"
