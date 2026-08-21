@@ -3,6 +3,10 @@ use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
 
+const MAX_QUERY_CHARS: usize = 200;
+const MAX_FIELD_CHARS: usize = 2_048;
+const MAX_USERS: usize = 30;
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSearchHit {
@@ -25,6 +29,11 @@ pub fn variables(query: &str, limit: u32, offset: u32) -> AppResult<Value> {
     if query.is_empty() {
         return Err(AppError::BadRequest("enter a name to search for".into()));
     }
+    if query.chars().count() > MAX_QUERY_CHARS || query.chars().any(char::is_control) {
+        return Err(AppError::BadRequest(
+            "user search must be 200 characters or fewer".into(),
+        ));
+    }
     Ok(json!({
         "searchTerm": query,
         "offset": offset,
@@ -42,7 +51,7 @@ fn string(value: Option<&Value>) -> Option<String> {
         .as_str()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_owned)
+        .map(|value| value.chars().take(MAX_FIELD_CHARS).collect())
 }
 
 fn image_url(data: &Value) -> Option<String> {
@@ -53,17 +62,25 @@ fn image_url(data: &Value) -> Option<String> {
         .filter_map(|source| {
             Some((
                 source.get("width").and_then(Value::as_u64).unwrap_or(0),
-                string(source.get("url"))?,
+                safe_image_url(string(source.get("url"))?)?,
             ))
         })
         .min_by_key(|(width, _)| width.abs_diff(300))
         .map(|(_, url)| url)
 }
 
+fn safe_image_url(value: String) -> Option<String> {
+    reqwest::Url::parse(&value)
+        .ok()
+        .filter(|url| url.scheme() == "https" && url.host_str().is_some())
+        .map(|_| value)
+}
+
 fn username_from_uri(uri: &str) -> Option<String> {
     uri.strip_prefix("spotify:user:")
         .map(str::trim)
         .filter(|value| !value.is_empty())
+        .filter(|value| value.len() <= 256 && !value.chars().any(char::is_control))
         .map(str::to_owned)
 }
 
@@ -78,7 +95,7 @@ pub fn parse(data: &Value) -> AppResult<UserSearchPage> {
         .unwrap_or_default();
 
     let mut parsed = Vec::with_capacity(items.len());
-    for item in items {
+    for item in items.into_iter().take(MAX_USERS) {
         // Filtered search wraps each entity as { data: UserResponseWrapper }.
         // Be tolerant of an unwrapped fixture/response because Spotify has
         // changed this envelope independently from the operation schema.
@@ -135,6 +152,7 @@ mod tests {
         assert_eq!(value["searchTerm"], "Alice");
         assert_eq!(value["limit"], 30);
         assert_eq!(value["offset"], 4);
+        assert!(variables(&"x".repeat(MAX_QUERY_CHARS + 1), 10, 0).is_err());
     }
 
     #[test]
@@ -143,7 +161,7 @@ mod tests {
             "totalCount": 3,
             "pagingInfo":{"limit":2,"nextOffset":2},
             "items":[
-                {"data":{"uri":"spotify:user:b","username":"b","displayName":"Bee","avatar":{"sources":[{"url":"wide","width":640},{"url":"near","width":320}]}}},
+                {"data":{"uri":"spotify:user:b","username":"b","displayName":"Bee","avatar":{"sources":[{"url":"https://i.scdn.co/wide","width":640},{"url":"https://i.scdn.co/near","width":320}]}}},
                 {"data":{"uri":"spotify:user:a","name":"Aye","avatar":{"sources":[]}}},
                 {"data":{"uri":"spotify:artist:nope","username":"nope"}}
             ]
@@ -151,7 +169,10 @@ mod tests {
         let page = parse(&data).unwrap();
         assert_eq!(page.users.len(), 2);
         assert_eq!(page.users[0].username, "a");
-        assert_eq!(page.users[1].image_url.as_deref(), Some("near"));
+        assert_eq!(
+            page.users[1].image_url.as_deref(),
+            Some("https://i.scdn.co/near")
+        );
         assert_eq!(page.total, 3);
         assert_eq!(page.next_offset, Some(2));
     }

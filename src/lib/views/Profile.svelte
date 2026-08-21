@@ -113,13 +113,14 @@
   {#if profile}
     <section class="stats" aria-label="Profile totals">
       <div><strong>{profile.followingCount ?? profile.following.length}</strong><span>Following</span></div>
-      <div><strong>{profile.followers.length || "—"}</strong><span>Visible followers</span></div>
+      <div><strong>{profile.followersAvailable ? profile.followers.length : "Private"}</strong><span>Visible followers</span></div>
       <div><strong>{profile.totalPublicPlaylistsCount ?? profile.publicPlaylists.length}</strong><span>Public playlists</span></div>
     </section>
     {#if profile.recentlyPlayedArtists.length}<section><h2>Recently played artists</h2><div class="tiles">{#each profile.recentlyPlayedArtists as artist (artist.uri)}<button onclick={() => api.loadContext(artist.uri)}>{#if artist.imageUrl}<img src={artist.imageUrl} alt="" loading="lazy" />{:else}<span class="tile-image"></span>{/if}<strong class="truncate">{artist.name}</strong></button>{/each}</div></section>{/if}
     {#if profile.publicPlaylists.length}<section><h2>Public playlists</h2><div class="tiles">{#each profile.publicPlaylists as playlist (playlist.uri)}<button onclick={() => api.loadContext(playlist.uri)}>{#if playlist.imageUrl}<img src={playlist.imageUrl} alt="" loading="lazy" />{:else}<span class="tile-image square"></span>{/if}<strong class="truncate">{playlist.name}</strong><small class="truncate">{playlist.ownerName ?? profile.displayName}</small></button>{/each}</div></section>{/if}
     {#if profile.following.length}<section><h2>Following</h2><div class="chips">{#each profile.following as item (item.uri)}<button onclick={() => item.uri.startsWith("spotify:artist:") && api.loadContext(item.uri)} disabled={!item.uri.startsWith("spotify:artist:")}>{item.name}</button>{/each}</div></section>{/if}
     {#if profile.showFollows && profile.followers.length}<section><h2>Followers</h2><div class="chips">{#each profile.followers as item (item.uri)}<button disabled>{item.name}</button>{/each}</div></section>{/if}
+    {#if !profile.followingAvailable || (profile.showFollows && !profile.followersAvailable)}<p class="muted relation-note">Some follow lists are private or unavailable for this profile.</p>{/if}
   {/if}
 
   {#if profile?.isCurrentUser !== false}

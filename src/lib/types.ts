@@ -355,6 +355,8 @@ export interface UserProfile {
   publicPlaylists: ProfilePlaylist[];
   followers: ProfileArtist[];
   following: ProfileArtist[];
+  followersAvailable: boolean;
+  followingAvailable: boolean;
 }
 
 export interface ConcertEvent {
