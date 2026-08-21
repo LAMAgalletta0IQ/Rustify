@@ -5,10 +5,9 @@ mod commands;
 mod connect;
 mod error;
 mod friends;
-// Experimental Spotify Jams module. Self-contained; see README_jams.md. Not yet
-// exposed to the UI — the app only links it so it compiles and can be driven
-// from examples/jam_demo.rs. Remove this line if you want to keep it out of the
-// build for now.
+// Experimental Spotify Jams module. Self-contained; see README_jams.md.
+// `pub` because `examples/jam_demo.rs` drives it directly outside the crate;
+// wired to the UI via jams_bridge.rs and the jam commands in commands.rs.
 pub mod jams;
 mod jams_bridge;
 mod library;
