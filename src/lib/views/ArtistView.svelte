@@ -10,6 +10,11 @@
   let concerts=$state<ConcertEvent[]>([]); let concertsAvailable=$state(true); let stats=$state<ArtistStats|null>(null);
   let loading=$state(true); let loadingMore=$state(false); let error=$state<string|null>(null); let hasMore=$state(false); let followed=$state(false);
   let showAllTracks=$state(false); let releaseFilter=$state("all"); let reloadKey=$state(0);
+  // Bumped on every effect run so a loadMore() still in flight for the
+  // previous artist can tell it's stale once it resolves — otherwise rapid
+  // artist navigation could append the old artist's next album page onto
+  // the new artist's (already-reset) album list.
+  let generation=0;
   let brokenImages=$state<Set<string>>(new Set());
   function onArtworkError(url:string|null|undefined){if(!url||brokenImages.has(url))return;brokenImages=new Set(brokenImages).add(url)}
   const visibleAlbums=$derived(releaseFilter==="all"?albums:albums.filter((album)=>album.albumType===releaseFilter));
@@ -19,7 +24,7 @@
   // independent REST/library lookups. Only the first two are core content —
   // concerts (folded into the same response) and the liked-songs/follow
   // lookups stay non-fatal, same as before.
-  $effect(()=>{ const id=artist.id; reloadKey; let cancelled=false; loading=true; error=null;
+  $effect(()=>{ const id=artist.id; reloadKey; let cancelled=false; loading=true; error=null; generation++;
     Promise.allSettled([
       api.getArtist(id).then((v)=>{if(!cancelled)loadedDetails=v}),
       api.getArtistOverview(id).then((v)=>{if(!cancelled){tracks=v.topTracks;concerts=v.concerts.events;concertsAvailable=v.concerts.available;stats=v.stats}}),
@@ -29,8 +34,8 @@
     ]).then((results)=>{const failed=results.slice(0,3).find((r)=>r.status==="rejected");if(!cancelled&&failed?.status==="rejected")error=store.handleError(failed.reason,false).message}).finally(()=>{if(!cancelled)loading=false});
     return()=>{cancelled=true};
   });
-  async function loadMore(){if(loadingMore||!hasMore)return;loadingMore=true;try{const p=await api.getArtistAlbums(artist.id,10,albums.length);const seen=new Set(albums.map(a=>a.uri));albums=[...albums,...p.items.filter(a=>!seen.has(a.uri))];hasMore=p.hasMore}catch(e){error=store.handleError(e,false).message}finally{loadingMore=false}}
-  async function toggleFollow(){const next=!followed;followed=next;try{await api.setArtistsSaved([artist.id],next)}catch(e){followed=!next;store.handleError(e)}}
+  async function loadMore(){if(loadingMore||!hasMore)return;const gen=generation;loadingMore=true;try{const p=await api.getArtistAlbums(artist.id,10,albums.length);if(gen!==generation)return;const seen=new Set(albums.map(a=>a.uri));albums=[...albums,...p.items.filter(a=>!seen.has(a.uri))];hasMore=p.hasMore}catch(e){if(gen===generation)error=store.handleError(e,false).message}finally{if(gen===generation)loadingMore=false}}
+  async function toggleFollow(){const gen=generation;const next=!followed;followed=next;try{await api.setArtistsSaved([artist.id],next)}catch(e){if(gen===generation)followed=!next;store.handleError(e)}}
   async function shuffle(){await store.run(async()=>{await api.setShuffle(true);await api.loadContext(details.uri)})}
   function concertDate(event:ConcertEvent){if(!event.startDateIso)return "Date TBA";const date=new Date(event.startDateIso);return Number.isNaN(date.valueOf())?event.startDateIso:new Intl.DateTimeFormat(undefined,{weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}).format(date)}
 </script>

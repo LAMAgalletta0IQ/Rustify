@@ -17,6 +17,11 @@
   /** A short page means the server ran out; nothing more to ask for. */
   let exhausted = $state(false);
   let imageBroken = $state(false);
+  // Bumped each time the playlist-load effect below reruns, so a loadMore()
+  // still in flight for the previous playlist can detect it's stale once it
+  // resolves — otherwise rapid playlist navigation could append the old
+  // playlist's next page onto the new playlist's (already-reset) track list.
+  let generation = 0;
   $effect(() => {
     playlist.id;
     imageBroken = false;
@@ -25,6 +30,7 @@
   $effect(() => {
     const id = playlist.id;
     let cancelled = false;
+    generation++;
     loading = true;
     (async () => {
       try {
@@ -46,15 +52,17 @@
 
   async function loadMore() {
     if (loadingMore || exhausted) return;
+    const gen = generation;
     loadingMore = true;
     try {
       const next = await api.getPlaylistTracks(playlist.id, PAGE, tracks.length);
+      if (gen !== generation) return; // superseded by a different playlist
       tracks = [...tracks, ...next];
       exhausted = next.length < PAGE;
     } catch (e) {
-      store.handleError(e);
+      if (gen === generation) store.handleError(e);
     } finally {
-      loadingMore = false;
+      if (gen === generation) loadingMore = false;
     }
   }
 </script>

@@ -11,6 +11,12 @@
   let saved = $state<boolean | null>(null);
   let saving = $state(false);
   let imageBroken = $state(false);
+  // Bumped each time the album-load effect below reruns. toggleSaved()'s
+  // error rollback captures it at click time, so a save/unsave request that
+  // fails *after* the user has already navigated to a different album
+  // rolls back this component's `saved` for the album that's actually on
+  // screen now, not silently flipping it for whichever album is current.
+  let generation = 0;
   $effect(() => {
     album.id;
     imageBroken = false;
@@ -19,6 +25,7 @@
   $effect(() => {
     const id = album.id;
     let cancelled = false;
+    generation++;
     loading = true;
     (async () => {
       try {
@@ -52,13 +59,14 @@
 
   async function toggleSaved() {
     if (saving) return;
+    const gen = generation;
     const next = !saved;
     saved = next;
     saving = true;
     try {
       await api.setAlbumsSaved([album.id], next);
     } catch (e) {
-      saved = !next;
+      if (gen === generation) saved = !next;
       store.handleError(e);
     } finally {
       saving = false;
