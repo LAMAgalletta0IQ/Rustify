@@ -51,11 +51,19 @@
   --ease-standard: cubic-bezier(.2,.8,.2,1);
   --control-height: 38px;
   --control-radius: var(--r-sm);
-  --control-bg: rgba(30, 22, 14, 0.72);
-  --control-hover: rgba(45, 34, 23, 0.9);
+  /* Same warm hue as --glass/--fg elsewhere, but controls and menus need to
+     stay legible over arbitrary content, so they sit heavier on the glass
+     elevation scale (glass 6% -> glass-strong 14%) rather than matching it
+     exactly. They previously went all the way to 72-96% opacity, which reads
+     as a solid, near-opaque brown box next to everything else's translucent
+     glass — the "wrong app" look. Backdrop-filter blur on .menu-surface was
+     also nearly invisible at 96%; it needs some real transparency to do
+     anything (see CLAUDE.md on Acrylic/backdrop-filter). */
+  --control-bg: rgba(30, 22, 14, 0.48);
+  --control-hover: rgba(45, 34, 23, 0.62);
   --control-border: rgba(255, 241, 224, 0.14);
   --control-border-hover: rgba(255, 241, 224, 0.24);
-  --menu-bg: rgba(27, 19, 12, 0.96);
+  --menu-bg: rgba(27, 19, 12, 0.6);
   --menu-selected: color-mix(in srgb, var(--accent) 13%, transparent);
   --focus-ring: 0 0 0 2px var(--accent);
   --disabled-opacity: 0.44;

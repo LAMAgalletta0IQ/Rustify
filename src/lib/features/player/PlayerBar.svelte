@@ -433,6 +433,22 @@
     flex: none;
     width: 74px;
   }
+  /* Between full width and the 920px breakpoint below, .right's content
+     (lyrics button, Connect menu, output selector, volume) can add up to
+     more natural width than the grid's minmax(170px, 1fr) floor guarantees,
+     so on a merely-narrow (not yet phone-narrow) window they overlapped the
+     center transport controls instead of shrinking. Trim the two widest,
+     least essential pieces — the output selector's device-name label and the
+     lyrics button's text — before that happens, rather than jumping straight
+     to hiding volume entirely at 920px. */
+  @media (max-width: 1180px) {
+    .lyrics-button span {
+      display: none;
+    }
+    :global(.output-selector.compact .compact-label) {
+      max-width: 64px;
+    }
+  }
   @media (max-width: 920px) {
     footer {
       grid-template-columns: minmax(150px, 1fr) minmax(280px, 1.7fr) auto;
