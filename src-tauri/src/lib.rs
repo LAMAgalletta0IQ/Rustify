@@ -108,6 +108,8 @@ pub fn run() {
             commands::list_audio_devices,
             commands::get_audio_status,
             commands::get_equalizer_presets,
+            commands::configure_audio,
+            commands::update_audio_settings,
             commands::login,
             commands::restore_session,
             commands::logout,

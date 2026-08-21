@@ -32,7 +32,7 @@ participant uses a private, undocumented endpoint and is not implemented.
 ### Lyrics
 Spotify has no public lyrics endpoint, and librespot 0.8 has no supported
 lyrics API. Rustify therefore uses the separate documented LRCLIB API through
-[[lyrics.rs]]. Synchronized LRC is preferred and plain text is the fallback.
+[[mod.rs|lyrics/mod.rs]]. Synchronized LRC is preferred and plain text is the fallback.
 Coverage and timing accuracy depend on LRCLIB; missing entries are reported as
 unavailable and never fabricated. See [[2026-08-capability-audit]].
 

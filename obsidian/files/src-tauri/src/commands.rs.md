@@ -109,7 +109,7 @@ name), `get_artist_albums`, `get_artist`, `get_top_tracks`, `get_top_artists`,
 
 ### Lyrics
 `get_lyrics` requires a live session and delegates read-only lookup/parsing to
-[[lyrics.rs]].
+[[mod.rs|lyrics/mod.rs]].
 
 ### Search / Queue
 `search_spotify`, `get_queue`, `add_to_queue`.

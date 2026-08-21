@@ -28,6 +28,8 @@ export interface TrackInfo {
   name: string;
   artists: string[];
   album: string;
+  albumId: string | null;
+  albumUri: string | null;
   coverUrl: string | null;
   durationMs: number;
 }
@@ -67,7 +69,6 @@ export interface LoginInfo {
 }
 
 export interface AppSettings {
-  defaultVolumePercent: number;
   reduceMotion: boolean;
   cacheLimitMb: number;
   audioQuality: StreamQuality;
@@ -99,6 +100,7 @@ export interface AudioDevice {
   isDefault: boolean;
   isSelected: boolean;
   isActive: boolean;
+  isAvailable: boolean;
 }
 
 export interface AudioStatus {

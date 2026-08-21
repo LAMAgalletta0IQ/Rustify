@@ -9,18 +9,20 @@
   // rather than showing up on HMR.
   import iconUrl from "../src-tauri/icons/64x64.png";
   import { store } from "./lib/store.svelte";
-  import PlayerBar from "./lib/components/PlayerBar.svelte";
+  import PlayerBar from "./lib/features/player/PlayerBar.svelte";
+  import AlbumView from "./lib/views/AlbumView.svelte";
   import Home from "./lib/views/Home.svelte";
   import Jams from "./lib/views/Jams.svelte";
   import Library from "./lib/views/Library.svelte";
   import Login from "./lib/views/Login.svelte";
-  import NowPlaying from "./lib/views/NowPlaying.svelte";
+  import NowPlaying from "./lib/features/lyrics/NowPlaying.svelte";
   import Search from "./lib/views/Search.svelte";
-  import Settings from "./lib/views/Settings.svelte";
+  import Settings from "./lib/features/settings/Settings.svelte";
   import Profile from "./lib/views/Profile.svelte";
   import Setup from "./lib/views/Setup.svelte";
   import Releases from "./lib/views/Releases.svelte";
   import ForYou from "./lib/views/ForYou.svelte";
+  import type { AlbumSummary } from "./lib/types";
 
   type Tab = "home" | "search" | "releases" | "library" | "forYou" | "jams" | "settings";
 
@@ -28,6 +30,8 @@
   let nowPlayingOpen = $state(false);
   let profileOpen = $state(false);
   let playerFullscreen = $state(false);
+  let fullscreenLyricsRequested = $state(false);
+  let openAlbum = $state<AlbumSummary | null>(null);
   let main: HTMLElement | null = $state(null);
 
   const appWindow = getCurrentWindow();
@@ -36,6 +40,8 @@
     tab = next;
     nowPlayingOpen = false;
     profileOpen = false;
+    openAlbum = null;
+    fullscreenLyricsRequested = false;
     // Each tab keeps its own component state, but they share one scroller.
     if (main) main.scrollTop = 0;
   }
@@ -45,6 +51,34 @@
       await store.logout();
       store.setupNeeded = true;
     });
+  }
+
+  function openArtworkDestination() {
+    const track = store.playback.track;
+    if (!track) return;
+    if (track.albumId && track.albumUri) {
+      openAlbum = {
+        id: track.albumId,
+        uri: track.albumUri,
+        name: track.album,
+        artists: track.artists,
+        imageUrl: track.coverUrl,
+      };
+      nowPlayingOpen = false;
+      profileOpen = false;
+      fullscreenLyricsRequested = false;
+      return;
+    }
+    nowPlayingOpen = true;
+    profileOpen = false;
+    fullscreenLyricsRequested = false;
+  }
+
+  function openNowPlaying(fullscreenLyrics = false) {
+    openAlbum = null;
+    profileOpen = false;
+    nowPlayingOpen = true;
+    fullscreenLyricsRequested = fullscreenLyrics;
   }
 
   onMount(() => store.init());
@@ -108,6 +142,8 @@
           onclick={() => {
             profileOpen = true;
             nowPlayingOpen = false;
+            openAlbum = null;
+            fullscreenLyricsRequested = false;
           }}
           title="Open profile"
         >
@@ -138,10 +174,23 @@
       {/if}
 
       <main bind:this={main} class:player-view={nowPlayingOpen}>
-        {#if profileOpen}
+        {#if openAlbum}
+          <AlbumView album={openAlbum} onBack={() => (openAlbum = null)} />
+        {:else if profileOpen}
           <Profile onBack={() => (profileOpen = false)} />
         {:else if nowPlayingOpen}
-          <NowPlaying onClose={() => (nowPlayingOpen = false)} onFullscreenChange={(value) => (playerFullscreen = value)} />
+          <NowPlaying
+            onClose={() => {
+              nowPlayingOpen = false;
+              fullscreenLyricsRequested = false;
+            }}
+            onNavigateArtwork={openArtworkDestination}
+            startFullscreen={fullscreenLyricsRequested}
+            onFullscreenChange={(value) => {
+              playerFullscreen = value;
+              if (!value) fullscreenLyricsRequested = false;
+            }}
+          />
         {:else if tab === "home"}
           <Home onBrowseLibrary={() => go("library")} onOpenForYou={() => go("forYou")} onOpenReleases={() => go("releases")} />
         {:else if tab === "search"}
@@ -159,7 +208,14 @@
         {/if}
       </main>
 
-      {#if !playerFullscreen}<PlayerBar onOpenNowPlaying={() => (nowPlayingOpen = !nowPlayingOpen)} />{/if}
+      {#if !playerFullscreen}
+        <PlayerBar
+          onOpenNowPlaying={() =>
+            nowPlayingOpen ? (nowPlayingOpen = false) : openNowPlaying(false)}
+          onOpenArtwork={openArtworkDestination}
+          onOpenLyrics={() => openNowPlaying(true)}
+        />
+      {/if}
     </div>
   {/if}
 </div>

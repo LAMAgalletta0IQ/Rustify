@@ -1,10 +1,12 @@
 ---
 tags: [file, frontend, ui, playback]
 ---
-# `src/lib/components/PlayerBar.svelte`
+# `src/lib/features/player/PlayerBar.svelte`
 
-Persistent four-part playback surface: current track opens Now Playing, center
-transport/repeat/shuffle, progress scrubber, and device/volume controls.
+Persistent playback surface. Artwork has its own album/content navigation,
+metadata opens Now Playing, the center owns transport and the single standard
+timeline, and the right side exposes a labeled Lyrics action, Spotify Connect,
+the native output selector, and player volume.
 
 `cycleRepeat` maps off → context → track → off. Seek converts percentage to
 milliseconds; volume passes 0–100 to Rust for librespot-scale conversion.
@@ -21,5 +23,5 @@ y=663, correcting the previous 2 px user-agent-margin offset.
 
 ## See also
 
-[[player.rs]] · [[NowPlaying.svelte]] · [[DevicePicker.svelte]] ·
+[[player.rs]] · [[NowPlaying.svelte]] · [[SpotifyConnectMenu.svelte]] ·
 [[playback-and-connect]] · [[2026-08-capability-audit]] · [[MOC]]

@@ -34,7 +34,7 @@ then `settings.json` in `data_dir` (written by `set_client_id` in
 fallback — see the gotcha below.
 
 ### `struct Settings` / `load_settings` / `save_settings`
-`settings.json` stores the Client ID, default volume (50%), reduced motion
+`settings.json` stores the Client ID, private last player volume, reduced motion
 (false), and cache cap (2048 MB). Serde defaults migrate older Client-ID-only
 files. The document survives logout and every update merges rather than
 overwriting the Client ID.

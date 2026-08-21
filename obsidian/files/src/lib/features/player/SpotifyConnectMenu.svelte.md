@@ -1,7 +1,11 @@
 ---
 tags: [file, frontend, ui, playback]
 ---
-# `src/lib/components/DevicePicker.svelte`
+# `src/lib/features/player/SpotifyConnectMenu.svelte`
+
+The menu is deliberately separate from native CPAL output selection. It is
+portalled to `document.body`, collision-bounded, scrollable, and restores
+trigger focus on Escape. Arrow/Home/End keys move through account devices.
 
 **Module:** [[frontend-components]] · **Language:** Svelte 5 · **156 lines**
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as api from "../api";
   import { store } from "../store.svelte";
+  import SelectMenu, { type SelectOption } from "../ui/SelectMenu.svelte";
   import type { AlbumSummary } from "../types";
   import AlbumView from "./AlbumView.svelte";
 
@@ -13,6 +14,18 @@
   let type = $state("all");
   let range = $state("90");
   let openAlbum = $state<AlbumSummary | null>(null);
+  const typeOptions: SelectOption[] = [
+    { value: "all", label: "All releases" },
+    { value: "album", label: "Albums" },
+    { value: "single", label: "Singles and EPs" },
+    { value: "compilation", label: "Compilations" },
+  ];
+  const rangeOptions: SelectOption[] = [
+    { value: "30", label: "Last 30 days" },
+    { value: "90", label: "Last 90 days" },
+    { value: "365", label: "Last year" },
+    { value: "all", label: "Any date" },
+  ];
 
   const visible = $derived.by(() => {
     const cutoff = range === "all" ? 0 : Date.now() - Number(range) * 86_400_000;
@@ -63,8 +76,8 @@
   <div class="releases">
     <header><div><span class="eyebrow">Your followed artists</span><h1>Recent releases</h1><p>Albums and singles from the artists you follow, ordered by the dates Spotify provides.</p></div></header>
     <div class="filters" aria-label="Release filters">
-      <label>Type <select bind:value={type}><option value="all">All releases</option><option value="album">Albums</option><option value="single">Singles and EPs</option><option value="compilation">Compilations</option></select></label>
-      <label>Date <select bind:value={range}><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option><option value="all">Any date</option></select></label>
+      <div class="filter"><span>Type</span><SelectMenu value={type} options={typeOptions} label="Release type" onChange={(value) => (type = value ?? "all")} /></div>
+      <div class="filter"><span>Date</span><SelectMenu value={range} options={rangeOptions} label="Release date range" onChange={(value) => (range = value ?? "all")} /></div>
     </div>
     {#if partial.length}<p class="partial" role="status">Some artist catalogs could not be refreshed, so this page may be incomplete. Try again later.</p>{/if}
     {#if visible.length}
@@ -88,8 +101,7 @@
 
 <style>
   .releases { padding: 22px 0 38px; } header h1 { margin: 4px 0; } header p, .empty p { margin: 0; color: var(--fg-dim); }
-  .filters { display: flex; gap: 12px; margin: 22px 0; } .filters label { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); }
-  select { padding: 8px 12px; color: var(--fg); background: var(--glass); border: 1px solid var(--hairline); border-radius: var(--r-sm); }
+  .filters { display: flex; gap: 12px; margin: 22px 0; } .filter { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); }
   .partial, .state, .empty { padding: 14px 16px; border: 1px solid var(--hairline); background: var(--glass); border-radius: var(--r-md); color: var(--fg-dim); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 14px; }
   article { padding: 10px; } .open { display: flex; width: 100%; flex-direction: column; align-items: flex-start; text-align: left; gap: 5px; }
@@ -97,5 +109,5 @@
   .open span, time { color: var(--fg-dim); font-size: 11px; } .eyebrow { color: var(--accent)!important; text-transform: uppercase; letter-spacing: .07em; }
   .actions { display: flex; gap: 7px; margin-top: 10px; } .actions button, .more { padding: 7px 10px; border: 1px solid var(--hairline); background: var(--glass-strong); border-radius: var(--r-sm); }
   .actions button[aria-pressed="true"] { color: var(--accent); } .more { display: block; margin: 20px auto 0; }
-  .state { display: flex; justify-content: space-between; } @media(max-width:600px){.filters{align-items:flex-start;flex-direction:column}}
+  .state { display: flex; justify-content: space-between; } @media(max-width:600px){.filters{align-items:stretch;flex-direction:column}.filter{justify-content:space-between}}
 </style>

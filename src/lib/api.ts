@@ -22,6 +22,7 @@ import type {
   SearchResults,
   TrackSummary,
   EqualizerPreset,
+  EqualizerSettings,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -61,6 +62,20 @@ export const listAudioDevices = () =>
 export const getAudioStatus = () => invoke<AudioStatus>("get_audio_status");
 export const getEqualizerPresets = () =>
   invoke<EqualizerPreset[]>("get_equalizer_presets");
+export const configureAudio = (
+  outputDevice: string | null,
+  equalizer: EqualizerSettings,
+) =>
+  invoke<AudioStatus>("configure_audio", {
+    configuration: { outputDevice, equalizer },
+  });
+export const updateAudioSettings = (
+  outputDevice: string | null,
+  equalizer: EqualizerSettings,
+) =>
+  invoke<AppSettings>("update_audio_settings", {
+    configuration: { outputDevice, equalizer },
+  });
 
 // ---- playback -----------------------------------------------------------
 export const getPlayback = () => invoke<PlaybackState>("get_playback");

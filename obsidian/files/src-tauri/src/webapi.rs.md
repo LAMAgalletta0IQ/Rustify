@@ -56,7 +56,7 @@ const MAX_RETRIES: u32 = 2;
 ## Inputs / outputs / side effects
 
 **Network I/O only.** Spotify Web API requests originate here. librespot and
-[[lyrics.rs]] own their separate traffic.
+[[mod.rs|lyrics/mod.rs]] own their separate traffic.
 
 ## Dependencies
 

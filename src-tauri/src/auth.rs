@@ -114,8 +114,11 @@ pub fn webapi_client_id(data_dir: &Path) -> AppResult<String> {
 pub struct Settings {
     #[serde(default)]
     pub webapi_client_id: Option<String>,
-    #[serde(default = "default_volume_percent")]
-    pub default_volume_percent: u8,
+    /// Last volume chosen in the player. This is deliberately not exposed as
+    /// a Settings control: the player volume is the one authoritative volume
+    /// control, while this value only restores it on the next local session.
+    #[serde(default = "default_volume_percent", alias = "default_volume_percent")]
+    pub last_volume_percent: u8,
     #[serde(default)]
     pub reduce_motion: bool,
     #[serde(default = "default_cache_limit_mb")]
@@ -142,7 +145,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             webapi_client_id: None,
-            default_volume_percent: default_volume_percent(),
+            last_volume_percent: default_volume_percent(),
             reduce_motion: false,
             cache_limit_mb: default_cache_limit_mb(),
             audio_quality: StreamQuality::default(),
@@ -596,8 +599,17 @@ mod settings_tests {
     fn old_settings_files_receive_functional_defaults() {
         let settings: Settings = serde_json::from_str(r#"{"webapi_client_id":"client"}"#).unwrap();
         assert_eq!(settings.webapi_client_id.as_deref(), Some("client"));
-        assert_eq!(settings.default_volume_percent, 50);
+        assert_eq!(settings.last_volume_percent, 50);
         assert_eq!(settings.cache_limit_mb, 2048);
         assert!(!settings.reduce_motion);
+    }
+
+    #[test]
+    fn legacy_default_volume_migrates_to_last_player_volume() {
+        let settings: Settings = serde_json::from_str(r#"{"default_volume_percent":73}"#).unwrap();
+        assert_eq!(settings.last_volume_percent, 73);
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("last_volume_percent"));
+        assert!(!serialized.contains("default_volume_percent"));
     }
 }

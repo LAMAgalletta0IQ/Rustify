@@ -111,7 +111,7 @@ app touches:
 backend supplies exact track, first artist, album, and duration parameters plus
 an identifying User-Agent. It uses no key, secret, scraping, or undocumented
 endpoint. A 404 becomes an `unavailable` lyrics state; 429 honors
-`Retry-After`; synchronized LRC is parsed and sorted locally. See [[lyrics.rs]].
+`Retry-After`; synchronized LRC is parsed and sorted locally. See [[mod.rs|lyrics/mod.rs]].
 
 ## Platform dependencies
 

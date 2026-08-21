@@ -1,10 +1,19 @@
 <script lang="ts">
-  import * as api from "../api";
-  import { store } from "../store.svelte";
-  import { formatMs, volumeToPercent } from "../types";
-  import DevicePicker from "./DevicePicker.svelte";
+  import * as api from "../../api";
+  import AudioOutputSelector from "../audio/AudioOutputSelector.svelte";
+  import { store } from "../../store.svelte";
+  import { formatMs, volumeToPercent } from "../../types";
+  import SpotifyConnectMenu from "./SpotifyConnectMenu.svelte";
 
-  let { onOpenNowPlaying }: { onOpenNowPlaying: () => void } = $props();
+  let {
+    onOpenNowPlaying,
+    onOpenArtwork,
+    onOpenLyrics,
+  }: {
+    onOpenNowPlaying: () => void;
+    onOpenArtwork: () => void;
+    onOpenLyrics: () => void;
+  } = $props();
 
   const pb = $derived(store.playback);
   const pct = $derived(
@@ -14,6 +23,10 @@
   let volumeDraft = $state<number | null>(null);
   const seekPct = $derived(seekDraft ?? pct);
   const volumePct = $derived(volumeDraft ?? volumeToPercent(pb.volume));
+  const lyricsAvailable = $derived(
+    store.lyrics?.status === "available" &&
+      (store.lyrics.synced.length > 0 || Boolean(store.lyrics.plain)),
+  );
 
   function previewSeek(e: Event) {
     seekDraft = Number((e.currentTarget as HTMLInputElement).value);
@@ -35,6 +48,12 @@
     volumeDraft = null;
   }
 
+  async function changeOutput(value: string | null) {
+    await store.run(() =>
+      store.saveAudioSettings(value, store.settings.equalizer),
+    );
+  }
+
   function cycleRepeat() {
     // off -> context -> track -> off
     const [c, t] = pb.repeatTrack
@@ -48,19 +67,29 @@
 
 <div class="wrap">
   <footer>
-    <button class="now" onclick={onOpenNowPlaying} title="Open now playing">
-      {#if pb.track?.coverUrl}
-        <img src={pb.track.coverUrl} alt="" width="46" height="46" />
-      {:else}
-        <span class="ph"></span>
-      {/if}
-      <span class="meta">
-        <span class="name truncate">{pb.track?.name ?? "Nothing playing"}</span>
-        <span class="artist muted truncate">
-          {pb.track?.artists.join(", ") ?? ""}
+    <div class="now">
+      <button
+        class="art"
+        onclick={onOpenArtwork}
+        disabled={!pb.track}
+        title={pb.track?.albumId ? `Open ${pb.track.album}` : "Open track details"}
+        aria-label={pb.track?.albumId ? `Open album ${pb.track.album}` : "Open track details"}
+      >
+        {#if pb.track?.coverUrl}
+          <img src={pb.track.coverUrl} alt="" width="46" height="46" />
+        {:else}
+          <span class="ph"></span>
+        {/if}
+      </button>
+      <button class="meta-button" onclick={onOpenNowPlaying} disabled={!pb.track} title="Open now playing">
+        <span class="meta">
+          <span class="name truncate">{pb.track?.name ?? "Nothing playing"}</span>
+          <span class="artist muted truncate">
+            {pb.track?.artists.join(", ") ?? ""}
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+    </div>
 
     <div class="center">
       <div class="controls">
@@ -134,7 +163,25 @@
     </div>
 
     <div class="right">
-      <DevicePicker />
+      <button
+        class="lyrics-button"
+        onclick={onOpenLyrics}
+        disabled={!lyricsAvailable}
+        title={lyricsAvailable ? "Open fullscreen lyrics" : store.lyricsLoading ? "Lyrics are loading" : "Lyrics are unavailable"}
+        aria-label="Open fullscreen lyrics"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M9 18V5l10-2v13" />
+          <circle cx="6" cy="18" r="3" /><circle cx="16" cy="16" r="3" />
+        </svg>
+        <span>Lyrics</span>
+      </button>
+      <SpotifyConnectMenu />
+      <AudioOutputSelector
+        value={store.settings.outputDevice}
+        compact
+        onChange={(value) => void changeOutput(value)}
+      />
       <svg class="vicon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 8a5 5 0 0 1 0 8" />
       </svg>
@@ -178,8 +225,17 @@
     align-items: center;
     gap: 12px;
     min-width: 0;
-    padding: 0;
     text-align: left;
+  }
+  .art {
+    flex: none;
+    padding: 0;
+    border-radius: 9px;
+  }
+  .art:not(:disabled):hover img,
+  .art:not(:disabled):focus-visible img {
+    filter: brightness(1.12);
+    transform: scale(1.025);
   }
   .now img,
   .ph {
@@ -189,6 +245,12 @@
     object-fit: cover;
     flex: none;
     background: rgba(255, 241, 224, 0.08);
+    transition: filter var(--motion-fast), transform var(--motion-fast);
+  }
+  .meta-button {
+    min-width: 0;
+    padding: 2px 0;
+    text-align: left;
   }
   .meta {
     display: flex;
@@ -309,6 +371,7 @@
     background: transparent;
     cursor: pointer;
   }
+
   .rail input[type="range"]::-webkit-slider-runnable-track {
     height: 4px;
     border: 0;
@@ -348,6 +411,20 @@
     gap: 10px;
     color: var(--fg-dim);
   }
+  .lyrics-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0 9px;
+    border-radius: var(--control-radius);
+    color: var(--fg-dim);
+  }
+  .lyrics-button:hover:not(:disabled),
+  .lyrics-button:focus-visible {
+    color: var(--fg);
+    background: var(--glass-hover);
+  }
   .vicon {
     flex: none;
   }
@@ -355,5 +432,15 @@
     max-width: 74px;
     flex: none;
     width: 74px;
+  }
+  @media (max-width: 920px) {
+    footer {
+      grid-template-columns: minmax(150px, 1fr) minmax(280px, 1.7fr) auto;
+      gap: 12px;
+    }
+    .vicon,
+    .vol {
+      display: none;
+    }
   }
 </style>

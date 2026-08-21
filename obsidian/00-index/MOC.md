@@ -32,6 +32,7 @@ from the official Spotify Web API.
 | [[known-limitations]] | Password login, Jams, Blends, lyrics, queue reorder — and *why* |
 | [[2026-08-capability-audit]] | Verified Spotify/librespot/LRCLIB capability boundary and acceptance results |
 | [[2026-08-parity-pass]] | Relevance, followed releases, fullscreen lyrics, DSP/audio devices, and verified limitations |
+| [[2026-08-ui-audio-stability-pass]] | Live DSP controls, shared menus/devices, stable fullscreen/lyrics, and protected refactor |
 
 ## Modules
 
@@ -51,15 +52,22 @@ from the official Spotify Web API.
 
 ### Backend — Rust (`src-tauri/src/`) `#backend`
 Entry and wiring: [[main.rs]] · [[lib.rs]] · [[state.rs]] · [[error.rs]]
-Feature modules: [[auth.rs]] · [[player.rs]] · [[commands.rs]] · [[connect.rs]] · [[library.rs]] · [[lyrics.rs]] · [[search.rs]] · [[queue.rs]] · [[media_keys.rs]] · [[webapi.rs]]
+Feature modules: [[auth.rs]] · [[player.rs]] · [[commands.rs]] · [[connect.rs]] · [[library.rs]] · [[mod.rs|lyrics/mod.rs]] · [[search.rs]] · [[queue.rs]] · [[media_keys.rs]] · [[webapi.rs]]
 
 ### Frontend — Svelte (`src/`) `#frontend`
 Shell & bootstrap: [[main.ts]] · [[App.svelte]] · [[app.css]] · [[vite-env.d.ts]]
 Shared library: [[api.ts]] · [[types.ts]] · [[store.svelte.ts]]
 Views: [[Setup.svelte]] · [[Login.svelte]] · [[Home.svelte]] · [[Search.svelte]] · [[Library.svelte]] · [[NowPlaying.svelte]] · [[Profile.svelte]] · [[Settings.svelte]] · [[PlaylistView.svelte]] · [[AlbumView.svelte]] · [[ArtistView.svelte]]
-Components: [[PlayerBar.svelte]] · [[DevicePicker.svelte]] · [[TrackList.svelte]]
+Components: [[PlayerBar.svelte]] · [[SpotifyConnectMenu.svelte]] · [[TrackList.svelte]]
+
+Feature UI: [[PlayerBar.svelte]] · [[SpotifyConnectMenu.svelte]] ·
+[[AudioOutputSelector.svelte]] · [[audio-devices.svelte.ts]] ·
+[[NowPlaying.svelte]] · [[Settings.svelte]] · [[SelectMenu.svelte]]
+
+Native audio: [[audio-mod]] · lyrics: [[mod.rs|lyrics/mod.rs]]
 
 ### Tauri configuration (`src-tauri/`) `#config`
+
 [[tauri.conf.json]] · [[Cargo.toml]] · [[Cargo.lock]] · [[build.rs]] · [[default.json]]
 
 ### Root configuration `#config`
