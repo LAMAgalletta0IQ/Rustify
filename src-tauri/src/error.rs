@@ -80,6 +80,9 @@ pub enum AppError {
 
     #[error("Spotify's persisted query changed: {0}")]
     PersistedQueryExpired(String),
+
+    #[error("Spotify DJ context resolution is unavailable: {0}")]
+    LexiconUnavailable(String),
 }
 
 impl AppError {
@@ -101,6 +104,7 @@ impl AppError {
             Self::PublicApiLimitation(_) => "PublicApiLimitation",
             Self::EndpointNotAvailable(_) => "EndpointNotAvailable",
             Self::PersistedQueryExpired(_) => "PersistedQueryExpired",
+            Self::LexiconUnavailable(_) => "LexiconUnavailable",
         }
     }
 }

@@ -18,7 +18,8 @@ export interface AppErrorPayload {
     | "FeatureUnsupported"
     | "PublicApiLimitation"
     | "EndpointNotAvailable"
-    | "PersistedQueryExpired";
+    | "PersistedQueryExpired"
+    | "LexiconUnavailable";
   message: string;
   /** Seconds to wait, from Spotify's `Retry-After`. Only set for RateLimited. */
   retryAfter?: number | null;
@@ -214,6 +215,31 @@ export interface HomeSection {
 export interface HomeFeed {
   greeting: string | null;
   sections: HomeSection[];
+}
+
+export interface DjTrack {
+  uri: string;
+  canonicalUri: string | null;
+  source: string | null;
+  stationUri: string | null;
+  narrationKinds: string[];
+  narrationImageUrl: string | null;
+}
+
+export interface DjSession {
+  available: boolean;
+  contextUri: string;
+  contextUrl: string | null;
+  tracks: DjTrack[];
+  metadata: Record<string, string>;
+  interactivityEnabled: boolean;
+  jumpButtonLabel: string | null;
+  volatileContextId: string | null;
+  lexiconCurrentTime: string | null;
+  lexiconExpirationTime: string | null;
+  reason: string;
+  active: boolean;
+  narrationResolved: boolean;
 }
 
 export interface LyricsLine {

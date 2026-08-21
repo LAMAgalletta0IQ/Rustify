@@ -12,6 +12,7 @@ import type {
   ArtistSummary,
   AuthState,
   Device,
+  DjSession,
   JamSession,
   JamStatus,
   LoginInfo,
@@ -158,6 +159,9 @@ export const getPersonalizedHome = (limit = 10) =>
     limit,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   });
+export const getDjStatus = (refresh = false) =>
+  invoke<DjSession | null>("get_dj_status", { refresh });
+export const startDj = () => invoke<DjSession>("start_dj");
 export const getLyrics = (
   trackName: string,
   artistName: string,

@@ -4,6 +4,7 @@
   import type {
     AlbumSummary,
     ArtistSummary,
+    DjSession,
     HomeFeed,
     HomeItem,
     PlaylistSummary,
@@ -26,14 +27,17 @@
   let topTracks = $state<TrackSummary[]>([]);
   let discovery = $state<AlbumSummary[]>([]);
   let personalized = $state<HomeFeed | null>(null);
+  let dj = $state<DjSession | null>(null);
   let loadingRecent = $state(true);
   let loadingMix = $state(true);
   let loadingDiscovery = $state(true);
   let loadingPersonalized = $state(true);
+  let loadingDj = $state(true);
   let recentError = $state<string | null>(null);
   let mixError = $state<string | null>(null);
   let discoveryError = $state<string | null>(null);
   let personalizedError = $state<string | null>(null);
+  let djError = $state<string | null>(null);
   let reloadKey = $state(0);
 
   let openPlaylist = $state<PlaylistSummary | null>(null);
@@ -60,7 +64,20 @@
     loadingMix = true;
     loadingDiscovery = true;
     loadingPersonalized = true;
-    recentError = mixError = discoveryError = personalizedError = null;
+    loadingDj = true;
+    recentError = mixError = discoveryError = personalizedError = djError = null;
+
+    const djTask = api
+      .getDjStatus(true)
+      .then((status) => {
+        if (!cancelled) dj = status;
+      })
+      .catch((e) => {
+        if (!cancelled) djError = store.handleError(e, false).message;
+      })
+      .finally(() => {
+        if (!cancelled) loadingDj = false;
+      });
 
     const personalizedTask = api
       .getPersonalizedHome(10)
@@ -126,7 +143,7 @@
         if (!cancelled) loadingDiscovery = false;
       });
 
-    void Promise.all([personalizedTask, recentTask, mixTask, discoveryTask]);
+    void Promise.all([djTask, personalizedTask, recentTask, mixTask, discoveryTask]);
     return () => {
       cancelled = true;
     };
@@ -206,6 +223,15 @@
       store.run(() => api.loadContext(item.uri));
     }
   }
+
+  function startDj() {
+    loadingDj = true;
+    djError = null;
+    api.startDj()
+      .then((session) => (dj = session))
+      .catch((e) => (djError = store.handleError(e, false).message))
+      .finally(() => (loadingDj = false));
+  }
 </script>
 
 {#if openPlaylist}
@@ -245,6 +271,25 @@
     {:else if !loadingRecent && !recentError}
       <div class="state"><span>Quick access will learn from real listening and navigation activity on this account.</span><button onclick={onBrowseLibrary}>Browse library</button></div>
     {/if}
+
+    <section aria-labelledby="dj-heading">
+      <div class="dj-card">
+        <div class="dj-copy">
+          <span class="eyebrow">dynamic session</span>
+          <h2 id="dj-heading">DJ X</h2>
+          {#if dj}
+            <p>{dj.tracks.length} tracks resolved from Lexicon{dj.narrationResolved ? "; narration synthesis is ready" : dj.tracks.some((track) => track.narrationKinds.length) ? ", with narration metadata" : ""}.</p>
+          {:else if djError}
+            <p>{djError}</p>
+          {:else}
+            <p>Spotify’s personalized, continuously refreshed DJ context.</p>
+          {/if}
+        </div>
+        <button class="dj-action" disabled={loadingDj || !dj} onclick={startDj}>
+          {loadingDj ? "Checking…" : dj?.active ? "Restart DJ" : "Start DJ"}
+        </button>
+      </div>
+    </section>
 
     <section aria-labelledby="spotify-home-heading">
       <div class="section-head">
@@ -372,6 +417,11 @@
   .eyebrow { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
   .personalized-sections { display: grid; gap: 22px; }
   .shelf h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+  .dj-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px; border-radius: var(--r-md); border: 1px solid rgba(126, 95, 255, .32); background: linear-gradient(120deg, rgba(72, 38, 150, .32), var(--glass)); }
+  .dj-copy h2 { margin: 3px 0 5px; font-size: 22px; }
+  .dj-copy p { margin: 0; color: var(--fg-dim); }
+  .dj-action { flex: none; padding: 10px 16px; border-radius: 999px; color: #fff; background: rgba(126, 95, 255, .75); }
+  .dj-action:disabled { opacity: .45; cursor: default; }
   .state { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--glass); border: 1px solid var(--hairline); border-radius: var(--r-md); color: var(--fg-dim); }
   .state button, .link { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
   @media (max-width: 900px) { .jump { grid-template-columns: repeat(2, minmax(0,1fr)); } }

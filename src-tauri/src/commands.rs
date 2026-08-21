@@ -21,7 +21,7 @@ use crate::player;
 use crate::queue::{self, QueueView};
 use crate::search::ArtistSummary;
 use crate::search::{self, SearchResults};
-use crate::spotify::HomeFeed;
+use crate::spotify::{DjSession, HomeFeed};
 use crate::state::{events, AppState, AuthState, PlaybackState, SpotifySession};
 use crate::webapi::WebApi;
 
@@ -88,6 +88,79 @@ pub async fn get_personalized_home(
             time_zone.as_deref().unwrap_or("UTC"),
         )
         .await
+}
+
+#[tauri::command]
+pub async fn get_dj_status(
+    state: State<'_, AppState>,
+    refresh: Option<bool>,
+) -> AppResult<Option<DjSession>> {
+    if !refresh.unwrap_or(false) {
+        if let Some(session) = state.internal_spotify.cached_dj().await {
+            return Ok(Some(session));
+        }
+    }
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    state
+        .internal_spotify
+        .resolve_dj(&session, false)
+        .await
+        .map(Some)
+}
+
+/// Resolves the dynamic DJ session through Lexicon before loading its current
+/// track window. librespot 0.8 cannot resolve empty dynamic context pages on
+/// its own, so passing the recovered URIs is the compatibility path.
+#[tauri::command]
+pub async fn start_dj(state: State<'_, AppState>) -> AppResult<DjSession> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    let mut dj = state.internal_spotify.resolve_dj(&session, false).await?;
+    match state
+        .internal_spotify
+        .prepare_dj_narration(&session, &dj)
+        .await
+    {
+        Ok(resolved) => dj.narration_resolved = resolved,
+        Err(error) => {
+            log::warn!(target: "spotify.dj", "narration preflight failed; continuing with music: {error}")
+        }
+    }
+    let uris: Vec<_> = dj.tracks.iter().map(|track| track.uri.clone()).collect();
+    let first = uris.first().cloned();
+    let activate = !state.playback.read().await.is_active_device;
+    with_spirc(&state, move |spirc| {
+        if activate {
+            spirc.activate()?;
+        }
+        spirc.load(LoadRequest::from_tracks(
+            uris,
+            LoadRequestOptions {
+                start_playing: true,
+                playing_track: first.map(PlayingTrack::Uri),
+                ..Default::default()
+            },
+        ))
+    })
+    .await?;
+    state
+        .internal_spotify
+        .dj
+        .update_status(true, dj.narration_resolved)
+        .await;
+    dj.active = true;
+    Ok(dj)
 }
 
 /// Shape of the login flow, so the UI can describe it accurately instead of

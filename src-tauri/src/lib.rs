@@ -153,6 +153,8 @@ pub fn run() {
             commands::get_top_tracks,
             commands::get_top_artists,
             commands::get_personalized_home,
+            commands::get_dj_status,
+            commands::start_dj,
             commands::get_lyrics,
             // search
             commands::search_spotify,
