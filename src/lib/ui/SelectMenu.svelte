@@ -233,15 +233,22 @@
   }
   .select-trigger:disabled { opacity: var(--disabled-opacity); }
   .select-trigger.compact {
+    /* min-width:0 is what actually lets this shrink below its content's
+       natural size inside a flex row (PlayerBar's .right, here or anywhere
+       else this is used compactly) — width/max-width alone cap growth, they
+       don't override the flex default of "never shrink below content",
+       which is what let the label run into its neighbors instead of eliding. */
+    min-width: 0;
     width: auto;
     max-width: 190px;
+    flex-shrink: 1;
     min-height: 30px;
     padding: 6px 8px;
     color: var(--fg-dim);
   }
   .select-trigger.compact:hover,
   .select-trigger.compact[aria-expanded="true"] { color: var(--fg); }
-  .compact-label { max-width: 130px; font-size: 11px; }
+  .compact-label { min-width: 0; max-width: 130px; font-size: 11px; }
   .select-trigger svg { flex: none; }
   .select-trigger .chevron { transition: transform var(--motion-fast); }
   .select-trigger[aria-expanded="true"] .chevron { transform: rotate(180deg); }

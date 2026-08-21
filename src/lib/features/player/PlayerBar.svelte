@@ -276,6 +276,7 @@
     flex-direction: column;
     align-items: center;
     gap: 7px;
+    min-width: 0;
   }
   .controls {
     display: flex;
@@ -415,6 +416,15 @@
     justify-content: flex-end;
     gap: 10px;
     color: var(--fg-dim);
+    /* A grid item's default min-width is auto, which floors it at its
+       content's natural size — the actual cause of the overlap: at a track
+       width the responsive breakpoints below hadn't yet trimmed for, .right
+       needed more room than its minmax(…, 1fr) track guaranteed and spilled
+       over the center column instead of clipping. min-width:0 lets it
+       actually shrink to the track; overflow:hidden makes a still-too-narrow
+       track clip cleanly instead of spilling. */
+    min-width: 0;
+    overflow: hidden;
   }
   .lyrics-button {
     display: inline-flex;
