@@ -25,3 +25,7 @@ Rustify-main.zip
 
 # Scratch state for long-running agent work sessions.
 .agent-work/
+
+# rust-analyzer's out-of-tree build cache, when it lands at the workspace
+# root instead of src-tauri/target/.
+/target/
