@@ -166,6 +166,21 @@ impl WebApi {
         self.send::<Value>(req, token).await.map(|_| ())
     }
 
+    pub async fn post_query(
+        &self,
+        token: &str,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> AppResult<()> {
+        let req = self
+            .http
+            .post(format!("{BASE}{path}"))
+            .query(query)
+            .header(reqwest::header::CONTENT_LENGTH, "0")
+            .body("");
+        self.send::<Value>(req, token).await.map(|_| ())
+    }
+
     pub async fn delete_query(
         &self,
         token: &str,

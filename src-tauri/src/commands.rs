@@ -48,6 +48,18 @@ where
     f(&s.spirc).map_err(AppError::from)
 }
 
+async fn remote_put(state: &AppState, path: &str, query: &[(&str, String)]) -> AppResult<()> {
+    WebApi::new()
+        .put_query(&token(state).await?, path, query)
+        .await
+}
+
+async fn remote_post(state: &AppState, path: &str, query: &[(&str, String)]) -> AppResult<()> {
+    WebApi::new()
+        .post_query(&token(state).await?, path, query)
+        .await
+}
+
 fn device_name() -> String {
     std::env::var("COMPUTERNAME")
         .ok()
@@ -531,50 +543,115 @@ pub async fn get_playback(state: State<'_, AppState>) -> AppResult<PlaybackState
 
 #[tauri::command]
 pub async fn play(state: State<'_, AppState>) -> AppResult<()> {
-    with_spirc(&state, |s| s.play()).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.play()).await
+    } else {
+        remote_put(&state, "/me/player/play", &[]).await
+    }
 }
 
 #[tauri::command]
 pub async fn pause(state: State<'_, AppState>) -> AppResult<()> {
-    with_spirc(&state, |s| s.pause()).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.pause()).await
+    } else {
+        remote_put(&state, "/me/player/pause", &[]).await
+    }
 }
 
 #[tauri::command]
 pub async fn play_pause(state: State<'_, AppState>) -> AppResult<()> {
-    with_spirc(&state, |s| s.play_pause()).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.play_pause()).await
+    } else if state.playback.read().await.is_playing {
+        remote_put(&state, "/me/player/pause", &[]).await
+    } else {
+        remote_put(&state, "/me/player/play", &[]).await
+    }
 }
 
 #[tauri::command]
 pub async fn next_track(state: State<'_, AppState>) -> AppResult<()> {
-    with_spirc(&state, |s| s.next()).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.next()).await
+    } else {
+        remote_post(&state, "/me/player/next", &[]).await
+    }
 }
 
 #[tauri::command]
 pub async fn previous_track(state: State<'_, AppState>) -> AppResult<()> {
-    with_spirc(&state, |s| s.prev()).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.prev()).await
+    } else {
+        remote_post(&state, "/me/player/previous", &[]).await
+    }
 }
 
 #[tauri::command]
 pub async fn seek(state: State<'_, AppState>, position_ms: u32) -> AppResult<()> {
-    with_spirc(&state, |s| s.set_position_ms(position_ms)).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.set_position_ms(position_ms)).await
+    } else {
+        remote_put(
+            &state,
+            "/me/player/seek",
+            &[("position_ms", position_ms.to_string())],
+        )
+        .await
+    }
 }
 
 /// `percent` is 0..=100; librespot's own scale is 0..=65535.
 #[tauri::command]
 pub async fn set_volume(state: State<'_, AppState>, percent: u8) -> AppResult<()> {
-    let v = player::percent_to_volume(percent);
-    with_spirc(&state, |s| s.set_volume(v)).await
+    if state.playback.read().await.is_active_device {
+        let volume = player::percent_to_volume(percent);
+        with_spirc(&state, |s| s.set_volume(volume)).await
+    } else {
+        remote_put(
+            &state,
+            "/me/player/volume",
+            &[("volume_percent", percent.min(100).to_string())],
+        )
+        .await
+    }
 }
 
 #[tauri::command]
 pub async fn set_shuffle(state: State<'_, AppState>, shuffle: bool) -> AppResult<()> {
-    with_spirc(&state, |s| s.shuffle(shuffle)).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.shuffle(shuffle)).await
+    } else {
+        remote_put(
+            &state,
+            "/me/player/shuffle",
+            &[("state", shuffle.to_string())],
+        )
+        .await
+    }
 }
 
 #[tauri::command]
 pub async fn set_repeat(state: State<'_, AppState>, context: bool, track: bool) -> AppResult<()> {
-    with_spirc(&state, |s| s.repeat(context)).await?;
-    with_spirc(&state, |s| s.repeat_track(track)).await
+    if state.playback.read().await.is_active_device {
+        with_spirc(&state, |s| s.repeat(context)).await?;
+        with_spirc(&state, |s| s.repeat_track(track)).await
+    } else {
+        let repeat = if track {
+            "track"
+        } else if context {
+            "context"
+        } else {
+            "off"
+        };
+        remote_put(
+            &state,
+            "/me/player/repeat",
+            &[("state", repeat.to_string())],
+        )
+        .await
+    }
 }
 
 #[tauri::command]
