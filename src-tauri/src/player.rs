@@ -498,6 +498,8 @@ struct ApiNamed {
 
 #[derive(Debug, Deserialize)]
 struct ApiAlbum {
+    id: String,
+    uri: String,
     name: String,
     images: Vec<ApiImage>,
 }
@@ -528,17 +530,23 @@ async fn fetch_track_info(api: &WebApi, token: &str, uri: &SpotifyUri) -> AppRes
                 name: ep.name,
                 artists: ep.show.map(|s| vec![s.name]).unwrap_or_default(),
                 album: String::new(),
+                album_id: None,
+                album_uri: None,
                 cover_url: pick_cover(&ep.images),
                 duration_ms: ep.duration_ms,
             })
         }
         _ => {
             let tr: ApiTrack = api.get(token, &format!("/tracks/{id}"), &[]).await?;
+            let album_id = tr.album.id.clone();
+            let album_uri = tr.album.uri.clone();
             Ok(TrackInfo {
                 uri: uri_str,
                 name: tr.name,
                 artists: tr.artists.into_iter().map(|a| a.name).collect(),
                 album: tr.album.name,
+                album_id: Some(album_id),
+                album_uri: Some(album_uri),
                 cover_url: pick_cover(&tr.album.images),
                 duration_ms: tr.duration_ms,
             })
@@ -694,11 +702,20 @@ async fn apply_remote(
             .min_by_key(|i| (i.width.unwrap_or(640) as i32 - 300).abs())
             .map(|i| i.url.clone());
 
+        let album = item.album;
+        let album_name = album
+            .as_ref()
+            .map(|value| value.name.clone())
+            .unwrap_or_default();
+        let album_id = album.as_ref().map(|value| value.id.clone());
+        let album_uri = album.as_ref().map(|value| value.uri.clone());
         pb.track = Some(TrackInfo {
             uri: item.uri,
             name: item.name,
             artists: item.artists.into_iter().map(|a| a.name).collect(),
-            album: item.album.map(|a| a.name).unwrap_or_default(),
+            album: album_name,
+            album_id,
+            album_uri,
             cover_url: cover,
             duration_ms: item.duration_ms,
         });

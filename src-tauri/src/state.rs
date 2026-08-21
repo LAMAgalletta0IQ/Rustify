@@ -34,6 +34,8 @@ pub struct TrackInfo {
     pub name: String,
     pub artists: Vec<String>,
     pub album: String,
+    pub album_id: Option<String>,
+    pub album_uri: Option<String>,
     pub cover_url: Option<String>,
     pub duration_ms: u32,
 }

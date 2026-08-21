@@ -48,6 +48,8 @@ pub struct RemoteNamed {
 
 #[derive(Debug, Deserialize)]
 pub struct RemoteAlbum {
+    pub id: String,
+    pub uri: String,
     pub name: String,
     #[serde(default)]
     pub images: Vec<RemoteImage>,

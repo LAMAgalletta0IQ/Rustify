@@ -1,7 +1,7 @@
 ---
 tags: [file, backend, lyrics, integration]
 ---
-# `src-tauri/src/lyrics.rs`
+# `src-tauri/src/lyrics/mod.rs`
 
 Read-only documented LRCLIB client. `fetch` calls `https://lrclib.net/api/get`
 with exact track, first artist, album, and rounded duration parameters, a

@@ -25,7 +25,8 @@ exposed to the webview.
 | [[player.rs]] | librespot session, `Spirc`, event pump | librespot |
 | [[connect.rs]] | Device list, transfer | Web API |
 | [[library.rs]] | Playlists, albums, liked songs, save/unsave, artist | Web API |
-| [[lyrics.rs]] | Documented lyrics lookup and synchronized LRC parsing | LRCLIB |
+| [[mod.rs|lyrics/mod.rs]] | Documented lyrics lookup and synchronized LRC parsing | LRCLIB |
+| [[audio-mod]] | CPAL output selection, fallback, presets, and real-time DSP | librespot sink + CPAL |
 | [[search.rs]] | Multi-type search | Web API |
 | [[queue.rs]] | Queue read/append | Web API |
 | [[media_keys.rs]] | Global media-key shortcuts | Tauri plugin |

@@ -108,4 +108,4 @@ different device was actively playing.
 
 [[architecture]] · [[auth-and-tokens]] · [[known-limitations]] ·
 [[external-dependencies]] · [[Home.svelte]] · [[ArtistView.svelte]] ·
-[[NowPlaying.svelte]] · [[library.rs]] · [[lyrics.rs]] · [[MOC]]
+[[NowPlaying.svelte]] · [[library.rs]] · [[mod.rs|lyrics/mod.rs]] · [[MOC]]

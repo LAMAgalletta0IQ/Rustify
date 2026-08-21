@@ -47,7 +47,7 @@ src/
 [[AlbumView.svelte]] · [[ArtistView.svelte]]
 
 ### Components — [[frontend-components]]
-[[PlayerBar.svelte]] · [[DevicePicker.svelte]] · [[TrackList.svelte]]
+[[PlayerBar.svelte]] · [[SpotifyConnectMenu.svelte]] · [[TrackList.svelte]]
 
 ## Architecture
 

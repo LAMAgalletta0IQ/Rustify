@@ -6,6 +6,7 @@ import type {
   AppSettings,
   AuthState,
   LoginInfo,
+  LyricsResult,
   PlaybackState,
 } from "./types";
 
@@ -37,7 +38,6 @@ const emptyAuth: AuthState = {
 };
 
 const defaultSettings: AppSettings = {
-  defaultVolumePercent: 50,
   reduceMotion: false,
   cacheLimitMb: 2048,
   audioQuality: "automatic",
@@ -62,15 +62,23 @@ class AppStore {
   /** True until a Web API client ID is configured; gates Login behind Setup. */
   setupNeeded = $state(false);
   settings = $state<AppSettings>({ ...defaultSettings });
+  lyrics = $state<LyricsResult | null>(null);
+  lyricsLoading = $state(false);
+  lyricsError = $state<string | null>(null);
 
   #unlisten: UnlistenFn[] = [];
   #ticker: number | null = null;
   #intentionalLogout = false;
+  #lyricsRequest = 0;
 
   async init() {
     this.#unlisten.push(
       await listen<PlaybackState>(EVENT_PLAYBACK, (e) => {
+        const previousTrack = this.playback.track?.uri;
         this.playback = e.payload;
+        if (previousTrack !== e.payload.track?.uri) {
+          this.#syncLyrics(e.payload.track);
+        }
         this.#syncTicker();
       }),
     );
@@ -103,6 +111,7 @@ class AppStore {
       this.auth = liveAuth.loggedIn ? liveAuth : await api.restoreSession();
       if (this.auth.loggedIn) {
         this.playback = await api.getPlayback();
+        this.#syncLyrics(this.playback.track);
         this.#syncTicker();
       } else if (info && !info.privateClientId) {
         // A private client ID is required only for the two-tab loopback flow.
@@ -122,12 +131,47 @@ class AppStore {
     this.settings = await api.updateSettings(settings);
   }
 
+  async saveAudioSettings(
+    outputDevice: string | null,
+    equalizer: AppSettings["equalizer"],
+  ) {
+    this.settings = await api.updateAudioSettings(outputDevice, equalizer);
+  }
+
+  #syncLyrics(track: PlaybackState["track"]) {
+    const request = ++this.#lyricsRequest;
+    this.lyrics = null;
+    this.lyricsError = null;
+    this.lyricsLoading = Boolean(track);
+    if (!track) return;
+    void api
+      .getLyrics(
+        track.uri,
+        track.name,
+        track.artists[0] ?? "",
+        track.album,
+        track.durationMs,
+      )
+      .then((lyrics) => {
+        if (request === this.#lyricsRequest) this.lyrics = lyrics;
+      })
+      .catch((error) => {
+        if (request === this.#lyricsRequest) {
+          this.lyricsError = api.asAppError(error).message;
+        }
+      })
+      .finally(() => {
+        if (request === this.#lyricsRequest) this.lyricsLoading = false;
+      });
+  }
+
   async logout() {
     this.#intentionalLogout = true;
     try {
       await api.logout();
       this.auth = { ...emptyAuth };
       this.playback = { ...emptyPlayback };
+      this.#syncLyrics(null);
     } finally {
       this.#intentionalLogout = false;
     }
@@ -167,6 +211,7 @@ class AppStore {
   }
 
   destroy() {
+    this.#lyricsRequest += 1;
     this.#unlisten.forEach((f) => f());
     this.#unlisten = [];
     if (this.#ticker !== null) clearInterval(this.#ticker);

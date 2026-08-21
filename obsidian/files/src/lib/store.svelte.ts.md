@@ -26,7 +26,7 @@ and provides shared error handling.
 | `error` | `$state<string \| null>` | Banner text |
 | `booting` | `$state(boolean)` | True until the restore attempt settles |
 | `setupNeeded` | `$state(boolean)` | True until a Web API Client ID is configured; gates [[Login.svelte]] behind [[Setup.svelte]] |
-| `settings` | `$state<AppSettings>` | Persisted default volume, cache cap, and reduced motion |
+| `settings` | `$state<AppSettings>` | Quality, output/EQ, cache cap, and reduced motion |
 | `#unlisten` | `UnlistenFn[]` | Event subscriptions |
 | `#ticker` | `number \| null` | Interval handle |
 

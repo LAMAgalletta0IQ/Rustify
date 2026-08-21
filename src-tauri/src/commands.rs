@@ -229,7 +229,6 @@ pub struct LoginInfo {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
-    pub default_volume_percent: u8,
     pub reduce_motion: bool,
     pub cache_limit_mb: u32,
     pub audio_quality: StreamQuality,
@@ -251,7 +250,6 @@ fn validate_crossfade(seconds: u8) -> AppResult<()> {
 impl From<auth::Settings> for AppSettings {
     fn from(value: auth::Settings) -> Self {
         Self {
-            default_volume_percent: value.default_volume_percent,
             reduce_motion: value.reduce_motion,
             cache_limit_mb: value.cache_limit_mb,
             audio_quality: value.audio_quality,
@@ -315,11 +313,6 @@ pub fn update_settings(
         .app_data_dir()
         .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
 
-    if settings.default_volume_percent > 100 {
-        return Err(AppError::BadRequest(
-            "Default volume must be between 0 and 100.".into(),
-        ));
-    }
     if !(128..=8192).contains(&settings.cache_limit_mb) {
         return Err(AppError::BadRequest(
             "Cache size must be between 128 MB and 8192 MB.".into(),
@@ -327,16 +320,60 @@ pub fn update_settings(
     }
     validate_crossfade(settings.crossfade_seconds)?;
     audio::validate_equalizer(&settings.equalizer)?;
-    audio::validate_output_device(settings.output_device.as_deref())?;
 
     let mut persisted = auth::settings_or_default(&data_dir);
-    persisted.default_volume_percent = settings.default_volume_percent;
     persisted.reduce_motion = settings.reduce_motion;
     persisted.cache_limit_mb = settings.cache_limit_mb;
     persisted.audio_quality = settings.audio_quality;
     persisted.crossfade_seconds = settings.crossfade_seconds;
     persisted.output_device = settings.output_device;
     persisted.equalizer = settings.equalizer;
+    auth::save_settings(&data_dir, &persisted)?;
+    state
+        .audio
+        .configure(persisted.output_device.clone(), persisted.equalizer.clone());
+    Ok(persisted.into())
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioConfiguration {
+    pub output_device: Option<String>,
+    pub equalizer: EqualizerSettings,
+}
+
+/// Applies sound changes to the active sink without touching disk. Slider
+/// input uses this path so the graph, controls, and audio thread never drift
+/// apart while the debounced persistence call is still pending.
+#[tauri::command]
+pub fn configure_audio(
+    state: State<'_, AppState>,
+    configuration: AudioConfiguration,
+) -> AppResult<AudioStatus> {
+    audio::validate_equalizer(&configuration.equalizer)?;
+    state
+        .audio
+        .configure(configuration.output_device, configuration.equalizer);
+    Ok(state.audio.status())
+}
+
+/// Persists only output/EQ settings, leaving unrelated Settings drafts alone.
+/// A saved device may be disconnected: the sink falls back to the system
+/// default and retries it after hot-plugging instead of rejecting the setting.
+#[tauri::command]
+pub fn update_audio_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    configuration: AudioConfiguration,
+) -> AppResult<AppSettings> {
+    audio::validate_equalizer(&configuration.equalizer)?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+    let mut persisted = auth::settings_or_default(&data_dir);
+    persisted.output_device = configuration.output_device;
+    persisted.equalizer = configuration.equalizer;
     auth::save_settings(&data_dir, &persisted)?;
     state
         .audio
@@ -417,7 +454,7 @@ async fn establish(
         device_name(),
         data_dir.join("cache"),
         player::PlaybackOptions {
-            initial_volume_percent: settings.default_volume_percent,
+            initial_volume_percent: settings.last_volume_percent,
             cache_limit_mb: settings.cache_limit_mb,
             quality: settings.audio_quality,
             crossfade_seconds: settings.crossfade_seconds,
@@ -722,15 +759,27 @@ pub async fn seek(app: AppHandle, state: State<'_, AppState>, position_ms: u32) 
 
 /// `percent` is 0..=100; librespot's own scale is 0..=65535.
 #[tauri::command]
-pub async fn set_volume(state: State<'_, AppState>, percent: u8) -> AppResult<()> {
+pub async fn set_volume(app: AppHandle, state: State<'_, AppState>, percent: u8) -> AppResult<()> {
+    if percent > 100 {
+        return Err(AppError::BadRequest(
+            "Volume must be between 0 and 100.".into(),
+        ));
+    }
     if state.playback.read().await.is_active_device {
-        let volume = player::percent_to_volume(percent);
-        with_spirc(&state, |s| s.set_volume(volume)).await
+        let v = player::percent_to_volume(percent);
+        with_spirc(&state, |s| s.set_volume(v)).await?;
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+        let mut settings = auth::settings_or_default(&data_dir);
+        settings.last_volume_percent = percent;
+        auth::save_settings(&data_dir, &settings)
     } else {
         remote_put(
             &state,
             "/me/player/volume",
-            &[("volume_percent", percent.min(100).to_string())],
+            &[("volume_percent", percent.to_string())],
         )
         .await
     }

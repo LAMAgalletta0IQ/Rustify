@@ -24,7 +24,7 @@ in sync with `src-tauri/src/{state,library,search,connect,queue}.rs`.
 | `AlbumPage`, `RecentActivityItem` | same | [[library.rs]] |
 | `ArtistSummary`, `PlaylistHit`, `SearchResults` | same | [[search.rs]] |
 | `QueueView` | `QueueView` | [[queue.rs]] |
-| `LyricsResult`, `LyricsLine` | same | [[lyrics.rs]] |
+| `LyricsResult`, `LyricsLine` | same | [[mod.rs|lyrics/mod.rs]] |
 | `AppSettings` | `commands::AppSettings` | [[commands.rs]] |
 
 `AppErrorPayload["kind"]` is a **string-literal union** matching `AppError::kind`,

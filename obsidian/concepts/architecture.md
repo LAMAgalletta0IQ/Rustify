@@ -87,6 +87,18 @@ why.
 
 ## The boundary contract
 
+### Feature ownership after the stability pass
+
+Route/detail pages remain in `src/lib/views`. Composed behavior now lives with
+its domain: `features/audio` (CPAL devices), `features/player` (persistent
+transport and Spotify Connect), `features/lyrics` (Now Playing/fullscreen), and
+`features/settings`. Shared overlay behavior lives in `src/lib/ui`.
+
+The Rust module paths stay stable while the two multi-responsibility domains
+use folders: `audio/mod.rs` and `lyrics/mod.rs`. The conventional one-file Rust
+domains remain flat. Experimental Jam modules were deliberately excluded from
+this restructuring.
+
 Three things must stay in sync across the Rust/TypeScript line. Change one,
 change all:
 

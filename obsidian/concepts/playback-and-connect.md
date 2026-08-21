@@ -57,7 +57,7 @@ playback. This single ordering constraint is what makes the whole UI work.
 | --- | --- |
 | `name` | `<COMPUTERNAME> (Rustify)` |
 | `device_type` | `DeviceType::Computer` |
-| `initial_volume` | `percent_to_volume(settings.default_volume_percent)` — **raw 0..=65535 scale** |
+| `initial_volume` | `percent_to_volume(settings.last_volume_percent)` — **raw 0..=65535 scale** |
 
 Registration happens over Spotify's dealer/websocket once logged in, **not**
 mDNS. This is why librespot's `with-libmdns` default feature is disabled in
@@ -108,7 +108,7 @@ transfer *to* us.
 Pulling playback back is the opposite: `activate_this_device` calls
 `spirc.activate()` locally rather than issuing a transfer.
 
-So the device picker in [[DevicePicker.svelte]] mixes both mechanisms: HTTP to
+So the device picker in [[SpotifyConnectMenu.svelte]] mixes both mechanisms: HTTP to
 list and push away, librespot to pull back.
 
 > **`Device` deserialises from snake_case, serialises to camelCase.** Spotify
@@ -199,5 +199,5 @@ live sink after Save; quality changes begin with the next local session.
 ## See also
 
 [[architecture]] · [[data-flow]] · [[state-and-events]] · [[player.rs]] ·
-[[connect.rs]] · [[queue.rs]] · [[commands.rs]] · [[DevicePicker.svelte]] ·
+[[connect.rs]] · [[queue.rs]] · [[commands.rs]] · [[SpotifyConnectMenu.svelte]] ·
 [[known-limitations]] · [[MOC]]

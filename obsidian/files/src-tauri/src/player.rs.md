@@ -21,7 +21,7 @@ Builds and starts everything. Order is significant:
 
 1. Configs: `SessionConfig`, `PlayerConfig`, `AudioFormat`, `MixerConfig`.
 2. `ConnectConfig` — device name, `DeviceType::Computer`,
-   `initial_volume: percent_to_volume(settings.default_volume_percent)`.
+   `initial_volume: percent_to_volume(settings.last_volume_percent)`.
 3. `Cache::new(...)` — credentials + audio, capped by
    `settings.cache_limit_mb` (2 GB default, 128–8192 MB validated range).
 4. `audio_backend::find(None)` → rodio → WASAPI on Windows.

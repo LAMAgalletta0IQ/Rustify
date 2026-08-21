@@ -7,12 +7,18 @@ tags: [module, frontend, ui]
 
 Reusable UI shared across views.
 
+Feature-owned components live under `src/lib/features/{audio,player,lyrics,settings}`;
+cross-feature primitives live under `src/lib/ui`; only broadly reusable track
+rows remain under `src/lib/components`.
+
 ## The components
 
 | Component | Used by | Role |
 | --- | --- | --- |
-| [[PlayerBar.svelte]] | [[App.svelte]] | Persistent transport bar |
-| [[DevicePicker.svelte]] | [[PlayerBar.svelte]] | Connect device popover |
+| [[PlayerBar.svelte]] | [[App.svelte]] | Persistent transport and explicit Lyrics entry |
+| [[SpotifyConnectMenu.svelte]] | [[PlayerBar.svelte]] | Spotify Connect transfer menu |
+| [[AudioOutputSelector.svelte]] | PlayerBar, Settings | Shared native CPAL output selector |
+| [[SelectMenu.svelte]] | Settings, Releases, output selector | Portalled accessible listbox |
 | [[TrackList.svelte]] | [[Home.svelte]], [[Search.svelte]], [[AlbumView.svelte]], [[ArtistView.svelte]] | Track rows |
 
 ## `TrackList.svelte` — the most reused
@@ -36,7 +42,7 @@ updated optimistically with rollback on failure.
 ```
 App.svelte
 └── PlayerBar.svelte
-    └── DevicePicker.svelte
+    └── SpotifyConnectMenu.svelte
 
 Home / Search / AlbumView / ArtistView
 └── TrackList.svelte

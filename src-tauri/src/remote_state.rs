@@ -233,6 +233,12 @@ fn track_info(track: &librespot::protocol::player::ProvidedTrack, duration_ms: u
         name: summary.name,
         artists: summary.artists,
         album: summary.album,
+        // Connect state's ProvidedTrack metadata map does not carry a
+        // structured album id/URI the way the local session's Track
+        // metadata does; leaving these unset here (rather than guessing)
+        // matches player.rs's own fallback for a track it cannot resolve.
+        album_id: None,
+        album_uri: None,
         cover_url: summary.image_url,
         duration_ms: summary.duration_ms.max(duration_ms),
     }

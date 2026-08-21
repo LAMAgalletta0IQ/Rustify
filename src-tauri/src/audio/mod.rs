@@ -176,6 +176,7 @@ pub struct AudioDevice {
     pub is_default: bool,
     pub is_selected: bool,
     pub is_active: bool,
+    pub is_available: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -261,7 +262,7 @@ pub fn list_output_devices(runtime: &AudioRuntime) -> AppResult<Vec<AudioDevice>
     let selected = runtime.requested_device();
     let status = runtime.status();
     let (default, names) = output_names()?;
-    Ok(names
+    let mut devices = names
         .into_iter()
         .map(|name| AudioDevice {
             id: name.clone(),
@@ -269,23 +270,26 @@ pub fn list_output_devices(runtime: &AudioRuntime) -> AppResult<Vec<AudioDevice>
             is_selected: selected.as_deref() == Some(name.as_str())
                 || (selected.is_none() && default.as_deref() == Some(name.as_str())),
             is_active: status.active_device.as_deref() == Some(name.as_str()),
+            is_available: true,
             name,
         })
-        .collect())
-}
-
-pub fn validate_output_device(device: Option<&str>) -> AppResult<()> {
-    let Some(requested) = device.map(str::trim).filter(|name| !name.is_empty()) else {
-        return Ok(());
-    };
-    let (_, names) = output_names()?;
-    if names.iter().any(|name| name == requested) {
-        Ok(())
-    } else {
-        Err(AppError::Unavailable(format!(
-            "Audio output ‘{requested}’ is no longer available. Choose another device or System default."
-        )))
+        .collect::<Vec<_>>();
+    if let Some(missing) =
+        selected.filter(|requested| !devices.iter().any(|device| device.id == *requested))
+    {
+        devices.insert(
+            0,
+            AudioDevice {
+                id: missing.clone(),
+                name: missing,
+                is_default: false,
+                is_selected: true,
+                is_active: false,
+                is_available: false,
+            },
+        );
     }
+    Ok(devices)
 }
 
 fn available_device(requested: Option<&str>) -> (Option<String>, Option<String>) {
@@ -545,5 +549,97 @@ mod tests {
         settings.bands_db[2] = 0.0;
         settings.preamp_db = -13.0;
         assert!(validate_equalizer(&settings).is_err());
+    }
+
+    fn stereo_sine(frequency: f64, frames: usize, amplitude: f64) -> Vec<f64> {
+        (0..frames)
+            .flat_map(|frame| {
+                let phase = std::f64::consts::TAU * frequency * frame as f64 / SAMPLE_RATE as f64;
+                let sample = phase.sin() * amplitude;
+                [sample, sample]
+            })
+            .collect()
+    }
+
+    fn process_in_decoder_packets(
+        processor: &mut EqualizerProcessor,
+        samples: &mut [f64],
+        settings: &EqualizerSettings,
+    ) {
+        for packet in samples.chunks_mut(2_048) {
+            processor.process(packet, settings);
+        }
+    }
+
+    fn rms(samples: &[f64]) -> f64 {
+        (samples.iter().map(|sample| sample * sample).sum::<f64>() / samples.len() as f64).sqrt()
+    }
+
+    #[test]
+    fn one_kilohertz_band_changes_the_real_sample_stream() {
+        let mut flat_samples = stereo_sine(1_000.0, SAMPLE_RATE as usize, 0.05);
+        let mut boosted_samples = flat_samples.clone();
+        let flat = EqualizerSettings {
+            enabled: true,
+            auto_headroom: false,
+            ..EqualizerSettings::default()
+        };
+        let mut boosted = flat.clone();
+        boosted.bands_db[3] = 12.0;
+
+        process_in_decoder_packets(&mut EqualizerProcessor::new(), &mut flat_samples, &flat);
+        process_in_decoder_packets(
+            &mut EqualizerProcessor::new(),
+            &mut boosted_samples,
+            &boosted,
+        );
+        let settled = flat_samples.len() / 2;
+        let gain_ratio = rms(&boosted_samples[settled..]) / rms(&flat_samples[settled..]);
+
+        assert!(
+            gain_ratio > 2.5,
+            "expected an audible boost, got {gain_ratio:.2}x"
+        );
+    }
+
+    #[test]
+    fn bypass_settles_back_to_sample_exact_dry_audio() {
+        let mut processor = EqualizerProcessor::new();
+        let mut enabled = EqualizerSettings {
+            enabled: true,
+            bands_db: [8.0, -4.0, 3.0, 0.0, 2.0, -5.0],
+            ..EqualizerSettings::default()
+        };
+        let mut warmup = stereo_sine(400.0, 4_096, 0.1);
+        processor.process(&mut warmup, &enabled);
+
+        enabled.enabled = false;
+        let mut fade = stereo_sine(400.0, 2_048, 0.1);
+        processor.process(&mut fade, &enabled);
+        let mut dry = stereo_sine(400.0, 2_048, 0.1);
+        let expected = dry.clone();
+        processor.process(&mut dry, &enabled);
+
+        assert_eq!(dry, expected);
+    }
+
+    #[test]
+    fn rapid_valid_curve_changes_remain_finite_and_bounded() {
+        let mut processor = EqualizerProcessor::new();
+        let mut settings = EqualizerSettings {
+            enabled: true,
+            auto_headroom: false,
+            ..EqualizerSettings::default()
+        };
+        for step in 0..80 {
+            for (index, gain) in settings.bands_db.iter_mut().enumerate() {
+                *gain = if (step + index) % 2 == 0 { 12.0 } else { -12.0 };
+            }
+            settings.preamp_db = if step % 2 == 0 { 0.0 } else { -12.0 };
+            let mut samples = stereo_sine(1_000.0, 256, 0.8);
+            processor.process(&mut samples, &settings);
+            assert!(samples.iter().all(|sample| sample.is_finite()));
+            assert!(samples.iter().all(|sample| (-1.0..=1.0).contains(sample)));
+        }
     }
 }

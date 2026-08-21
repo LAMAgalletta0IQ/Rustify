@@ -8,6 +8,9 @@ tags: [module, frontend, ui]
 Full-screen views. Each occupies the main content area; [[PlayerBar.svelte]]
 stays visible beneath all of them.
 
+`NowPlaying` and `Settings` moved to feature folders because they coordinate
+domain state and shared components rather than acting as independent routes.
+
 ## The views
 
 | View | Shown when | Data source |

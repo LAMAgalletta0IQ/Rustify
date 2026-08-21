@@ -15,7 +15,7 @@ account-wide.
 `#[serde(rename = "type")]`), `is_active`, `is_restricted`, `volume_percent`.
 
 `id` is `Option` because Spotify may return a device with no id — such a device
-cannot be a transfer target, which is why [[DevicePicker.svelte]] disables
+cannot be a transfer target, which is why [[SpotifyConnectMenu.svelte]] disables
 those rows.
 
 Carries a **one-sided** rename: `#[serde(rename_all(serialize = "camelCase"))]`.
@@ -55,7 +55,7 @@ audible on hardware the user may not be looking at.
   `Serialize` *and* `Deserialize`. With a plain
   `#[serde(rename_all = "camelCase")]`, deserialisation expected `isActive`
   while Spotify sends `is_active`, so **every** device list failed with
-  `missing field 'isActive'` and [[DevicePicker.svelte]] rendered "No devices
+  `missing field 'isActive'` and [[SpotifyConnectMenu.svelte]] rendered "No devices
   found" — a parse failure wearing a friendly empty state. Restricting the
   rename to `serialize` keeps the wire names inbound and camelCase outbound.
   Any struct here that is both read from Spotify and sent to the webview needs
@@ -75,5 +75,5 @@ audible on hardware the user may not be looking at.
 
 ## See also
 
-[[playback-and-connect]] · [[DevicePicker.svelte]] · [[commands.rs]] ·
+[[playback-and-connect]] · [[SpotifyConnectMenu.svelte]] · [[commands.rs]] ·
 [[player.rs]] · [[webapi.rs]] · [[backend-rust]] · [[MOC]]
