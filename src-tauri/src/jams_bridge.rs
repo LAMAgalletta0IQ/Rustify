@@ -125,7 +125,7 @@ fn session_update_event(raw: Value) -> Result<JamEvent, JamError> {
         .unwrap_or_default();
     Ok(JamEvent::SessionUpdate {
         reason,
-        session,
+        session: session.map(Box::new),
         updated_members,
     })
 }
@@ -241,7 +241,11 @@ impl JamController {
                         Some(message) => match dealer_json(message).and_then(session_update_event) {
                             Ok(event) => {
                                 if let JamEvent::SessionUpdate { reason, session, .. } = &event {
-                                    let next = if terminal_update(reason) { None } else { session.clone() };
+                                    let next = if terminal_update(reason) {
+                                        None
+                                    } else {
+                                        session.as_deref().cloned()
+                                    };
                                     if terminal_update(reason) || next.is_some() {
                                         *state_for_updates.write().await = next;
                                     }

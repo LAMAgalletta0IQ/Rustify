@@ -62,12 +62,14 @@ pub enum AppError {
     /// through the public Web API or a supported librespot API, so it is not
     /// implemented rather than half-implemented against something unstable.
     #[error("{0} is not available: {1}")]
+    #[allow(dead_code)]
     FeatureUnsupported(String, String),
 
     /// The public Web API used to support this, but Spotify has since removed
     /// or restricted it (e.g. `/artists/{{id}}/top-tracks`, Feb 2026). Distinct
     /// from `FeatureUnsupported`, which never had a public endpoint at all.
     #[error("{0}")]
+    #[allow(dead_code)]
     PublicApiLimitation(String),
 
     /// A specific documented endpoint has no reachable equivalent for this

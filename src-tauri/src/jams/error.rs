@@ -42,7 +42,7 @@ pub enum JamError {
     NetworkError(#[from] reqwest::Error),
 
     #[error("websocket error: {0}")]
-    WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocketError(String),
 
     /// Non-2xx response that is not already classified above.
     #[error("spclient returned HTTP {status}: {body}")]
@@ -62,4 +62,10 @@ pub enum JamError {
     /// from the official client and must not be guessed.
     #[error("invalid jams configuration: {0}")]
     Config(String),
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for JamError {
+    fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocketError(error.to_string())
+    }
 }

@@ -30,7 +30,7 @@ pub enum JamEvent {
     #[serde(rename_all = "camelCase")]
     SessionUpdate {
         reason: String,
-        session: Option<super::session::JamSession>,
+        session: Option<Box<super::session::JamSession>>,
         updated_members: Vec<super::session::JamMember>,
     },
     /// Device discoverability/exposure update from social-connect.
@@ -219,7 +219,7 @@ impl DealerClient {
                             self.dead_timeout
                         )));
                     }
-                    if writer.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    if writer.send(Message::Ping(Vec::new())).await.is_err() {
                         return Err(JamError::DealerDisconnected("heartbeat ping send failed".into()));
                     }
                 }
