@@ -207,7 +207,13 @@ input:focus-visible,
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  /* auto-fit, not auto-fill: auto-fill reserves a track for every column
+     that *could* fit the row, even past the last real item, which shows as
+     a phantom empty column whenever the container width leaves a partial
+     row — most visibly when the Friends panel opens/closes and changes
+     main's width out from under an already-laid-out grid. auto-fit collapses
+     those empty tracks to 0 so the real cards take the freed space instead. */
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
   gap: 16px;
 }
 

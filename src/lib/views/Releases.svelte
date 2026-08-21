@@ -108,7 +108,9 @@
   .releases { padding: 22px 0 38px; } header h1 { margin: 4px 0; } header p, .empty p { margin: 0; color: var(--fg-dim); }
   .filters { display: flex; gap: 12px; margin: 22px 0; } .filter { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); }
   .partial, .state, .empty { padding: 14px 16px; border: 1px solid var(--hairline); background: var(--glass); border-radius: var(--r-md); color: var(--fg-dim); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 14px; }
+  /* auto-fit, not auto-fill — see app.css's shared .grid for why (phantom
+     empty trailing column when the Friends panel changes main's width). */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(170px,1fr)); gap: 14px; }
   article { padding: 10px; } .open { display: flex; width: 100%; flex-direction: column; align-items: flex-start; text-align: left; gap: 5px; }
   .open img, .open .art { width: 100%; aspect-ratio: 1; border-radius: 10px; object-fit: cover; margin-bottom: 6px; background: rgba(255,241,224,.06); }
   .open span, time { color: var(--fg-dim); font-size: 11px; } .eyebrow { color: var(--accent)!important; text-transform: uppercase; letter-spacing: .07em; }
