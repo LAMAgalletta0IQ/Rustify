@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use librespot::connect::Spirc;
 use librespot::core::session::Session;
@@ -215,6 +215,17 @@ pub struct AppState {
     /// retained, only safe booleans/counts, so this can have a long TTL.
     pub audio_capability_cache: RwLock<HashMap<String, crate::audio_capabilities::AudioCapability>>,
     pub friend_activity: RwLock<crate::friends::FriendFeed>,
+    /// `queryArtistOverview` is the single most expensive, most
+    /// rate-limit-exposed call an artist page makes (Pathfinder's quota is
+    /// shared with the whole librespot-based client ecosystem, not just this
+    /// app — see CLAUDE.md). Cache successful results for
+    /// `ARTIST_OVERVIEW_CACHE_TTL` so reopening the same artist doesn't repeat
+    /// the round trip, and only successes are cached: a failed lookup is
+    /// never remembered as if it were real data. Requests gate the same way
+    /// `lyrics_requests` does, so navigating to the same artist twice in
+    /// quick succession fires one Pathfinder call, not two.
+    pub artist_overview_cache: RwLock<HashMap<String, (Instant, crate::spotify::ArtistOverview)>>,
+    pub artist_overview_requests: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Session-local snapshot of the user's saved tracks, so opening several
     /// artist pages in a row does not re-walk the whole library each time to
     /// check which of its tracks the artist owns. Invalidated on any library

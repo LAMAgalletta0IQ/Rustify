@@ -1292,6 +1292,37 @@ pub async fn get_artist_overview(
     artist_id: String,
     locale: Option<String>,
 ) -> AppResult<crate::spotify::ArtistOverview> {
+    const ARTIST_OVERVIEW_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+    const MAX_ARTIST_OVERVIEW_CACHE_ENTRIES: usize = 64;
+
+    let cache_key = format!("{artist_id}:{}", locale.as_deref().unwrap_or(""));
+    if let Some((fetched_at, cached)) = state.artist_overview_cache.read().await.get(&cache_key) {
+        if fetched_at.elapsed() < ARTIST_OVERVIEW_CACHE_TTL {
+            return Ok(cached.clone());
+        }
+    }
+
+    // Gate concurrent requests for the same artist (e.g. a double-click, or
+    // navigating away and immediately back) onto one Pathfinder call rather
+    // than firing one per caller — same pattern as `lyrics_requests`.
+    let request_gate = {
+        let mut requests = state.artist_overview_requests.lock().await;
+        if requests.len() >= MAX_ARTIST_OVERVIEW_CACHE_ENTRIES && !requests.contains_key(&cache_key)
+        {
+            requests.clear();
+        }
+        requests
+            .entry(cache_key.clone())
+            .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    let _request_guard = request_gate.lock().await;
+    if let Some((fetched_at, cached)) = state.artist_overview_cache.read().await.get(&cache_key) {
+        if fetched_at.elapsed() < ARTIST_OVERVIEW_CACHE_TTL {
+            return Ok(cached.clone());
+        }
+    }
+
     let session = state
         .spotify
         .read()
@@ -1299,21 +1330,30 @@ pub async fn get_artist_overview(
         .as_ref()
         .map(|spotify| spotify.session.clone())
         .ok_or(AppError::NotLoggedIn)?;
+    // Whether the *field* was empty inside a successful Pathfinder response
+    // (schema drift — worth reconstructing from REST) versus the whole
+    // Pathfinder call having failed (rate-limited/unreachable/hash-rejected —
+    // reconstructing from REST would only pile more requests, up to 1+5 of
+    // them, onto a service that just told us to back off). These used to
+    // collapse into the same "top_tracks.is_empty()" state below, so a single
+    // Pathfinder 429 on this operation triggered a 6-request REST fallback on
+    // every artist page opened until the rate limit cleared — amplifying the
+    // exact 429 that caused it in the first place.
+    let pathfinder_failed;
     let mut overview = match state
         .internal_spotify
         .artist_overview(&session, &artist_id, locale.as_deref().unwrap_or(""))
         .await
     {
-        Ok(overview) => overview,
-        // Pathfinder itself can be unreachable/rate-limited/hash-rejected —
-        // distinct from the field-level "topTracks was empty" case below.
-        // Top tracks must not go missing just because concerts (which was
-        // always allowed to fail) shares a request with it now; concerts is
-        // the only piece genuinely lost here.
+        Ok(overview) => {
+            pathfinder_failed = false;
+            overview
+        }
         Err(error) => {
+            pathfinder_failed = true;
             log::warn!(
                 target: "spotify.artist",
-                "artist overview via Pathfinder failed for {artist_id}, falling back to REST-only: {error}"
+                "artist overview via Pathfinder failed for {artist_id}: {error}"
             );
             crate::spotify::ArtistOverview {
                 stats: Default::default(),
@@ -1322,7 +1362,7 @@ pub async fn get_artist_overview(
             }
         }
     };
-    if overview.top_tracks.is_empty() {
+    if overview.top_tracks.is_empty() && !pathfinder_failed {
         let t = token(&state).await?;
         match library::artist_tracks(&WebApi::new(), &t, &artist_id).await {
             Ok(fallback) => overview.top_tracks = fallback,
@@ -1331,6 +1371,17 @@ pub async fn get_artist_overview(
                 "Pathfinder top tracks empty and REST fallback failed for {artist_id}: {error}"
             ),
         }
+    }
+
+    // Only a genuine Pathfinder success is worth remembering — caching the
+    // empty placeholder from a failure would make a transient 429 look like
+    // "this artist really has no top tracks" for the next ten minutes.
+    if !pathfinder_failed {
+        let mut cache = state.artist_overview_cache.write().await;
+        if cache.len() >= MAX_ARTIST_OVERVIEW_CACHE_ENTRIES && !cache.contains_key(&cache_key) {
+            cache.clear();
+        }
+        cache.insert(cache_key, (std::time::Instant::now(), overview.clone()));
     }
     Ok(overview)
 }
