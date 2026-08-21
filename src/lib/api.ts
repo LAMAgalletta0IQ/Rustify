@@ -23,6 +23,7 @@ import type {
   QueueView,
   RecentActivityItem,
   SearchResults,
+  SleepTimerStatus,
   TrackSummary,
   EqualizerPreset,
 } from "./types";
@@ -32,6 +33,7 @@ export const EVENT_PLAYBACK = "playback:changed";
 export const EVENT_AUTH = "auth:changed";
 export const EVENT_JAMS = "jams:changed";
 export const EVENT_QUEUE = "queue:changed";
+export const EVENT_SLEEP_TIMER = "sleep-timer:changed";
 
 /**
  * Tauri rejects with the serialised `AppError`. Normalise it so callers always
@@ -87,6 +89,13 @@ export const setShuffle = (shuffle: boolean) =>
   invoke<void>("set_shuffle", { shuffle });
 export const setRepeat = (context: boolean, track: boolean) =>
   invoke<void>("set_repeat", { context, track });
+export const getSleepTimer = () => invoke<SleepTimerStatus>("get_sleep_timer");
+export const startSleepTimer = (seconds: number) =>
+  invoke<SleepTimerStatus>("start_sleep_timer", { seconds });
+export const sleepAtEndOfTrack = () =>
+  invoke<SleepTimerStatus>("sleep_at_end_of_track");
+export const cancelSleepTimer = () =>
+  invoke<SleepTimerStatus>("cancel_sleep_timer");
 /**
  * Play a context (playlist/album/artist/collection), optionally starting at a
  * specific track so the rest of the context keeps playing after it.

@@ -13,6 +13,7 @@ pub mod events {
     pub const AUTH: &str = "auth:changed";
     pub const JAMS: &str = "jams:changed";
     pub const QUEUE: &str = "queue:changed";
+    pub const SLEEP_TIMER: &str = "sleep-timer:changed";
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -199,6 +200,7 @@ pub struct AppState {
     pub queue: RwLock<crate::queue::QueueView>,
     pub auth: RwLock<AuthState>,
     pub device_auth: crate::auth::DeviceAuthStore,
+    pub sleep_timer: crate::sleep_timer::SleepTimerController,
     /// Held outside `spotify` so the event pump can read it without taking a
     /// lock on the whole session.
     pub tokens: TokenStore,

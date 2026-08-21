@@ -236,7 +236,12 @@ fn spawn_event_pump(
                     pb.is_playing = false;
                     state.active_device.set(false);
                 }
-                // Preload/EndOfTrack/PlayRequestIdChanged and the remaining
+                PlayerEvent::EndOfTrack { .. } => {
+                    drop(pb);
+                    state.sleep_timer.on_end_of_track(&app).await;
+                    continue;
+                }
+                // Preload/PlayRequestIdChanged and the remaining
                 // variants carry no state the UI renders.
                 _ => {
                     drop(pb);

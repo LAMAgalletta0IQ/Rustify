@@ -822,6 +822,7 @@ pub fn spawn_refresher(
                             // `session.refresh_task` is this task. Dropping its
                             // handle detaches it, and returning below ends it.
                         }
+                        state.sleep_timer.cancel(None).await;
                         *state.auth.write().await = AuthState::default();
                         *state.playback.write().await = PlaybackState::default();
                         let _ = app.emit(events::AUTH, AuthState::default());

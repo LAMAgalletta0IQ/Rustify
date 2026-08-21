@@ -81,6 +81,13 @@ export interface DeviceAuthorization {
   interval: number;
 }
 
+export interface SleepTimerStatus {
+  active: boolean;
+  mode: "duration" | "endOfTrack" | null;
+  endsAtUnixMs: number | null;
+  remainingSeconds: number | null;
+}
+
 export interface AppSettings {
   defaultVolumePercent: number;
   reduceMotion: boolean;

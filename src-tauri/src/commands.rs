@@ -499,6 +499,7 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
 #[tauri::command]
 pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     state.device_auth.cancel().await;
+    state.sleep_timer.cancel(None).await;
     if let Some(s) = state.spotify.write().await.take() {
         let _ = s.spirc.shutdown();
         s.refresh_task.abort();
@@ -574,6 +575,38 @@ pub async fn set_shuffle(state: State<'_, AppState>, shuffle: bool) -> AppResult
 pub async fn set_repeat(state: State<'_, AppState>, context: bool, track: bool) -> AppResult<()> {
     with_spirc(&state, |s| s.repeat(context)).await?;
     with_spirc(&state, |s| s.repeat_track(track)).await
+}
+
+#[tauri::command]
+pub async fn get_sleep_timer(
+    state: State<'_, AppState>,
+) -> AppResult<crate::sleep_timer::SleepTimerStatus> {
+    Ok(state.sleep_timer.status().await)
+}
+
+#[tauri::command]
+pub async fn start_sleep_timer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    seconds: u64,
+) -> AppResult<crate::sleep_timer::SleepTimerStatus> {
+    state.sleep_timer.start_duration(app, seconds).await
+}
+
+#[tauri::command]
+pub async fn sleep_at_end_of_track(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<crate::sleep_timer::SleepTimerStatus> {
+    Ok(state.sleep_timer.start_end_of_track(&app).await)
+}
+
+#[tauri::command]
+pub async fn cancel_sleep_timer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<crate::sleep_timer::SleepTimerStatus> {
+    Ok(state.sleep_timer.cancel(Some(&app)).await)
 }
 
 /// Loads a *context* (playlist, album, artist, or the liked-songs collection)

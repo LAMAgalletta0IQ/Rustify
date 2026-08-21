@@ -17,6 +17,7 @@ mod queue;
 mod relevance;
 mod remote_state;
 mod search;
+mod sleep_timer;
 mod spotify;
 mod state;
 mod webapi;
@@ -127,6 +128,10 @@ pub fn run() {
             commands::set_volume,
             commands::set_shuffle,
             commands::set_repeat,
+            commands::get_sleep_timer,
+            commands::start_sleep_timer,
+            commands::sleep_at_end_of_track,
+            commands::cancel_sleep_timer,
             commands::load_context,
             commands::load_tracks,
             // connect
