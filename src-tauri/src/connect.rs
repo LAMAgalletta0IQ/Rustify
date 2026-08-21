@@ -9,7 +9,7 @@ use crate::webapi::WebApi;
 /// directions, which made every device list fail to parse with
 /// "missing field `isActive`" — so the rename is restricted to serialisation
 /// and deserialisation keeps the wire names.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct Device {
     pub id: Option<String>,

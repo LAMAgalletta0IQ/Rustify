@@ -25,7 +25,6 @@ const CLUSTER_TOPIC: &str = "hm://connect-state/v1/cluster";
 #[derive(Debug)]
 struct ClusterSnapshot {
     devices: Vec<Device>,
-    active_device_id: Option<String>,
     local_is_active: bool,
     player: Option<PlayerState>,
 }
@@ -44,43 +43,58 @@ pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime
         .map_err(|error| AppError::Other(format!("subscribe to Connect state: {error}")))?;
 
     Ok(tauri::async_runtime::spawn(async move {
-        while let Some(message) = updates.next().await {
-            match DealerMessage::from_raw::<ClusterUpdate>(message) {
-                Ok(update) => {
-                    let Some(snapshot) = snapshot(&update, &local_device_id) else {
-                        log::debug!("spotify.connect: cluster update had no cluster");
-                        continue;
-                    };
-                    let outcome = apply(&app, snapshot).await;
-                    if outcome.playback_changed {
-                        let playback = crate::player::snapshot(&app.state::<AppState>()).await;
-                        if let Err(error) = app.emit(events::PLAYBACK, playback) {
-                            log::warn!("spotify.connect: playback event failed: {error}");
+        let mut retry = std::time::Duration::from_secs(1);
+        loop {
+            while let Some(message) = updates.next().await {
+                retry = std::time::Duration::from_secs(1);
+                match DealerMessage::from_raw::<ClusterUpdate>(message) {
+                    Ok(update) => {
+                        let Some(snapshot) = snapshot(&update, &local_device_id) else {
+                            log::debug!("spotify.connect: cluster update had no cluster");
+                            continue;
+                        };
+                        let outcome = apply(&app, snapshot).await;
+                        if outcome.playback_changed {
+                            let playback = crate::player::snapshot(&app.state::<AppState>()).await;
+                            if let Err(error) = app.emit(events::PLAYBACK, playback) {
+                                log::warn!("spotify.connect: playback event failed: {error}");
+                            }
+                        }
+                        if outcome.queue_changed {
+                            let queue = app.state::<AppState>().queue.read().await.clone();
+                            if let Err(error) = app.emit(events::QUEUE, queue) {
+                                log::warn!("spotify.connect: queue event failed: {error}");
+                            }
                         }
                     }
-                    if outcome.queue_changed {
-                        let queue = app.state::<AppState>().queue.read().await.clone();
-                        if let Err(error) = app.emit(events::QUEUE, queue) {
-                            log::warn!("spotify.connect: queue event failed: {error}");
-                        }
-                    }
+                    Err(error) => log::warn!("spotify.connect: invalid cluster protobuf: {error}"),
                 }
-                Err(error) => log::warn!("spotify.connect: invalid cluster protobuf: {error}"),
+            }
+
+            mark_recovering(&app).await;
+            log::warn!("spotify.connect: cluster subscription ended; resubscribing in {retry:?}");
+            tokio::time::sleep(retry).await;
+            match session.dealer().add_listen_for(CLUSTER_TOPIC) {
+                Ok(next) => {
+                    updates = next;
+                }
+                Err(error) => {
+                    log::warn!("spotify.connect: cluster resubscribe failed: {error}");
+                    retry = (retry * 2).min(std::time::Duration::from_secs(30));
+                }
             }
         }
-
-        // The Dealer manager normally carries subscriptions across reconnects.
-        // If the stream itself ends, surface that distinction instead of
-        // silently presenting a stale snapshot as connected.
-        let state = app.state::<AppState>();
-        let snapshot = {
-            let mut playback = state.playback.write().await;
-            playback.connection_status = ConnectionStatus::Recovering;
-            playback.clone()
-        };
-        let _ = app.emit(events::PLAYBACK, snapshot);
-        log::warn!("spotify.connect: cluster subscription ended");
     }))
+}
+
+async fn mark_recovering(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let snapshot = {
+        let mut playback = state.playback.write().await;
+        playback.connection_status = ConnectionStatus::Recovering;
+        playback.clone()
+    };
+    let _ = app.emit(events::PLAYBACK, snapshot);
 }
 
 fn snapshot(update: &ClusterUpdate, local_device_id: &str) -> Option<ClusterSnapshot> {
@@ -98,9 +112,11 @@ fn snapshot(update: &ClusterUpdate, local_device_id: &str) -> Option<ClusterSnap
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
 
+    let local_is_active = devices
+        .iter()
+        .any(|device| device.is_active && device.id.as_deref() == Some(local_device_id));
     Some(ClusterSnapshot {
-        local_is_active: active_device_id.as_deref() == Some(local_device_id),
-        active_device_id,
+        local_is_active,
         devices,
         player: cluster.player_state.as_ref().cloned(),
     })
@@ -121,23 +137,18 @@ fn device(id: &str, info: &DeviceInfo, active_device_id: Option<&str>) -> Device
             info.name.clone()
         },
         device_type: format!("{:?}", info.device_type.enum_value_or_default()).to_lowercase(),
-        is_active: active_device_id == Some(device_id.as_str()),
+        is_active: active_device_id == Some(id) || active_device_id == Some(device_id.as_str()),
         is_restricted: !info.can_play || !info.disallow_playback_reasons.is_empty(),
-        volume_percent: Some(((volume * 100) / u16::MAX as u32) as u8),
+        volume_percent: Some(((volume * 100 + u16::MAX as u32 / 2) / u16::MAX as u32) as u8),
     }
 }
 
 async fn apply(app: &AppHandle, snapshot: ClusterSnapshot) -> ApplyOutcome {
     let state = app.state::<AppState>();
     let active_device = snapshot
-        .active_device_id
-        .as_deref()
-        .and_then(|id| {
-            snapshot
-                .devices
-                .iter()
-                .find(|device| device.id.as_deref() == Some(id))
-        })
+        .devices
+        .iter()
+        .find(|device| device.is_active)
         .cloned();
 
     let before_queue = {
@@ -150,9 +161,18 @@ async fn apply(app: &AppHandle, snapshot: ClusterSnapshot) -> ApplyOutcome {
         before_playback = playback_identity(&playback);
         playback.connection_status = ConnectionStatus::Connected;
         playback.is_active_device = snapshot.local_is_active;
-        playback.active_device = active_device;
+        playback.active_device = active_device.clone();
         playback.available_devices = snapshot.devices;
         state.active_device.set(snapshot.local_is_active);
+
+        if !snapshot.local_is_active {
+            if let Some(volume) = active_device
+                .as_ref()
+                .and_then(|device| device.volume_percent)
+            {
+                playback.volume = crate::player::percent_to_volume(volume);
+            }
+        }
 
         if let Some(player) = snapshot.player.as_ref() {
             playback.context_uri = nonempty(&player.context_uri);
@@ -169,20 +189,23 @@ async fn apply(app: &AppHandle, snapshot: ClusterSnapshot) -> ApplyOutcome {
                 playback.is_playing = player.is_playing && !player.is_paused;
                 playback.is_loading = player.is_buffering;
                 playback.duration_ms = clamp_ms(player.duration);
-                playback.set_position(remote_position(player));
+                let position = remote_position(player);
+                let duration_ms = playback.duration_ms;
+                playback.set_position(if duration_ms > 0 {
+                    position.min(duration_ms)
+                } else {
+                    position
+                });
                 if let Some(track) = player.track.as_ref() {
                     let next = track_info(track, playback.duration_ms);
-                    let changed = playback
-                        .track
-                        .as_ref()
-                        .is_none_or(|current| current.uri != next.uri);
-                    if changed
-                        || playback
+                    if !next.uri.is_empty() && next.uri != "-" {
+                        let changed = playback
                             .track
                             .as_ref()
-                            .is_some_and(|current| current.name.is_empty())
-                    {
-                        playback.track = Some(next);
+                            .is_none_or(|current| current != &next);
+                        if changed {
+                            playback.track = Some(next);
+                        }
                     }
                 } else {
                     playback.track = None;
@@ -247,15 +270,25 @@ struct PlaybackIdentity {
     local_active: bool,
     position_ms: u32,
     duration_ms: u32,
-    track: Option<String>,
+    track: Option<TrackInfo>,
     context: Option<String>,
     volume: u16,
     shuffle: bool,
     repeat_context: bool,
     repeat_track: bool,
     active_device: Option<String>,
-    devices: Vec<(Option<String>, String, bool, Option<u8>)>,
+    devices: Vec<DeviceIdentity>,
     status: ConnectionStatus,
+}
+
+#[derive(PartialEq, Eq)]
+struct DeviceIdentity {
+    id: Option<String>,
+    name: String,
+    device_type: String,
+    active: bool,
+    restricted: bool,
+    volume_percent: Option<u8>,
 }
 
 fn playback_identity(playback: &crate::state::PlaybackState) -> PlaybackIdentity {
@@ -265,7 +298,7 @@ fn playback_identity(playback: &crate::state::PlaybackState) -> PlaybackIdentity
         local_active: playback.is_active_device,
         position_ms: playback.position_ms,
         duration_ms: playback.duration_ms,
-        track: playback.track.as_ref().map(|track| track.uri.clone()),
+        track: playback.track.clone(),
         context: playback.context_uri.clone(),
         volume: playback.volume,
         shuffle: playback.shuffle,
@@ -278,13 +311,13 @@ fn playback_identity(playback: &crate::state::PlaybackState) -> PlaybackIdentity
         devices: playback
             .available_devices
             .iter()
-            .map(|device| {
-                (
-                    device.id.clone(),
-                    device.name.clone(),
-                    device.is_active,
-                    device.volume_percent,
-                )
+            .map(|device| DeviceIdentity {
+                id: device.id.clone(),
+                name: device.name.clone(),
+                device_type: device.device_type.clone(),
+                active: device.is_active,
+                restricted: device.is_restricted,
+                volume_percent: device.volume_percent,
             })
             .collect(),
         status: playback.connection_status,
@@ -388,5 +421,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(remote_position(&player), 42_000);
+    }
+
+    #[test]
+    fn resolves_active_device_by_cluster_map_key_and_rounds_volume() {
+        let info = DeviceInfo {
+            can_play: true,
+            device_id: "reported-id".to_owned(),
+            volume: 65_534,
+            ..Default::default()
+        };
+        let projected = device("cluster-key", &info, Some("cluster-key"));
+        assert!(projected.is_active);
+        assert_eq!(projected.volume_percent, Some(100));
     }
 }

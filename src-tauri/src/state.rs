@@ -27,7 +27,7 @@ pub enum ConnectionStatus {
     Recovering,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackInfo {
     pub uri: String,

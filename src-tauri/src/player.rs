@@ -559,7 +559,10 @@ pub fn spawn_remote_poller(
             let token = tokens.get().await;
 
             if skip || token.is_empty() {
-                tokio::time::sleep(REMOTE_POLL).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(REMOTE_POLL) => {}
+                    changed = active_rx.changed() => if changed.is_err() { break },
+                }
                 continue;
             }
 
@@ -575,7 +578,10 @@ pub fn spawn_remote_poller(
                 Err(e) => log::debug!("remote playback poll failed: {e}"),
             }
 
-            tokio::time::sleep(REMOTE_POLL).await;
+            tokio::select! {
+                _ = tokio::time::sleep(REMOTE_POLL) => {}
+                changed = active_rx.changed() => if changed.is_err() { break },
+            }
         }
     })
 }
@@ -587,25 +593,29 @@ async fn apply_remote(
     remote: Option<connect::RemotePlayback>,
 ) -> bool {
     let mut pb = state.playback.write().await;
-    let before = (
-        pb.is_playing,
-        pb.position_ms,
-        pb.track.as_ref().map(|t| t.uri.clone()),
-        pb.context_uri.clone(),
-        pb.active_device
-            .as_ref()
-            .and_then(|device| device.id.clone()),
-    );
+    let before = remote_identity(&pb);
 
     let Some(r) = remote else {
         // 204: nothing playing anywhere.
-        if pb.track.is_none() && !pb.is_playing {
+        if pb.track.is_none()
+            && !pb.is_playing
+            && pb.context_uri.is_none()
+            && pb.active_device.is_none()
+        {
             return false;
         }
         pb.is_playing = false;
+        pb.is_loading = false;
+        pb.is_active_device = false;
         pb.track = None;
         pb.set_position(0);
         pb.duration_ms = 0;
+        pb.context_uri = None;
+        pb.active_device = None;
+        for device in &mut pb.available_devices {
+            device.is_active = false;
+        }
+        state.active_device.set(false);
         return true;
     };
 
@@ -613,7 +623,7 @@ async fn apply_remote(
     pb.connection_status = ConnectionStatus::Connected;
     state.active_device.set(false);
     pb.is_playing = r.is_playing;
-    pb.set_position(r.progress_ms.unwrap_or(0));
+    pb.is_loading = false;
 
     if let Some(shuffle) = r.shuffle_state {
         pb.shuffle = shuffle;
@@ -627,11 +637,13 @@ async fn apply_remote(
     }
     pb.active_device = r.device.clone();
     if let Some(device) = r.device {
-        if !pb
+        if let Some(existing) = pb
             .available_devices
-            .iter()
-            .any(|candidate| candidate.id == device.id)
+            .iter_mut()
+            .find(|candidate| candidate.id == device.id)
         {
+            *existing = device;
+        } else {
             pb.available_devices.push(device);
         }
     }
@@ -641,6 +653,7 @@ async fn apply_remote(
 
     if let Some(item) = r.item {
         pb.duration_ms = item.duration_ms;
+        pb.set_position(r.progress_ms.unwrap_or(0).min(item.duration_ms));
         let cover = item
             .album
             .as_ref()
@@ -659,18 +672,45 @@ async fn apply_remote(
             cover_url: cover,
             duration_ms: item.duration_ms,
         });
+    } else {
+        pb.set_position(r.progress_ms.unwrap_or(0));
+        pb.duration_ms = 0;
+        pb.track = None;
     }
 
-    let after = (
-        pb.is_playing,
-        pb.position_ms,
-        pb.track.as_ref().map(|t| t.uri.clone()),
-        pb.context_uri.clone(),
-        pb.active_device
-            .as_ref()
-            .and_then(|device| device.id.clone()),
-    );
+    let after = remote_identity(&pb);
     before != after
+}
+
+#[derive(PartialEq, Eq)]
+struct RemoteIdentity {
+    playing: bool,
+    loading: bool,
+    position: u32,
+    duration: u32,
+    track: Option<TrackInfo>,
+    context: Option<String>,
+    volume: u16,
+    shuffle: bool,
+    repeat_context: bool,
+    repeat_track: bool,
+    active_device: Option<connect::Device>,
+}
+
+fn remote_identity(playback: &PlaybackState) -> RemoteIdentity {
+    RemoteIdentity {
+        playing: playback.is_playing,
+        loading: playback.is_loading,
+        position: playback.position_ms,
+        duration: playback.duration_ms,
+        track: playback.track.clone(),
+        context: playback.context_uri.clone(),
+        volume: playback.volume,
+        shuffle: playback.shuffle,
+        repeat_context: playback.repeat_context,
+        repeat_track: playback.repeat_track,
+        active_device: playback.active_device.clone(),
+    }
 }
 
 /// Rebuilds a fresh playback snapshot (used on reconnect / initial load).
@@ -695,5 +735,23 @@ mod tests {
         let enabled = playback_config(StreamQuality::VeryHigh, 7);
         assert_eq!(enabled.crossfade, std::time::Duration::from_secs(7));
         assert!(enabled.gapless);
+    }
+
+    #[test]
+    fn remote_identity_detects_device_only_changes() {
+        let mut playback = PlaybackState {
+            active_device: Some(connect::Device {
+                id: Some("phone".into()),
+                name: "Phone".into(),
+                device_type: "smartphone".into(),
+                is_active: true,
+                is_restricted: false,
+                volume_percent: Some(20),
+            }),
+            ..Default::default()
+        };
+        let before = remote_identity(&playback);
+        playback.active_device.as_mut().unwrap().volume_percent = Some(80);
+        assert!(before != remote_identity(&playback));
     }
 }
