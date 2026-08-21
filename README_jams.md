@@ -68,14 +68,20 @@ sitting among spclient ones.
 
 ## Wired into the app
 
-The **Jams** tab (`src/lib/views/Jams.svelte`) drives it from the UI: Create /
-Join / Leave / Add current track, a live dealer event feed, and a status line
-that reports how many endpoints/hashes are captured. The glue is
+`src/lib/views/Jams.svelte` drives it from the UI — Create / Join / Leave /
+Add current track, toggling participant queue control, kicking a member and
+ending the session (owner only) — reached via a Jam icon button in the player
+bar rather than a permanent top-level tab, since a session is a contextual
+player/social action, not a standing destination. The glue is
 `src-tauri/src/jams_bridge.rs` (`JamController`), which builds the module
 lazily on first use, mirrors the session's Web API bearer token into it, and
 forwards dealer events to the webview as `jams:changed`. Commands:
 `get_jam_status`, `create_jam`, `refresh_jam`, `join_jam`, `leave_jam`,
 `add_track_to_jam`, `set_jam_queue_control`, `kick_jam_member`, and `end_jam`.
+Raw diagnostics (captured endpoint/hash counts, a live JSON event dump) were
+removed from the normal view; they were a development aid, not something a
+user should see. The one case still surfaced in-UI is the config-only "no
+endpoints configured" hint, in plain language.
 
 Realtime session state reuses librespot's authenticated Dealer connection and
 subscribes to `social-connect/v2/session_update` plus

@@ -51,23 +51,49 @@ checking that librespot has caught up.
 
 ```
 src-tauri/src/
-  auth.rs      OAuth via librespot-oauth; token persistence; Premium check
-  player.rs    librespot Session + Player + Spirc; PlayerEvent -> Tauri events
-  connect.rs   Connect device list + transfer (Web API)
-  library.rs   Playlists, saved albums/tracks (Web API)
-  search.rs    Search (Web API)
-  queue.rs     Queue read/append (Web API)
-  media_keys.rs Global media-key shortcuts (Play/Pause, Next, Prev)
-  state.rs     Central AppState, TokenStore, PlaybackState
-  commands.rs  Tauri command layer
-  webapi.rs    Thin Web API HTTP client
+  auth.rs        OAuth via librespot-oauth; token persistence; Premium check;
+                 RFC 8628 device authorization
+  player.rs      librespot Session + Player + Spirc; PlayerEvent -> Tauri events;
+                 decoder-level crossfade
+  connect.rs     Connect device list + transfer (Web API)
+  remote_state.rs  Dealer-driven Connect cluster/player/queue projection
+  library.rs     Playlists, saved albums/tracks, artist albums (Web API)
+  search.rs      Search (Web API)
+  queue.rs       Local + Connect queue projection (SetQueue events, autoplay)
+  sleep_timer.rs Duration/end-of-track sleep timer
+  audio/         Equalizer DSP (biquad peaking filters) + output sink
+  lyrics/        First-party synced lyrics with LRCLIB fallback
+  friends.rs     Dealer-driven friend-presence feed
+  profiles.rs    Rich user profiles, follow lists
+  podcasts.rs    Herodotus episode resume state
+  music_videos.rs  Native Spotify music-video metadata/capability
+  audio_capabilities.rs  Per-track format inventory, storage-resolve/v2, Lossless capability
+  telemetry.rs   Bounded ledger of genuine local playback (no Gabo impersonation)
+  media_keys.rs  Global media-key shortcuts (Play/Pause, Next, Prev)
+  state.rs       Central AppState, TokenStore, PlaybackState
+  commands.rs    Tauri command layer
+  webapi.rs      Thin Web API HTTP client
+  jams/          Spotify Jam (social-connect v2) — see README_jams.md
+  spotify/       Pathfinder GraphQL client + Home, DJ (Lexicon), concerts,
+                 credits, artist stats/top tracks, generated-playlist
+                 tracklists, fuzzy user search
 src/
-  App.svelte           Shell: top nav, error banner, router
-  lib/store.svelte.ts  Runes store; subscribes to backend events
-  lib/api.ts           Typed wrappers over every Tauri command
-  lib/views/           Login, Home, Search, NowPlaying, AlbumView, ArtistView
-  lib/components/      PlayerBar, DevicePicker, TrackList
+  App.svelte              Shell: top nav, error banner, router
+  lib/store.svelte.ts     Runes store; subscribes to backend events
+  lib/api.ts              Typed wrappers over every Tauri command
+  lib/views/               Login, Home, ForYou, Search, Library, Jams, Profile,
+                           Setup, AlbumView, ArtistView, PlaylistView, Releases
+  lib/components/         TrackList
+  lib/features/player/    PlayerBar, SpotifyConnectMenu
+  lib/features/lyrics/    Fullscreen Now Playing + synced lyrics
+  lib/features/settings/  Settings (quality, output, equalizer, crossfade)
+  lib/features/audio/     Output device selection
+  lib/ui/                 Shared SelectMenu/menu primitives
 ```
+
+The module list above is deliberately just names and one line each; read
+`obsidian/` (a maintained vault — start at `obsidian/00-index/MOC.md`) for the
+*why* behind each one, and `README_jams.md` for Jam specifically.
 
 ### Playing a context, not a track
 
@@ -132,17 +158,32 @@ account's stated plan — nothing is spoofed or bypassed.
 
 These are upstream gaps, flagged rather than guessed at:
 
-- **Jams** — no support. Spotify exposes no public Web API for Jams, and
-  librespot implements nothing for them. Omitted entirely.
+- **Jams** — implemented against Spotify's private `social-connect/v2`
+  service (no public Web API exists for this), gated behind first-party
+  credentials librespot's own session already holds. See `README_jams.md`
+  for the real endpoints, the bearer-token gotchas, and current status.
+- **DJ narration audio** — the music track playback and Lexicon/dynamic-context
+  resolution work; narration (the spoken commentary between tracks) resolves
+  a real, valid signed playback URL from Spotify's TTS endpoint but nothing
+  plays it yet. That would need a second audio pipeline running alongside
+  librespot's own Sink, which needs live device testing to get right.
+- **Spotify-native Lossless** — FLAC decoding, per-track format inventory and
+  storage-resolve/v2 probing are implemented and report an honest capability
+  state; actual protected-stream playback needs a PlayPlay key this project
+  will not extract or bypass. Blocked on that, not on missing plumbing.
+- **Gabo playback telemetry** — genuine local playback is tracked in a bounded
+  ledger, but it is never uploaded to Spotify's Gabo endpoint: doing so
+  legitimately would require impersonating a first-party client, which this
+  project treats as a hard line, not a missing feature.
 - **Blends** — read/play only. An existing Blend is an ordinary playlist and
   appears and plays like one. *Creating* a Blend or inviting a participant uses
   a private, undocumented endpoint and is not implemented.
-- **Lyrics** — no public Web API endpoint exists. The full now-playing view
-  leaves layout space for a future provider.
 - **Queue reordering** — the Web API supports appending to the queue
   (`POST /me/player/queue`) but offers no reorder or remove operation.
-- **Artist top tracks have no container context**, so they play as an ad-hoc
-  track list rather than a browsable Spotify context.
+- **Artist top tracks** are read from Pathfinder when available (real
+  Spotify-ranked tracks with no fabricated "Popular" chart), falling back to
+  an ad-hoc sample built from recent albums if that field isn't there; either
+  way they play as a track list rather than a browsable Spotify context.
 - **Album track rows carry no cover art** — `/albums/{id}/tracks` returns
   simplified track objects with no nested album. The header shows the art.
 - **`GET /me/player/queue`** reflects the *active* device's queue. Accurate
@@ -152,7 +193,10 @@ These are upstream gaps, flagged rather than guessed at:
 
 ## Measured footprint
 
-Taken on this machine, 2026-08-17, release build:
+Taken on this machine, 2026-08-17, release build — **predates the Jam/DJ/
+Home/lyrics/friends/profile/telemetry/audio-capability work below**, all of
+which add dependencies and background tasks. Re-measure before quoting this
+number for the current build.
 
 | Idle | Rustify | Official client |
 | --- | --- | --- |
@@ -205,3 +249,23 @@ memory work means shrinking or replacing the webview, not optimising Rust.
 14. **Restart** — relaunching skips the browser login (stored refresh token).
 15. **Resource usage** — compare idle/active RAM and CPU against the official
     client in Task Manager.
+
+The features below were added after this checklist was written and are not
+yet folded into it as numbered steps; each has its own status/caveats
+documented where it lives (`README_jams.md` for Jam; `obsidian/` for the
+rest). At minimum, before relying on a build, confirm each of these actually
+does something rather than just render:
+
+16. **Home / Made For You** — Daily Mix, Discover Weekly, Release Radar and
+    similar cards load with real artwork, open, and play.
+17. **DJ** — starting it plays real tracks; check the log for narration
+    (expected to resolve but not play — see Known limitations).
+18. **Jam** — create one, copy the invite, have a second account join it,
+    confirm both sides see member/queue updates live.
+19. **Lyrics** — open fullscreen on a track with synced lyrics; the active
+    line follows playback and manual scroll suspends auto-follow until you
+    return to it.
+20. **Friend Activity** — the sidebar rail shows real presence for accounts
+    that have visible friend activity, not a static "unavailable" message.
+21. **Sleep timer / crossfade / equalizer** — set each from Settings/Now
+    Playing and confirm an audible effect, not just a UI state change.
