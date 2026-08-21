@@ -429,6 +429,29 @@ pub async fn login(app: AppHandle, state: State<'_, AppState>) -> AppResult<Auth
     establish(&app, &state, &api, toks).await
 }
 
+#[tauri::command]
+pub async fn start_device_authorization(
+    state: State<'_, AppState>,
+) -> AppResult<auth::DeviceAuthorization> {
+    auth::start_device_authorization(&state.device_auth).await
+}
+
+#[tauri::command]
+pub async fn complete_device_authorization(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<AuthState> {
+    let api = WebApi::new();
+    let tokens = auth::complete_device_authorization(&state.device_auth).await?;
+    establish(&app, &state, &api, tokens).await
+}
+
+#[tauri::command]
+pub async fn cancel_device_authorization(state: State<'_, AppState>) -> AppResult<()> {
+    state.device_auth.cancel().await;
+    Ok(())
+}
+
 /// Attempted once at startup. Returns a logged-out state rather than an error
 /// when there is nothing stored, so the UI can just show the login screen.
 #[tauri::command]
@@ -447,12 +470,6 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
         .path()
         .app_data_dir()
         .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
-
-    // No point attempting a restore that cannot complete the Web API half —
-    // the UI shows the Setup screen instead until a client ID is saved.
-    if auth::webapi_client_id(&data_dir).is_err() {
-        return Ok(AuthState::default());
-    }
 
     let Some(stored) = auth::load_stored_tokens(&data_dir) else {
         return Ok(AuthState::default());
@@ -481,6 +498,7 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
 
 #[tauri::command]
 pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    state.device_auth.cancel().await;
     if let Some(s) = state.spotify.write().await.take() {
         let _ = s.spirc.shutdown();
         s.refresh_task.abort();

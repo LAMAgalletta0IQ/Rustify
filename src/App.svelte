@@ -71,7 +71,7 @@
         </div>
       </div>
       {#if store.setupNeeded}
-        <Setup onDone={() => store.finishSetup()} />
+        <Setup onDone={() => store.finishSetup()} onPair={() => (store.setupNeeded = false)} />
       {:else}
         <Login />
       {/if}

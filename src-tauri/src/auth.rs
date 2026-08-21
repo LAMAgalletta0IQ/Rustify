@@ -1,5 +1,7 @@
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use librespot::core::config::SessionConfig;
@@ -75,6 +77,10 @@ pub const WEBAPI_SCOPES: &[&str] = &[
 /// API traffic only. Normally set in `.env` at the project root; see
 /// `.env.example`.
 pub const CLIENT_ID_ENV: &str = "RUSTIFY_CLIENT_ID";
+
+const DEVICE_AUTHORIZATION_URL: &str = "https://accounts.spotify.com/oauth2/device/authorize";
+const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
+const DEVICE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 /// Client ID for the streaming session.
 ///
@@ -226,6 +232,107 @@ pub struct SessionTokens {
     pub webapi_client_id: String,
 }
 
+/// Public half of an RFC 8628 pairing request. The device code itself remains
+/// backend-only; it is a short-lived credential and the webview never needs it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceAuthorization {
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: Option<String>,
+    pub url: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+struct PendingDeviceAuthorization {
+    public: DeviceAuthorization,
+    device_code: String,
+    client_id: String,
+    scopes: Vec<String>,
+    started: Instant,
+    cancelled: AtomicBool,
+}
+
+/// One pending pairing per application. Starting or cancelling a flow signals
+/// an in-flight poller without exposing its device code to command arguments.
+#[derive(Default)]
+pub struct DeviceAuthStore {
+    pending: tokio::sync::RwLock<Option<Arc<PendingDeviceAuthorization>>>,
+}
+
+impl DeviceAuthStore {
+    pub async fn cancel(&self) {
+        if let Some(pending) = self.pending.write().await.take() {
+            pending.cancelled.store(true, Ordering::Release);
+        }
+    }
+
+    async fn replace(&self, pending: Arc<PendingDeviceAuthorization>) {
+        self.cancel().await;
+        self.pending.write().await.replace(pending);
+    }
+
+    async fn current(&self) -> AppResult<Arc<PendingDeviceAuthorization>> {
+        self.pending
+            .read()
+            .await
+            .clone()
+            .ok_or_else(|| AppError::BadRequest("no device authorization is pending".to_string()))
+    }
+
+    async fn clear_if(&self, completed: &Arc<PendingDeviceAuthorization>) {
+        let mut guard = self.pending.write().await;
+        if guard
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, completed))
+        {
+            guard.take();
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    verification_uri_complete: Option<String>,
+    expires_in: u64,
+    #[serde(default = "default_device_poll_interval")]
+    interval: u64,
+}
+
+const fn default_device_poll_interval() -> u64 {
+    5
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceTokenResponse {
+    access_token: String,
+    #[serde(default)]
+    refresh_token: String,
+    #[serde(default = "default_token_lifetime")]
+    expires_in: u64,
+    #[serde(default = "default_token_type")]
+    token_type: String,
+    scope: Option<String>,
+}
+
+const fn default_token_lifetime() -> u64 {
+    3600
+}
+
+fn default_token_type() -> String {
+    "Bearer".to_string()
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceOAuthError {
+    error: String,
+    error_description: Option<String>,
+}
+
 impl SessionTokens {
     /// Both roles served by a single login, for when no private client ID is set.
     fn shared(tok: OAuthToken) -> Self {
@@ -339,6 +446,188 @@ async fn refresh(
         .map_err(|e| AppError::Auth(e.to_string()))
 }
 
+fn device_http_client() -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| AppError::Auth(format!("build device authorization client: {error}")))
+}
+
+fn oauth_error(status: reqwest::StatusCode, body: &[u8], stage: &str) -> AppError {
+    let parsed = serde_json::from_slice::<DeviceOAuthError>(body).ok();
+    let (code, description) = parsed.map_or_else(
+        || {
+            (
+                "unknown_error".to_string(),
+                format!("HTTP {}", status.as_u16()),
+            )
+        },
+        |error| {
+            let description = error
+                .error_description
+                .unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
+            (error.error, description)
+        },
+    );
+    if code == "unauthorized_client" {
+        AppError::EndpointNotAvailable(format!(
+            "Spotify device authorization is not enabled for this client ({description})"
+        ))
+    } else {
+        AppError::Auth(format!(
+            "device authorization {stage}: {code} ({description})"
+        ))
+    }
+}
+
+/// Starts Spotify's RFC 8628 device authorization flow. The known streaming
+/// client is used because ordinary dashboard client IDs are commonly rejected
+/// with `unauthorized_client`; this capability is probed by the request itself.
+pub async fn start_device_authorization(store: &DeviceAuthStore) -> AppResult<DeviceAuthorization> {
+    let client_id = streaming_client_id();
+    let scope = STREAMING_SCOPES.join(" ");
+    let response = device_http_client()?
+        .post(DEVICE_AUTHORIZATION_URL)
+        .form(&[("client_id", client_id.as_str()), ("scope", scope.as_str())])
+        .send()
+        .await?;
+    let status = response.status();
+    let body = response.bytes().await?;
+    if !status.is_success() {
+        return Err(oauth_error(status, &body, "request failed"));
+    }
+    let wire: DeviceCodeResponse = serde_json::from_slice(&body).map_err(|error| {
+        AppError::Auth(format!("invalid device authorization response: {error}"))
+    })?;
+    if wire.device_code.is_empty() || wire.user_code.is_empty() || wire.verification_uri.is_empty()
+    {
+        return Err(AppError::Auth(
+            "device authorization response omitted a required field".to_string(),
+        ));
+    }
+    let url = wire
+        .verification_uri_complete
+        .clone()
+        .unwrap_or_else(|| wire.verification_uri.clone());
+    let public = DeviceAuthorization {
+        user_code: wire.user_code,
+        verification_uri: wire.verification_uri,
+        verification_uri_complete: wire.verification_uri_complete,
+        url,
+        expires_in: wire.expires_in,
+        interval: wire.interval.max(1),
+    };
+    let pending = Arc::new(PendingDeviceAuthorization {
+        public: public.clone(),
+        device_code: wire.device_code,
+        client_id,
+        scopes: STREAMING_SCOPES
+            .iter()
+            .map(|scope| (*scope).to_string())
+            .collect(),
+        started: Instant::now(),
+        cancelled: AtomicBool::new(false),
+    });
+    store.replace(pending).await;
+    Ok(public)
+}
+
+enum PollResponse {
+    Pending,
+    SlowDown,
+    Token(DeviceTokenResponse),
+}
+
+fn decode_poll_response(status: reqwest::StatusCode, body: &[u8]) -> AppResult<PollResponse> {
+    if status.is_success() {
+        let token = serde_json::from_slice(body)
+            .map_err(|error| AppError::Auth(format!("invalid device token response: {error}")))?;
+        return Ok(PollResponse::Token(token));
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        return Ok(PollResponse::SlowDown);
+    }
+    let parsed = serde_json::from_slice::<DeviceOAuthError>(body)
+        .map_err(|_| oauth_error(status, body, "token exchange failed"))?;
+    match parsed.error.as_str() {
+        "authorization_pending" => Ok(PollResponse::Pending),
+        "slow_down" => Ok(PollResponse::SlowDown),
+        _ => Err(oauth_error(status, body, "token exchange failed")),
+    }
+}
+
+async fn poll_device_token(pending: &PendingDeviceAuthorization) -> AppResult<OAuthToken> {
+    let client = device_http_client()?;
+    let mut interval = Duration::from_secs(pending.public.interval);
+    loop {
+        // RFC 8628 says not to exceed the server's interval. Waiting before
+        // the first request also gives the UI time to present the code and
+        // avoids an unnecessary guaranteed `authorization_pending` response.
+        tokio::time::sleep(interval).await;
+        if pending.cancelled.load(Ordering::Acquire) {
+            return Err(AppError::Auth(
+                "device authorization was cancelled".to_string(),
+            ));
+        }
+        if pending.started.elapsed() >= Duration::from_secs(pending.public.expires_in) {
+            return Err(AppError::Auth(
+                "device authorization code expired".to_string(),
+            ));
+        }
+
+        let response = client
+            .post(TOKEN_URL)
+            .form(&[
+                ("client_id", pending.client_id.as_str()),
+                ("grant_type", DEVICE_GRANT_TYPE),
+                ("device_code", pending.device_code.as_str()),
+            ])
+            .send()
+            .await;
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                let body = response.bytes().await?;
+                match decode_poll_response(status, &body)? {
+                    PollResponse::Pending => {}
+                    PollResponse::SlowDown => interval += Duration::from_secs(5),
+                    PollResponse::Token(token) => {
+                        if token.access_token.is_empty() || token.refresh_token.is_empty() {
+                            return Err(AppError::Auth(
+                                "device token response omitted access or refresh token".to_string(),
+                            ));
+                        }
+                        let scopes = token.scope.map_or_else(
+                            || pending.scopes.clone(),
+                            |scope| scope.split_whitespace().map(str::to_string).collect(),
+                        );
+                        return Ok(OAuthToken {
+                            access_token: token.access_token,
+                            refresh_token: token.refresh_token,
+                            expires_at: Instant::now() + Duration::from_secs(token.expires_in),
+                            token_type: token.token_type,
+                            scopes,
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                // A transient network failure must not throw away a still-valid
+                // pairing. The next interval retries; no token or code is logged.
+                log::debug!("spotify.auth: device token poll failed transiently: {error}");
+            }
+        }
+    }
+}
+
+pub async fn complete_device_authorization(store: &DeviceAuthStore) -> AppResult<SessionTokens> {
+    let pending = store.current().await?;
+    let result = poll_device_token(&pending).await.map(SessionTokens::shared);
+    store.clear_if(&pending).await;
+    result
+}
+
 /// Interactive login: opens the system browser and waits for the loopback
 /// redirect.
 ///
@@ -383,7 +672,9 @@ pub async fn restore_login(stored: &StoredTokens, data_dir: &Path) -> AppResult<
     // written before the check above, which may hold `""` rather than a real
     // token.
     let webapi_rt = stored.webapi_refresh_token.as_deref().and_then(non_empty);
-    let id = webapi_client_id(data_dir)?;
+    let Ok(id) = webapi_client_id(data_dir) else {
+        return Ok(SessionTokens::shared(streaming));
+    };
 
     match webapi_rt.as_deref() {
         Some(rt) => {
@@ -600,5 +891,61 @@ mod settings_tests {
         assert_eq!(settings.default_volume_percent, 50);
         assert_eq!(settings.cache_limit_mb, 2048);
         assert!(!settings.reduce_motion);
+    }
+
+    #[test]
+    fn device_poll_respects_pending_and_slow_down() {
+        assert!(matches!(
+            decode_poll_response(
+                reqwest::StatusCode::BAD_REQUEST,
+                br#"{"error":"authorization_pending"}"#,
+            ),
+            Ok(PollResponse::Pending)
+        ));
+        assert!(matches!(
+            decode_poll_response(
+                reqwest::StatusCode::BAD_REQUEST,
+                br#"{"error":"slow_down"}"#,
+            ),
+            Ok(PollResponse::SlowDown)
+        ));
+    }
+
+    #[test]
+    fn device_token_and_public_view_never_mix_credentials() {
+        let response = decode_poll_response(
+            reqwest::StatusCode::OK,
+            br#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"token_type":"Bearer","scope":"streaming user-read-private"}"#,
+        )
+        .expect("valid response");
+        let PollResponse::Token(token) = response else {
+            panic!("expected token")
+        };
+        assert_eq!(token.scope.as_deref(), Some("streaming user-read-private"));
+
+        let public = DeviceAuthorization {
+            user_code: "ABCD-EFGH".to_string(),
+            verification_uri: "https://spotify.com/pair".to_string(),
+            verification_uri_complete: None,
+            url: "https://spotify.com/pair".to_string(),
+            expires_in: 600,
+            interval: 5,
+        };
+        let json = serde_json::to_string(&public).expect("serialize public view");
+        assert!(!json.contains("device_code"));
+        assert!(!json.contains("access"));
+        assert!(!json.contains("refresh"));
+    }
+
+    #[tokio::test]
+    #[ignore = "live Spotify device authorization capability probe"]
+    async fn requests_live_device_code() {
+        let store = DeviceAuthStore::default();
+        let auth = start_device_authorization(&store)
+            .await
+            .expect("device authorization endpoint");
+        assert!(!auth.user_code.is_empty());
+        assert!(auth.url.starts_with("https://"));
+        store.cancel().await;
     }
 }

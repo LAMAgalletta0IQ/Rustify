@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import * as api from "../api";
 
-  let { onDone }: { onDone: () => void } = $props();
+  let { onDone, onPair }: { onDone: () => void; onPair: () => void } = $props();
 
   /** Null until loaded; the redirect URI below degrades gracefully while it is. */
   let info = $state<import("../types").LoginInfo | null>(null);
@@ -71,6 +71,10 @@
       {busy ? "Saving…" : "Continue"}
     </button>
 
+    <button class="secondary" onclick={onPair} disabled={busy}>
+      Pair with a code instead
+    </button>
+
     {#if errMsg}
       <div class="err">
         <strong>Could not save Client ID</strong>
@@ -81,6 +85,10 @@
     <p class="muted small">
       A Client ID is not a secret — it is safe to paste here and does not need
       to be kept private.
+    </p>
+    <p class="muted small">
+      Device pairing needs no redirect URI. Spotify will show a short code that
+      you can approve at spotify.com/pair on this or another device.
     </p>
   </div>
 </div>

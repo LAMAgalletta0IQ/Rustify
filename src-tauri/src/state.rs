@@ -198,6 +198,7 @@ pub struct AppState {
     /// by a single Web API request for display metadata.
     pub queue: RwLock<crate::queue::QueueView>,
     pub auth: RwLock<AuthState>,
+    pub device_auth: crate::auth::DeviceAuthStore,
     /// Held outside `spotify` so the event pump can read it without taking a
     /// lock on the whole session.
     pub tokens: TokenStore,

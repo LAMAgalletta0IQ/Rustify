@@ -111,6 +111,9 @@ pub fn run() {
             commands::get_audio_status,
             commands::get_equalizer_presets,
             commands::login,
+            commands::start_device_authorization,
+            commands::complete_device_authorization,
+            commands::cancel_device_authorization,
             commands::restore_session,
             commands::logout,
             // playback

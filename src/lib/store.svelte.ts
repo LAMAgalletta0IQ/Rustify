@@ -96,11 +96,6 @@ class AppStore {
         // Purely cosmetic below — a failure here must not block login.
         console.warn("could not read login info", api.asAppError(e).message);
       }
-      if (info && !info.privateClientId) {
-        this.setupNeeded = true;
-        return;
-      }
-
       // A webview reload (including development HMR) does not restart Rust.
       // Reuse that live session instead of consuming refresh tokens again.
       const liveAuth = await api.getAuthState();
@@ -108,6 +103,11 @@ class AppStore {
       if (this.auth.loggedIn) {
         this.playback = await api.getPlayback();
         this.#syncTicker();
+      } else if (info && !info.privateClientId) {
+        // A private client ID is required only for the two-tab loopback flow.
+        // Setup also offers device pairing, which uses the streaming client's
+        // accepted RFC 8628 capability and therefore needs no dashboard app.
+        this.setupNeeded = true;
       }
     } catch (e) {
       // A failed restore is not fatal — fall through to the login screen.

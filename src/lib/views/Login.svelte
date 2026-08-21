@@ -1,8 +1,10 @@
 <script lang="ts">
   import * as api from "../api";
   import { store } from "../store.svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import type { DeviceAuthorization, LoginInfo } from "../types";
 
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
 
   function useDifferentClientId() {
     stopCooldown();
@@ -12,6 +14,10 @@
   let busy = $state(false);
   let errKind = $state<string | null>(null);
   let errMsg = $state<string | null>(null);
+  let loginInfo = $state<LoginInfo | null>(null);
+  let pairing = $state<DeviceAuthorization | null>(null);
+  let pairingBusy = $state(false);
+  let pairRun = 0;
 
   /** Seconds left on a rate-limit window; null when not waiting. */
   let cooldown = $state<number | null>(null);
@@ -77,7 +83,53 @@
     }
   }
 
-  onDestroy(stopCooldown);
+  async function startPairing() {
+    const run = ++pairRun;
+    busy = true;
+    errKind = null;
+    errMsg = null;
+    try {
+      pairing = await api.startDeviceAuthorization();
+      try {
+        await openUrl(pairing.url);
+      } catch {
+        // The code and URL stay visible for headless/manual completion.
+      }
+      busy = false;
+      pairingBusy = true;
+      const authorized = await api.completeDeviceAuthorization();
+      if (run === pairRun) {
+        store.auth = authorized;
+        pairing = null;
+      }
+    } catch (e) {
+      if (run === pairRun) {
+        const err = api.asAppError(e);
+        errKind = err.kind;
+        errMsg = err.message;
+      }
+    } finally {
+      if (run === pairRun) {
+        busy = false;
+        pairingBusy = false;
+      }
+    }
+  }
+
+  async function cancelPairing() {
+    pairRun += 1;
+    pairing = null;
+    pairingBusy = false;
+    await api.cancelDeviceAuthorization().catch(() => {});
+  }
+
+  onMount(async () => {
+    loginInfo = await api.getLoginInfo().catch(() => null);
+  });
+  onDestroy(() => {
+    stopCooldown();
+    if (pairing) void api.cancelDeviceAuthorization();
+  });
 </script>
 
 <div class="wrap">
@@ -91,7 +143,7 @@
     <button
       class="btn-primary"
       onclick={() => doLogin()}
-      disabled={busy || cooldown !== null}
+      disabled={busy || pairingBusy || cooldown !== null || loginInfo?.privateClientId === false}
     >
       {busy
         ? "Waiting for browser…"
@@ -100,7 +152,29 @@
           : "Log in with Spotify"}
     </button>
 
-    {#if busy}
+    {#if loginInfo?.privateClientId === false}
+      <p class="muted small">
+        Browser login needs a dashboard Client ID. You can configure one below,
+        or use device pairing now.
+      </p>
+    {/if}
+
+    <button class="secondary" onclick={startPairing} disabled={busy || pairingBusy}>
+      {pairingBusy ? "Waiting for approval…" : "Pair with a code"}
+    </button>
+
+    {#if pairing}
+      <div class="pairing">
+        <span class="muted small">Enter this code at <strong>{pairing.verificationUri}</strong></span>
+        <code>{pairing.userCode}</code>
+        <div class="pair-actions">
+          <button class="secondary" onclick={() => openUrl(pairing!.url)}>Open pairing page</button>
+          <button class="linklike small" onclick={cancelPairing}>Cancel</button>
+        </div>
+      </div>
+    {/if}
+
+    {#if busy && !pairing}
       <p class="muted small">
         Your browser has been opened. Approve access — then approve a
         <strong>second</strong> time, in the tab that opens after it. One
@@ -199,6 +273,27 @@
   .err.premium {
     background: rgba(190, 160, 50, 0.18);
     border-color: rgba(220, 190, 90, 0.3);
+  }
+  .pairing {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    background: var(--glass-strong);
+  }
+  .pairing code {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+  }
+  .pair-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
   .linklike {
     color: var(--fg-dim);

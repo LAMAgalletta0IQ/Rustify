@@ -72,6 +72,15 @@ export interface LoginInfo {
   webapiRedirectUri: string;
 }
 
+export interface DeviceAuthorization {
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string | null;
+  url: string;
+  expiresIn: number;
+  interval: number;
+}
+
 export interface AppSettings {
   defaultVolumePercent: number;
   reduceMotion: boolean;

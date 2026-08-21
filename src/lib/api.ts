@@ -12,6 +12,7 @@ import type {
   ArtistSummary,
   AuthState,
   Device,
+  DeviceAuthorization,
   DjSession,
   JamSession,
   JamStatus,
@@ -54,6 +55,12 @@ export const getLoginInfo = () => invoke<LoginInfo>("get_login_info");
 export const setClientId = (clientId: string) =>
   invoke<void>("set_client_id", { clientId });
 export const login = () => invoke<AuthState>("login");
+export const startDeviceAuthorization = () =>
+  invoke<DeviceAuthorization>("start_device_authorization");
+export const completeDeviceAuthorization = () =>
+  invoke<AuthState>("complete_device_authorization");
+export const cancelDeviceAuthorization = () =>
+  invoke<void>("cancel_device_authorization");
 export const restoreSession = () => invoke<AuthState>("restore_session");
 export const logout = () => invoke<void>("logout");
 export const getSettings = () => invoke<AppSettings>("get_settings");
