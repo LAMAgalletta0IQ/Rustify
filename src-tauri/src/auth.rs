@@ -527,6 +527,7 @@ pub fn spawn_refresher(
                         if let Some(session) = state.spotify.write().await.take() {
                             let _ = session.spirc.shutdown();
                             session.remote_task.abort();
+                            session.connect_state_task.abort();
                             // `session.refresh_task` is this task. Dropping its
                             // handle detaches it, and returning below ends it.
                         }

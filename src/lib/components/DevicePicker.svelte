@@ -7,6 +7,11 @@
   let devices = $state<Device[]>([]);
   let loading = $state(false);
 
+  $effect(() => {
+    const live = store.playback.availableDevices;
+    if (live.length) devices = live;
+  });
+
   async function refresh() {
     loading = true;
     try {
@@ -34,7 +39,7 @@
   <button
     class="trigger"
     onclick={toggle}
-    title="Connect to a device"
+    title={`Connect: ${store.playback.connectionStatus}`}
     class:active={store.playback.isActiveDevice}
   >
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

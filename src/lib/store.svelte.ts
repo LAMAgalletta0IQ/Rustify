@@ -20,6 +20,10 @@ const emptyPlayback: PlaybackState = {
   shuffle: false,
   repeatContext: false,
   repeatTrack: false,
+  contextUri: null,
+  activeDevice: null,
+  availableDevices: [],
+  connectionStatus: "disconnected",
   audioQuality: "automatic",
   audioQualityLabel: "160 kbps",
 };

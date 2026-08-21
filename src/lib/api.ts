@@ -30,6 +30,7 @@ import type {
 export const EVENT_PLAYBACK = "playback:changed";
 export const EVENT_AUTH = "auth:changed";
 export const EVENT_JAMS = "jams:changed";
+export const EVENT_QUEUE = "queue:changed";
 
 /**
  * Tauri rejects with the serialised `AppError`. Normalise it so callers always

@@ -22,7 +22,7 @@ use crate::queue::{self, QueueView};
 use crate::search::ArtistSummary;
 use crate::search::{self, SearchResults};
 use crate::spotify::{DjSession, HomeFeed};
-use crate::state::{events, AppState, AuthState, PlaybackState, SpotifySession};
+use crate::state::{events, AppState, AuthState, ConnectionStatus, PlaybackState, SpotifySession};
 use crate::webapi::WebApi;
 
 /// Pulls the Web API bearer token out of the live session, or fails cleanly if
@@ -345,6 +345,7 @@ async fn establish(
 
     // Publish the token before anything reads it.
     state.tokens.set(toks.webapi.access_token.clone()).await;
+    state.playback.write().await.connection_status = ConnectionStatus::Connecting;
 
     // librespot gets the *streaming* bearer, which is the one carrying the
     // `streaming` scope from Spotify's desktop client ID.
@@ -383,17 +384,32 @@ async fn establish(
         let _ = old.spirc.shutdown();
         old.refresh_task.abort();
         old.remote_task.abort();
+        old.connect_state_task.abort();
     }
 
     // Reflects playback on the user's other devices, so opening the app while
     // listening on a phone shows the current track instead of "Nothing playing".
     let remote_task = player::spawn_remote_poller(app.clone(), state.tokens.clone());
+    let connect_state_task = match crate::remote_state::spawn(app.clone(), started.session.clone())
+    {
+        Ok(task) => task,
+        Err(error) => {
+            remote_task.abort();
+            refresh_task.abort();
+            let _ = started.spirc.shutdown();
+            state.playback.write().await.connection_status = ConnectionStatus::Disconnected;
+            return Err(error);
+        }
+    };
+
+    state.playback.write().await.connection_status = ConnectionStatus::Connected;
 
     *state.spotify.write().await = Some(SpotifySession {
         session: started.session,
         spirc: started.spirc,
         refresh_task,
         remote_task,
+        connect_state_task,
     });
     *state.auth.write().await = auth_state.clone();
 
@@ -469,6 +485,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
         let _ = s.spirc.shutdown();
         s.refresh_task.abort();
         s.remote_task.abort();
+        s.connect_state_task.abort();
     }
     // Drop the jam controller too: its dealer listener and event forwarder
     // must not outlive the session they authenticate against.
@@ -476,6 +493,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
     state.tokens.set(String::new()).await;
     *state.auth.write().await = AuthState::default();
     *state.playback.write().await = PlaybackState::default();
+    *state.queue.write().await = QueueView::default();
 
     if let Ok(dir) = app.path().app_data_dir() {
         auth::clear_stored_tokens(&dir);
@@ -929,13 +947,27 @@ pub async fn search_spotify(
 #[tauri::command]
 pub async fn get_queue(state: State<'_, AppState>) -> AppResult<QueueView> {
     let t = token(&state).await?;
-    queue::get_queue(&WebApi::new(), &t).await
+    let web = queue::get_queue(&WebApi::new(), &t).await?;
+    let merged = queue::merge_metadata(&*state.queue.read().await, web);
+    *state.queue.write().await = merged.clone();
+    Ok(merged)
 }
 
 #[tauri::command]
-pub async fn add_to_queue(state: State<'_, AppState>, uri: String) -> AppResult<()> {
+pub async fn add_to_queue(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    uri: String,
+) -> AppResult<()> {
     let t = token(&state).await?;
-    queue::add_to_queue(&WebApi::new(), &t, &uri).await
+    let api = WebApi::new();
+    queue::add_to_queue(&api, &t, &uri).await?;
+    if let Ok(web) = queue::get_queue(&api, &t).await {
+        let merged = queue::merge_metadata(&*state.queue.read().await, web);
+        *state.queue.write().await = merged.clone();
+        let _ = app.emit(events::QUEUE, merged);
+    }
+    Ok(())
 }
 
 // ---- jams (experimental) --------------------------------------------------

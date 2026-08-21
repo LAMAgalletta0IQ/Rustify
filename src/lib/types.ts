@@ -46,6 +46,10 @@ export interface PlaybackState {
   shuffle: boolean;
   repeatContext: boolean;
   repeatTrack: boolean;
+  contextUri: string | null;
+  activeDevice: Device | null;
+  availableDevices: Device[];
+  connectionStatus: "disconnected" | "connecting" | "connected" | "recovering";
   audioQuality: StreamQuality;
   audioQualityLabel: string;
 }
@@ -272,7 +276,10 @@ export interface SearchResults {
 
 export interface QueueView {
   currentlyPlaying: TrackSummary | null;
+  previous: TrackSummary[];
   queue: TrackSummary[];
+  autoplay: TrackSummary[];
+  revision: string | null;
 }
 
 // ---- jams (experimental) ---------------------------------------------------

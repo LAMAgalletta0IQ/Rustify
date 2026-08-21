@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use crate::audio::{self, StreamQuality};
 use crate::connect;
 use crate::error::{AppError, AppResult};
-use crate::state::{events, AppState, PlaybackState, TokenStore, TrackInfo};
+use crate::state::{events, AppState, ConnectionStatus, PlaybackState, TokenStore, TrackInfo};
 use crate::webapi::WebApi;
 
 /// librespot's internal volume scale.
@@ -168,6 +168,7 @@ fn spawn_event_pump(
                     // ahead of any audio actually playing.
                     pb.is_active_device = true;
                     state.active_device.set(true);
+                    pb.connection_status = ConnectionStatus::Connected;
                 }
                 PlayerEvent::Playing {
                     track_id,
@@ -369,7 +370,7 @@ fn pick_cover(images: &[ApiImage]) -> Option<String> {
 /// Only runs while this app is *not* the active device, so it costs nothing
 /// during local playback. Slow enough to stay clear of rate limits, fast
 /// enough that the UI is not visibly stale.
-const REMOTE_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+const REMOTE_POLL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Mirrors playback happening on other Connect devices into `PlaybackState`.
 ///
@@ -428,6 +429,10 @@ async fn apply_remote(
         pb.is_playing,
         pb.position_ms,
         pb.track.as_ref().map(|t| t.uri.clone()),
+        pb.context_uri.clone(),
+        pb.active_device
+            .as_ref()
+            .and_then(|device| device.id.clone()),
     );
 
     let Some(r) = remote else {
@@ -443,6 +448,7 @@ async fn apply_remote(
     };
 
     pb.is_active_device = false;
+    pb.connection_status = ConnectionStatus::Connected;
     state.active_device.set(false);
     pb.is_playing = r.is_playing;
     pb.set_position(r.progress_ms.unwrap_or(0));
@@ -457,6 +463,19 @@ async fn apply_remote(
     if let Some(v) = r.device.as_ref().and_then(|d| d.volume_percent) {
         pb.volume = percent_to_volume(v);
     }
+    pb.active_device = r.device.clone();
+    if let Some(device) = r.device {
+        if !pb
+            .available_devices
+            .iter()
+            .any(|candidate| candidate.id == device.id)
+        {
+            pb.available_devices.push(device);
+        }
+    }
+    pb.context_uri = r
+        .context
+        .and_then(|context| (!context.uri.is_empty() && context.uri != "-").then_some(context.uri));
 
     if let Some(item) = r.item {
         pb.duration_ms = item.duration_ms;
@@ -484,6 +503,10 @@ async fn apply_remote(
         pb.is_playing,
         pb.position_ms,
         pb.track.as_ref().map(|t| t.uri.clone()),
+        pb.context_uri.clone(),
+        pb.active_device
+            .as_ref()
+            .and_then(|device| device.id.clone()),
     );
     before != after
 }

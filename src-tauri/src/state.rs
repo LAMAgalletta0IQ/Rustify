@@ -12,6 +12,17 @@ pub mod events {
     pub const PLAYBACK: &str = "playback:changed";
     pub const AUTH: &str = "auth:changed";
     pub const JAMS: &str = "jams:changed";
+    pub const QUEUE: &str = "queue:changed";
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionStatus {
+    #[default]
+    Disconnected,
+    Connecting,
+    Connected,
+    Recovering,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -45,6 +56,13 @@ pub struct PlaybackState {
     pub shuffle: bool,
     pub repeat_context: bool,
     pub repeat_track: bool,
+    /// Connect context currently supplying the queue. Unlike a playlist name,
+    /// this is stable for generated, DJ, radio, collection, and Jam contexts.
+    pub context_uri: Option<String>,
+    /// Device topology comes directly from the Connect cluster Dealer stream.
+    pub active_device: Option<crate::connect::Device>,
+    pub available_devices: Vec<crate::connect::Device>,
+    pub connection_status: ConnectionStatus,
     /// Requested local-session quality. `audio_quality_label` is the concrete
     /// bitrate librespot 0.8 maps it to; remote-device quality is unknowable.
     pub audio_quality: StreamQuality,
@@ -129,6 +147,9 @@ pub struct SpotifySession {
     /// Mirrors playback from other Connect devices; aborted alongside the
     /// refresher, or it would keep polling after logout with a dead token.
     pub remote_task: tauri::async_runtime::JoinHandle<()>,
+    /// Event-first mirror of the Connect cluster/player/queue protobuf. The
+    /// slower Web API task above is only a recovery and metadata fallback.
+    pub connect_state_task: tauri::async_runtime::JoinHandle<()>,
 }
 
 /// Canonical, authoritative signal for whether this app is the active
@@ -173,6 +194,9 @@ impl Default for ActiveDeviceSignal {
 pub struct AppState {
     pub spotify: RwLock<Option<SpotifySession>>,
     pub playback: RwLock<PlaybackState>,
+    /// Last queue snapshot, hydrated first from Dealer and then (when needed)
+    /// by a single Web API request for display metadata.
+    pub queue: RwLock<crate::queue::QueueView>,
     pub auth: RwLock<AuthState>,
     /// Held outside `spotify` so the event pump can read it without taking a
     /// lock on the whole session.

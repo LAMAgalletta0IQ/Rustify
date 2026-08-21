@@ -15,6 +15,7 @@ mod media_keys;
 mod player;
 mod queue;
 mod relevance;
+mod remote_state;
 mod search;
 mod spotify;
 mod state;

@@ -70,12 +70,18 @@ pub struct RemoteItem {
 #[derive(Debug, Deserialize)]
 pub struct RemotePlayback {
     pub device: Option<Device>,
+    pub context: Option<RemoteContext>,
     pub is_playing: bool,
     pub progress_ms: Option<u32>,
     pub item: Option<RemoteItem>,
     /// "off" | "context" | "track"
     pub repeat_state: Option<String>,
     pub shuffle_state: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RemoteContext {
+    pub uri: String,
 }
 
 /// Current playback across the account, whatever device it is on.
