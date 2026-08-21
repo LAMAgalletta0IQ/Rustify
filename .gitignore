@@ -13,3 +13,8 @@ src-tauri/.cache/
 
 # Local visual references; keep them out of repository changes.
 /screenshots/
+
+# Merge-source archive (Version B) kept only as a local reference while
+# reconciling with main; not part of the tracked project.
+Rustify-main/
+Rustify-main.zip
