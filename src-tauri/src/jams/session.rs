@@ -492,16 +492,58 @@ pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
         &raw,
         &["join_session_token", "joinSessionToken", "joinToken"],
     );
+    // The official app's "Copy Jam link" shares a shortened `spotify.link/…`
+    // URL, not the raw `open.spotify.com/socialsession/<token>` form — if
+    // Spotify's own response carries that shortened link under some key,
+    // prefer it. The extra candidates below are speculative (unconfirmed
+    // against a live response); the constructed fallback is the one two
+    // independent reverse-engineering projects (this one's own PyPI capture
+    // and a separate OSS Spicetify extension) confirmed actually works, so
+    // it stays last and is never removed even if a new field name is added
+    // above it.
     let join_uri = string(&raw, &["join_session_uri", "joinSessionUri", "joinUri"]).or_else(|| {
         join_token
             .as_ref()
             .map(|token| format!("spotify:socialsession:{token}"))
     });
-    let join_url = string(&raw, &["join_session_url", "joinSessionUrl", "joinUrl"]).or_else(|| {
+    let join_url = string(
+        &raw,
+        &[
+            "join_session_url",
+            "joinSessionUrl",
+            "joinUrl",
+            "share_url",
+            "shareUrl",
+            "invite_link",
+            "inviteLink",
+            "link",
+        ],
+    )
+    .or_else(|| {
         join_token
             .as_ref()
             .map(|token| format!("https://open.spotify.com/socialsession/{token}"))
     });
+    if join_token.is_some()
+        && string(
+            &raw,
+            &["join_session_url", "joinSessionUrl", "joinUrl", "share_url", "shareUrl"],
+        )
+        .is_none()
+    {
+        // Diagnostic only, not a functional problem: the constructed link
+        // does work (see the comment above). This exists so a live session
+        // can confirm, from the log, whether Spotify's response genuinely
+        // never carries a shortened link or Rustify is just looking under
+        // the wrong key.
+        if let Some(object) = raw.as_object() {
+            debug!(
+                target: "jams::session",
+                "no shortened join URL field in session response; constructing one from join_session_token. Top-level keys present: {:?}",
+                object.keys().collect::<Vec<_>>()
+            );
+        }
+    }
     let session_type = value(
         &raw,
         &["initialSessionType", "initial_session_type", "sessionType"],
