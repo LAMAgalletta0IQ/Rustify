@@ -17,6 +17,14 @@
   let error = $state<string | null>(null);
   let offset = $state(0);
   let timer: number | null = null;
+  // Debouncing only stops back-to-back keystrokes from each firing a
+  // request; it does not stop two *already in-flight* requests (a slow
+  // response to an earlier query, still pending when a newer one is typed)
+  // from resolving out of order. Each request captures the current
+  // generation and only applies its result if nothing newer has started
+  // since — otherwise a stale response for "cat" can land after and
+  // overwrite the already-rendered results for "cats".
+  let generation = 0;
   let brokenImages = $state<Set<string>>(new Set());
   function onArtworkError(url: string | null | undefined) {
     if (!url || brokenImages.has(url)) return;
@@ -31,6 +39,7 @@
 
   async function run() {
     const q = query.trim();
+    const gen = ++generation;
     if (!q) {
       results = null;
       return;
@@ -39,23 +48,28 @@
     error = null;
     offset = 0;
     try {
-      results = await api.searchSpotify(q, 10, 0);
+      const next = await api.searchSpotify(q, 10, 0);
+      if (gen !== generation) return; // a newer search started; drop this one
+      results = next;
     } catch (e) {
+      if (gen !== generation) return;
       error = store.handleError(e, false).message;
     } finally {
-      loading = false;
+      if (gen === generation) loading = false;
     }
   }
   async function loadMore() {
     if (!results?.hasMore || loadingMore) return;
+    const gen = generation;
     loadingMore = true;
     try {
       const nextOffset = offset + 10;
       const next = await api.searchSpotify(query.trim(), 10, nextOffset);
+      if (gen !== generation || !results) return; // superseded by a fresh search
       const merge = <T extends { uri: string }>(a:T[], b:T[]) => { const seen=new Set(a.map(x=>x.uri)); return [...a,...b.filter(x=>!seen.has(x.uri))]; };
       results = { tracks:merge(results.tracks,next.tracks), albums:merge(results.albums,next.albums), artists:merge(results.artists,next.artists), playlists:merge(results.playlists,next.playlists), hasMore:next.hasMore };
       offset = nextOffset;
-    } catch(e) { error=store.handleError(e,false).message; } finally { loadingMore=false; }
+    } catch(e) { if (gen === generation) error=store.handleError(e,false).message; } finally { if (gen === generation) loadingMore=false; }
   }
 </script>
 
