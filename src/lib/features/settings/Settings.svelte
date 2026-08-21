@@ -38,6 +38,64 @@
   })));
   const curvePoints = $derived(draft.equalizer.bandsDb.map((gain, index) =>
     `${8 + index * 16.8},${32 - gain * (22 / 12)}`).join(" "));
+  /** Node positions in the same 0-100/0-64 space as the SVG curve above, but
+   * expressed as CSS percentages so plain HTML buttons (not SVG shapes,
+   * which can't take keyboard focus on their own) can sit on top of it. */
+  const nodePositions = $derived(draft.equalizer.bandsDb.map((gain, index) => ({
+    gain,
+    left: 8 + index * 16.8,
+    top: ((32 - gain * (22 / 12)) / 64) * 100,
+  })));
+
+  let graphEl = $state<HTMLElement | null>(null);
+  let draggingIndex = $state<number | null>(null);
+
+  function gainFromClientY(clientY: number): number {
+    if (!graphEl) return 0;
+    const rect = graphEl.getBoundingClientRect();
+    const ratio = (clientY - rect.top) / rect.height;
+    const gain = 12 - ratio * 24;
+    return Math.max(-12, Math.min(12, Math.round(gain * 2) / 2));
+  }
+
+  function startDrag(event: PointerEvent, index: number) {
+    if (!draft.equalizer.enabled) return;
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).focus();
+    draggingIndex = index;
+    setBand(index, gainFromClientY(event.clientY));
+    const move = (moveEvent: PointerEvent) => {
+      if (draggingIndex === null) return;
+      setBand(draggingIndex, gainFromClientY(moveEvent.clientY));
+    };
+    const up = () => {
+      draggingIndex = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  function nodeKeydown(event: KeyboardEvent, index: number) {
+    const gain = draft.equalizer.bandsDb[index];
+    if (event.key === "ArrowUp" || event.key === "ArrowRight") {
+      event.preventDefault();
+      setBand(index, Math.min(12, gain + 0.5));
+    } else if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      setBand(index, Math.max(-12, gain - 0.5));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setBand(index, 12);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setBand(index, -12);
+    } else if (event.key === "0") {
+      event.preventDefault();
+      setBand(index, 0);
+    }
+  }
 
   function cloneSettings(settings: AppSettings): AppSettings {
     return { ...settings, equalizer: { ...settings.equalizer,
@@ -175,18 +233,33 @@
     <div class="section-title"><div><h2>Equalizer</h2><small>Six smoothed peaking filters run in the active native audio sink.</small></div><label class="toggle"><input type="checkbox" checked={draft.equalizer.enabled} onchange={(event) => { draft.equalizer.enabled = event.currentTarget.checked; applyAudio(); }} /><span aria-hidden="true"></span><strong>{draft.equalizer.enabled ? "Enabled" : "Bypassed"}</strong></label></div>
     <div class="preset-control"><span><strong>Preset</strong><small>Presets apply to playback immediately.</small></span><SelectMenu value={draft.equalizer.activePresetId} options={presetOptions} label="Equalizer preset" onChange={applyPresetById} /></div>
 
-    <div class="graph-wrap" class:bypassed={!draft.equalizer.enabled}>
+    <div class="graph-wrap" class:bypassed={!draft.equalizer.enabled} bind:this={graphEl}>
       <span class="scale top">+12</span><span class="scale zero">0</span><span class="scale bottom">−12 dB</span>
-      <svg class="curve" viewBox="0 0 100 64" preserveAspectRatio="none" role="img" aria-label="Equalizer response curve from minus 12 to plus 12 decibels">
+      <svg class="curve" viewBox="0 0 100 64" preserveAspectRatio="none" aria-hidden="true">
         <line x1="0" y1="10" x2="100" y2="10" /><line x1="0" y1="32" x2="100" y2="32" /><line x1="0" y1="54" x2="100" y2="54" />
         <polyline points={curvePoints} />
-        {#each draft.equalizer.bandsDb as gain, index}<circle cx={8 + index * 16.8} cy={32 - gain * (22 / 12)} r="1.25" />{/each}
       </svg>
+      <div class="nodes" role="group" aria-label="Equalizer bands">
+        {#each nodePositions as node, index (index)}
+          <button
+            class="node"
+            class:dragging={draggingIndex === index}
+            style={`left:${node.left}%;top:${node.top}%`}
+            disabled={!draft.equalizer.enabled}
+            role="slider"
+            aria-label={`${bands[index][1]} gain`}
+            aria-valuemin="-12"
+            aria-valuemax="12"
+            aria-valuenow={node.gain}
+            aria-valuetext={`${node.gain > 0 ? "+" : ""}${node.gain.toFixed(1)} decibels`}
+            onpointerdown={(event) => startDrag(event, index)}
+            onkeydown={(event) => nodeKeydown(event, index)}
+          ><span class="node-value">{node.gain > 0 ? "+" : ""}{node.gain.toFixed(1)}</span></button>
+        {/each}
+      </div>
     </div>
-    <div class="bands">
-      {#each draft.equalizer.bandsDb as gain, index}
-        <label><output>{gain > 0 ? "+" : ""}{gain.toFixed(1)}</output><input class="band-slider" type="range" min="-12" max="12" step="0.5" value={gain} oninput={(event) => setBand(index, Number(event.currentTarget.value))} aria-label={`${bands[index][1]} gain`} aria-valuetext={`${gain > 0 ? "+" : ""}${gain.toFixed(1)} decibels`} /><span>{bands[index][0]}</span></label>
-      {/each}
+    <div class="freq-labels">
+      {#each bands as [label]}<span>{label}</span>{/each}
     </div>
     <div class="field preamp"><span><strong>Preamp</strong><small>Automatic headroom subtracts the largest boost to reduce clipping risk.</small></span><span class="range-row"><input type="range" min="-12" max="0" step="0.5" value={draft.equalizer.preampDb} oninput={(event) => setPreamp(Number(event.currentTarget.value))} aria-label="Equalizer preamp" /><output>{draft.equalizer.preampDb.toFixed(1)} dB</output></span></div>
     <label class="check"><input type="checkbox" checked={draft.equalizer.autoHeadroom} onchange={(event) => { draft.equalizer.autoHeadroom = event.currentTarget.checked; applyAudio(); }} /> Automatic headroom compensation</label>
@@ -206,7 +279,15 @@
 <style>
   .settings{max-width:920px;margin:0 auto;padding:22px 0 42px}header{margin-bottom:24px}h1{margin:0 0 5px;font-size:27px}header p,h2,.audio-status{margin:0}section{margin-top:14px;padding:19px 20px;border:1px solid var(--hairline);background:var(--glass);border-radius:var(--r-md);backdrop-filter:blur(var(--blur))}h2{font-size:15px}.section-title,.field,.preset-control{display:flex;align-items:center;justify-content:space-between;gap:28px}.section-title{margin-bottom:16px}section>h2{margin-bottom:15px}.field>span:first-child,.section-title>div,.preset-control>span:first-child{display:flex;min-width:0;flex-direction:column;gap:4px}small,.notice{color:var(--fg-dim);line-height:1.45}.notice{margin:14px 0 0;font-size:11px}.secondary{padding:8px 12px;border:1px solid var(--control-border);border-radius:var(--control-radius);background:var(--control-bg)}.secondary:hover:not(:disabled){background:var(--control-hover);border-color:var(--control-border-hover)}
   .toggle{display:flex;align-items:center;gap:8px;cursor:pointer}.toggle input{position:absolute;opacity:0;pointer-events:none}.toggle>span{position:relative;width:36px;height:20px;border-radius:999px;background:rgba(255,241,224,.16);transition:background var(--motion-fast)}.toggle>span::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--fg);transition:transform var(--motion-fast)}.toggle input:checked+span{background:var(--accent)}.toggle input:checked+span::after{transform:translateX(16px)}.toggle input:focus-visible+span{box-shadow:var(--focus-ring)}.preset-control{padding:12px 14px;border-radius:var(--r-sm);background:rgba(20,14,8,.2)}
-  .graph-wrap{position:relative;height:150px;margin:18px 0 0;padding-left:44px;transition:opacity var(--motion-normal)}.graph-wrap.bypassed{opacity:.45}.curve{width:100%;height:100%;overflow:visible}.curve line{stroke:rgba(255,241,224,.11);stroke-width:.35;vector-effect:non-scaling-stroke}.curve polyline{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.curve circle{fill:var(--accent);stroke:rgba(18,11,4,.8);stroke-width:.65;vector-effect:non-scaling-stroke}.scale{position:absolute;left:0;color:var(--fg-faint);font-size:10px;font-variant-numeric:tabular-nums}.scale.top{top:18px}.scale.zero{top:72px}.scale.bottom{bottom:17px}.bands{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-left:44px}.bands label{display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--fg-dim);font-size:11px}.bands output{color:var(--fg);font-variant-numeric:tabular-nums}.band-slider{width:24px;height:148px;writing-mode:vertical-lr;direction:rtl;accent-color:var(--accent)}
+  .graph-wrap{position:relative;height:200px;margin:18px 0 0;padding-left:44px;transition:opacity var(--motion-normal);touch-action:none}.graph-wrap.bypassed{opacity:.45}.curve{position:absolute;inset:0;left:44px;width:calc(100% - 44px);height:100%;overflow:visible;pointer-events:none}.curve line{stroke:rgba(255,241,224,.11);stroke-width:.35;vector-effect:non-scaling-stroke}.curve polyline{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.scale{position:absolute;left:0;color:var(--fg-faint);font-size:10px;font-variant-numeric:tabular-nums}.scale.top{top:12.6%}.scale.zero{top:50%;transform:translateY(-50%)}.scale.bottom{top:84.4%}
+  .nodes{position:absolute;inset:0;left:44px;width:calc(100% - 44px);height:100%}
+  .node{position:absolute;display:grid;place-items:center;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;color:var(--ink);background:var(--accent);border:2px solid rgba(18,11,4,.85);box-shadow:0 2px 8px rgba(0,0,0,.35);cursor:grab;touch-action:none;transition:transform var(--motion-fast)}
+  .node:hover:not(:disabled){transform:scale(1.12)}
+  .node.dragging{cursor:grabbing;transform:scale(1.18)}
+  .node:focus-visible{outline:none;box-shadow:var(--focus-ring),0 2px 8px rgba(0,0,0,.35)}
+  .node:disabled{cursor:default;opacity:.55}
+  .node-value{position:absolute;top:-22px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--fg-dim);pointer-events:none}
+  .freq-labels{display:grid;grid-template-columns:repeat(6,1fr);margin:8px 0 0 44px;color:var(--fg-dim);font-size:11px;text-align:center}
   .preamp{margin-top:20px;padding-top:18px;border-top:1px solid var(--hairline)}.range-row,.number-row{display:flex;align-items:center;gap:10px;flex:none}.range-row input{width:180px;accent-color:var(--accent)}output{min-width:54px;text-align:right;font-variant-numeric:tabular-nums}.check{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;cursor:pointer}input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}.preset-tools{display:flex;gap:8px;margin-top:16px}.preset-tools input,.number-row input{min-height:var(--control-height);padding:8px 11px;border:1px solid var(--control-border);border-radius:var(--control-radius);background:var(--control-bg)}.preset-tools input{flex:1}.number-row input{width:96px}.custom-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}.custom-list span{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;background:rgba(20,14,8,.2)}.custom-list button{margin-left:auto;color:var(--fg-dim)}.custom-list button:hover{color:var(--warning)}.audio-status{min-height:18px;margin-top:12px;color:var(--fg-dim);font-size:11px}.audio-status.error,.error{color:#ffaaa2}.actions{display:flex;align-items:center;gap:14px;margin-top:18px}.ok{color:var(--accent)}.audit{flex:none;color:var(--fg-dim);font-size:11px;font-variant-numeric:tabular-nums}
-  @media(max-width:680px){.field,.preset-control{align-items:flex-start;flex-direction:column;gap:14px}.bands{grid-template-columns:repeat(3,1fr);row-gap:18px;margin-left:0}.graph-wrap{padding-left:38px}.preset-tools{flex-wrap:wrap}}
+  @media(max-width:680px){.field,.preset-control{align-items:flex-start;flex-direction:column;gap:14px}.graph-wrap{padding-left:38px}.curve,.nodes{left:38px;width:calc(100% - 38px)}.freq-labels{margin-left:38px;font-size:10px}.preset-tools{flex-wrap:wrap}}
 </style>
