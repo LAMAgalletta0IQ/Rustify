@@ -76,13 +76,15 @@ async fn clear_crossfade_before_transition(app: &AppHandle, state: &AppState) ->
 }
 
 async fn remote_put(state: &AppState, path: &str, query: &[(&str, String)]) -> AppResult<()> {
-    WebApi::new()
+    state
+        .web_api
         .put_query(&token(state).await?, path, query)
         .await
 }
 
 async fn remote_post(state: &AppState, path: &str, query: &[(&str, String)]) -> AppResult<()> {
-    WebApi::new()
+    state
+        .web_api
         .post_query(&token(state).await?, path, query)
         .await
 }
@@ -547,9 +549,8 @@ pub async fn login(app: AppHandle, state: State<'_, AppState>) -> AppResult<Auth
         .app_data_dir()
         .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
 
-    let api = WebApi::new();
     let toks = auth::interactive_login(&data_dir).await?;
-    establish(&app, &state, &api, toks).await
+    establish(&app, &state, &state.web_api, toks).await
 }
 
 #[tauri::command]
@@ -564,9 +565,8 @@ pub async fn complete_device_authorization(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<AuthState> {
-    let api = WebApi::new();
     let tokens = auth::complete_device_authorization(&state.device_auth).await?;
-    establish(&app, &state, &api, tokens).await
+    establish(&app, &state, &state.web_api, tokens).await
 }
 
 #[tauri::command]
@@ -598,10 +598,8 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
         return Ok(AuthState::default());
     };
 
-    let api = WebApi::new();
-
     match auth::restore_login(&stored, &data_dir).await {
-        Ok(toks) => establish(&app, &state, &api, toks).await,
+        Ok(toks) => establish(&app, &state, &state.web_api, toks).await,
         Err(e) => {
             // Only discard the stored tokens when Spotify says the grant
             // itself is dead. A network blip at startup, a 429, or a 5xx are
@@ -993,7 +991,7 @@ pub async fn load_tracks(
 #[tauri::command]
 pub async fn list_devices(state: State<'_, AppState>) -> AppResult<Vec<Device>> {
     let t = token(&state).await?;
-    connect::list_devices(&WebApi::new(), &t).await
+    connect::list_devices(&state.web_api, &t).await
 }
 
 #[tauri::command]
@@ -1003,7 +1001,7 @@ pub async fn transfer_playback(
     play: bool,
 ) -> AppResult<()> {
     let t = token(&state).await?;
-    connect::transfer_playback(&WebApi::new(), &t, &device_id, play).await
+    connect::transfer_playback(&state.web_api, &t, &device_id, play).await
 }
 
 /// Pulls playback back to this app by activating our own Spirc device.
@@ -1021,7 +1019,7 @@ pub async fn get_playlists(
     offset: Option<u32>,
 ) -> AppResult<Vec<PlaylistSummary>> {
     let t = token(&state).await?;
-    library::playlists(&WebApi::new(), &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
+    library::playlists(&state.web_api, &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
 }
 
 #[tauri::command]
@@ -1034,7 +1032,7 @@ pub async fn get_playlist_tracks(
     let t = token(&state).await?;
     let limit = limit.unwrap_or(100);
     let offset = offset.unwrap_or(0);
-    match library::playlist_tracks(&WebApi::new(), &t, &playlist_id, limit, offset).await {
+    match library::playlist_tracks(&state.web_api, &t, &playlist_id, limit, offset).await {
         // Spotify's generated/personalized playlists (Daily Mix, Discover
         // Weekly, Release Radar, Daylist…) carry an ordinary spotify:playlist:
         // URI everywhere else, but the public REST endpoint 404s on their id
@@ -1075,7 +1073,7 @@ pub async fn get_saved_tracks(
     offset: Option<u32>,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::saved_tracks(&WebApi::new(), &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
+    library::saved_tracks(&state.web_api, &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
 }
 
 #[tauri::command]
@@ -1085,7 +1083,7 @@ pub async fn get_saved_albums(
     offset: Option<u32>,
 ) -> AppResult<Vec<AlbumSummary>> {
     let t = token(&state).await?;
-    library::saved_albums(&WebApi::new(), &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
+    library::saved_albums(&state.web_api, &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
 }
 
 /// `after` is the `next` cursor from the previous page, not an item count —
@@ -1097,7 +1095,7 @@ pub async fn get_followed_artists(
     after: Option<String>,
 ) -> AppResult<ArtistPage> {
     let t = token(&state).await?;
-    library::followed_artists(&WebApi::new(), &t, limit.unwrap_or(50), after.as_deref()).await
+    library::followed_artists(&state.web_api, &t, limit.unwrap_or(50), after.as_deref()).await
 }
 
 #[tauri::command]
@@ -1106,7 +1104,7 @@ pub async fn get_followed_releases(
     after: Option<String>,
 ) -> AppResult<FollowedReleasePage> {
     let t = token(&state).await?;
-    library::followed_releases(&WebApi::new(), &t, after.as_deref()).await
+    library::followed_releases(&state.web_api, &t, after.as_deref()).await
 }
 
 #[tauri::command]
@@ -1115,7 +1113,7 @@ pub async fn get_recently_played(
     limit: Option<u32>,
 ) -> AppResult<Vec<RecentActivityItem>> {
     let t = token(&state).await?;
-    library::recently_played(&WebApi::new(), &t, limit.unwrap_or(50)).await
+    library::recently_played(&state.web_api, &t, limit.unwrap_or(50)).await
 }
 
 /// Combines Spotify's real recent-play window with account-scoped local open
@@ -1182,7 +1180,7 @@ pub async fn get_album_tracks(
     album_id: String,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::album_tracks(&WebApi::new(), &t, &album_id).await
+    library::album_tracks(&state.web_api, &t, &album_id).await
 }
 
 #[tauri::command]
@@ -1192,7 +1190,7 @@ pub async fn set_tracks_saved(
     saved: bool,
 ) -> AppResult<()> {
     let t = token(&state).await?;
-    library::set_tracks_saved(&WebApi::new(), &t, &ids, saved).await?;
+    library::set_tracks_saved(&state.web_api, &t, &ids, saved).await?;
     library::invalidate_saved_tracks_cache(&state.saved_tracks_cache).await;
     Ok(())
 }
@@ -1204,7 +1202,7 @@ pub async fn set_albums_saved(
     saved: bool,
 ) -> AppResult<()> {
     let t = token(&state).await?;
-    library::set_albums_saved(&WebApi::new(), &t, &ids, saved).await
+    library::set_albums_saved(&state.web_api, &t, &ids, saved).await
 }
 
 #[tauri::command]
@@ -1214,7 +1212,7 @@ pub async fn set_artists_saved(
     saved: bool,
 ) -> AppResult<()> {
     let t = token(&state).await?;
-    library::set_artists_saved(&WebApi::new(), &t, &ids, saved).await
+    library::set_artists_saved(&state.web_api, &t, &ids, saved).await
 }
 
 #[tauri::command]
@@ -1223,7 +1221,7 @@ pub async fn get_tracks_saved(
     ids: Vec<String>,
 ) -> AppResult<Vec<bool>> {
     let t = token(&state).await?;
-    library::tracks_saved(&WebApi::new(), &t, &ids).await
+    library::tracks_saved(&state.web_api, &t, &ids).await
 }
 
 #[tauri::command]
@@ -1232,7 +1230,7 @@ pub async fn get_albums_saved(
     ids: Vec<String>,
 ) -> AppResult<Vec<bool>> {
     let t = token(&state).await?;
-    library::albums_saved(&WebApi::new(), &t, &ids).await
+    library::albums_saved(&state.web_api, &t, &ids).await
 }
 
 #[tauri::command]
@@ -1241,7 +1239,7 @@ pub async fn get_artists_saved(
     ids: Vec<String>,
 ) -> AppResult<Vec<bool>> {
     let t = token(&state).await?;
-    library::artists_saved(&WebApi::new(), &t, &ids).await
+    library::artists_saved(&state.web_api, &t, &ids).await
 }
 
 #[tauri::command]
@@ -1250,7 +1248,7 @@ pub async fn get_liked_tracks_by_artist(
     artist_id: String,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::liked_tracks_by_artist(&WebApi::new(), &t, &artist_id, &state.saved_tracks_cache)
+    library::liked_tracks_by_artist(&state.web_api, &t, &artist_id, &state.saved_tracks_cache)
         .await
 }
 
@@ -1263,7 +1261,7 @@ pub async fn get_artist_albums(
 ) -> AppResult<AlbumPage> {
     let t = token(&state).await?;
     library::artist_albums(
-        &WebApi::new(),
+        &state.web_api,
         &t,
         &artist_id,
         limit.unwrap_or(10),
@@ -1275,7 +1273,7 @@ pub async fn get_artist_albums(
 #[tauri::command]
 pub async fn get_artist(state: State<'_, AppState>, artist_id: String) -> AppResult<ArtistSummary> {
     let t = token(&state).await?;
-    library::artist(&WebApi::new(), &t, &artist_id).await
+    library::artist(&state.web_api, &t, &artist_id).await
 }
 
 /// Stats, top tracks and concerts in one call. Replaces what used to be a
@@ -1364,7 +1362,7 @@ pub async fn get_artist_overview(
     };
     if overview.top_tracks.is_empty() && !pathfinder_failed {
         let t = token(&state).await?;
-        match library::artist_tracks(&WebApi::new(), &t, &artist_id).await {
+        match library::artist_tracks(&state.web_api, &t, &artist_id).await {
             Ok(fallback) => overview.top_tracks = fallback,
             Err(error) => log::warn!(
                 target: "spotify.artist",
@@ -1495,7 +1493,7 @@ pub async fn get_top_tracks(
     limit: Option<u32>,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::top_tracks(&WebApi::new(), &t, limit.unwrap_or(20)).await
+    library::top_tracks(&state.web_api, &t, limit.unwrap_or(20)).await
 }
 
 #[tauri::command]
@@ -1504,7 +1502,7 @@ pub async fn get_top_artists(
     limit: Option<u32>,
 ) -> AppResult<Vec<ArtistSummary>> {
     let t = token(&state).await?;
-    library::top_artists(&WebApi::new(), &t, limit.unwrap_or(10)).await
+    library::top_artists(&state.web_api, &t, limit.unwrap_or(10)).await
 }
 
 #[tauri::command]
@@ -1639,7 +1637,7 @@ pub async fn search_spotify(
 ) -> AppResult<SearchResults> {
     let t = token(&state).await?;
     let limit = limit.unwrap_or(search::MAX_SEARCH_LIMIT);
-    search::search(&WebApi::new(), &t, &query, limit, offset.unwrap_or(0)).await
+    search::search(&state.web_api, &t, &query, limit, offset.unwrap_or(0)).await
 }
 
 // ---- queue --------------------------------------------------------------
@@ -1647,7 +1645,7 @@ pub async fn search_spotify(
 #[tauri::command]
 pub async fn get_queue(state: State<'_, AppState>) -> AppResult<QueueView> {
     let t = token(&state).await?;
-    let web = queue::get_queue(&WebApi::new(), &t).await?;
+    let web = queue::get_queue(&state.web_api, &t).await?;
     let merged = queue::merge_metadata(&*state.queue.read().await, web);
     *state.queue.write().await = merged.clone();
     Ok(merged)
@@ -1662,15 +1660,15 @@ pub async fn add_to_queue(
     queue::validate_queue_uri(&uri)?;
     let local = state.playback.read().await.is_active_device;
     let t = token(&state).await?;
-    let api = WebApi::new();
+    let api = &state.web_api;
     if local {
         let parsed = librespot::core::SpotifyUri::from_uri(&uri)
             .map_err(|error| AppError::BadRequest(format!("invalid queue URI: {error}")))?;
         with_spirc(&state, move |spirc| spirc.add_to_queue(parsed)).await?;
     } else {
-        queue::add_to_queue(&api, &t, &uri).await?;
+        queue::add_to_queue(api, &t, &uri).await?;
     }
-    if let Ok(web) = queue::get_queue(&api, &t).await {
+    if let Ok(web) = queue::get_queue(api, &t).await {
         let merged = queue::merge_metadata(&*state.queue.read().await, web);
         *state.queue.write().await = merged.clone();
         let _ = app.emit(events::QUEUE, merged);

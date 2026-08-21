@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex, RwLock};
 
 use crate::audio::{AudioRuntime, StreamQuality};
+use crate::webapi::WebApi;
 
 /// Event names emitted to the webview. Keep in sync with `src/lib/events.ts`.
 pub mod events {
@@ -199,6 +200,12 @@ impl Default for ActiveDeviceSignal {
 
 #[derive(Default)]
 pub struct AppState {
+    /// One `reqwest::Client` (internally `Arc`-pooled) for every Web API call
+    /// the app makes. Previously every command built its own `WebApi::new()`
+    /// — a fresh, empty connection pool per invocation — so back-to-back
+    /// requests (Home then Search, a session of artist pages) never reused a
+    /// warm TLS connection and paid a full handshake each time.
+    pub web_api: WebApi,
     pub spotify: RwLock<Option<SpotifySession>>,
     pub playback: RwLock<PlaybackState>,
     /// Last queue snapshot, hydrated first from Dealer and then (when needed)

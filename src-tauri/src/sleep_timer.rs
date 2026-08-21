@@ -7,7 +7,6 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
 use crate::state::{events, AppState, PlaybackState};
-use crate::webapi::WebApi;
 
 const MAX_DURATION_SECONDS: u64 = 7 * 24 * 60 * 60;
 const PAUSE_ATTEMPTS: usize = 3;
@@ -266,7 +265,8 @@ async fn pause_active_playback(app: &AppHandle) -> AppResult<()> {
         if token.is_empty() {
             return Err(AppError::NotLoggedIn);
         }
-        WebApi::new()
+        state
+            .web_api
             .put_query(&token, "/me/player/pause", &[])
             .await
     }

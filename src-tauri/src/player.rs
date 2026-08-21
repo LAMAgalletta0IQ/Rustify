@@ -171,7 +171,7 @@ fn spawn_event_pump(
     session: Session,
 ) {
     tauri::async_runtime::spawn(async move {
-        let api = WebApi::new();
+        let api = app.state::<AppState>().web_api.clone();
         let cache: Arc<Mutex<HashMap<String, TrackInfo>>> = Arc::new(Mutex::new(HashMap::new()));
 
         while let Some(event) = rx.recv().await {
@@ -579,7 +579,7 @@ pub fn spawn_remote_poller(
     tokens: TokenStore,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
-        let api = WebApi::new();
+        let api = app.state::<AppState>().web_api.clone();
         let mut active_rx = app.state::<AppState>().active_device.subscribe();
 
         // Polls before the first sleep: opening the app while music plays on
