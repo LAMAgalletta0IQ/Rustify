@@ -31,6 +31,11 @@ const TRACK_CREDITS_HASHES: &[&str] =
     &["e2ca40d46cf1fde36562261ccec754f23fb31b561877252e9fe0d6834aabb84b"];
 const SEARCH_USERS_HASHES: &[&str] =
     &["d3f7547835dc86a4fdf3997e0f79314e7580eaf4aaf2f4cb1e71e189c5dfcb1f"];
+/// Community-captured, unverified against a live account. Wrong or stale is
+/// safe: a rejected hash falls straight through to live bundle discovery,
+/// same as every other operation here.
+const PLAYLIST_CONTENTS_HASHES: &[&str] =
+    &["91d4c2bc3e0cd1bc672281c4f1f59f43ff55ba726ca04a45810d99bd091f3f0e"];
 
 pub struct PathfinderClient {
     http: Client,
@@ -132,6 +137,7 @@ impl PathfinderClient {
             "queryArtistOverview" => ARTIST_OVERVIEW_HASHES,
             "queryTrackCreditsModal" => TRACK_CREDITS_HASHES,
             "searchUsers" => SEARCH_USERS_HASHES,
+            "fetchPlaylistContents" => PLAYLIST_CONTENTS_HASHES,
             _ => &[],
         };
         for hash in known {

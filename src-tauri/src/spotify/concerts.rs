@@ -25,6 +25,18 @@ pub struct ConcertFeed {
     pub events: Vec<ConcertEvent>,
 }
 
+impl ConcertFeed {
+    /// The request that would supply concerts never went out (or failed
+    /// outright), as opposed to succeeding with a genuinely empty list.
+    pub fn unavailable() -> Self {
+        Self {
+            available: false,
+            total_count: 0,
+            events: Vec::new(),
+        }
+    }
+}
+
 pub fn variables(artist_id: &str, locale: &str) -> AppResult<Value> {
     if artist_id.len() != 22 || !artist_id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
         return Err(AppError::BadRequest(

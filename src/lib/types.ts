@@ -377,6 +377,17 @@ export interface ConcertFeed {
   events: ConcertEvent[];
 }
 
+export interface ArtistStats {
+  monthlyListeners: number | null;
+  followers: number | null;
+}
+
+export interface ArtistOverview {
+  stats: ArtistStats;
+  topTracks: TrackSummary[];
+  concerts: ConcertFeed;
+}
+
 export interface CreditContributor {
   name: string;
   artistUri: string | null;

@@ -2,23 +2,41 @@
 //! features. These clients use credentials from the authenticated librespot
 //! session and never persist or log them.
 
+mod artist_extras;
 mod concerts;
 mod credits;
 mod dj;
 mod home;
 mod pathfinder;
+mod playlist_contents;
 mod users;
 
+pub use artist_extras::ArtistStats;
 pub use concerts::ConcertFeed;
 pub use credits::TrackCredits;
 pub(crate) use dj::refill_uris as dj_refill_uris;
 pub use dj::DjSession;
 pub use home::HomeFeed;
+pub use playlist_contents::PlaylistContentsPage;
 pub use users::UserSearchPage;
 
 use librespot::core::session::Session;
+use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
+use crate::library::TrackSummary;
+
+/// Everything `queryArtistOverview` gives back that Rustify surfaces, fetched
+/// in one Pathfinder round trip instead of the REST fan-out (top tracks used
+/// to mean fetching five albums, then every track of each) that used to make
+/// opening an artist page cost a dozen-plus requests on its own.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistOverview {
+    pub stats: ArtistStats,
+    pub top_tracks: Vec<TrackSummary>,
+    pub concerts: ConcertFeed,
+}
 
 #[derive(Default)]
 pub struct InternalSpotify {
@@ -90,12 +108,16 @@ impl InternalSpotify {
         credits::parse(&data)
     }
 
-    pub async fn artist_concerts(
+    /// Stats + top tracks + concerts from a single `queryArtistOverview` call.
+    /// Concerts is the only piece that must parse cleanly — a malformed or
+    /// renamed stats/topTracks field degrades to empty/`None` rather than
+    /// failing the whole page (see `artist_extras`'s doc comment).
+    pub async fn artist_overview(
         &self,
         session: &Session,
         artist_id: &str,
         locale: &str,
-    ) -> AppResult<ConcertFeed> {
+    ) -> AppResult<ArtistOverview> {
         let auth = first_party_auth(session).await?;
         let data = self
             .pathfinder
@@ -107,7 +129,35 @@ impl InternalSpotify {
                 &auth.connection_id,
             )
             .await?;
-        concerts::parse(&data)
+        Ok(ArtistOverview {
+            stats: artist_extras::parse_stats(&data),
+            top_tracks: artist_extras::parse_top_tracks(&data),
+            concerts: concerts::parse(&data)?,
+        })
+    }
+
+    /// Fallback tracklist source for playlist ids the public REST API
+    /// answers 404 for — Spotify's generated/personalized playlists. Not
+    /// tried by default; see `playlist_contents`'s module doc comment.
+    pub async fn playlist_contents(
+        &self,
+        session: &Session,
+        playlist_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> AppResult<PlaylistContentsPage> {
+        let auth = first_party_auth(session).await?;
+        let data = self
+            .pathfinder
+            .query(
+                "fetchPlaylistContents",
+                playlist_contents::variables(playlist_id, limit, offset)?,
+                &auth.access_token,
+                &auth.client_token,
+                &auth.connection_id,
+            )
+            .await?;
+        playlist_contents::parse(&data)
     }
 
     pub async fn home(

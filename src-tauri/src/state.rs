@@ -215,6 +215,11 @@ pub struct AppState {
     /// retained, only safe booleans/counts, so this can have a long TTL.
     pub audio_capability_cache: RwLock<HashMap<String, crate::audio_capabilities::AudioCapability>>,
     pub friend_activity: RwLock<crate::friends::FriendFeed>,
+    /// Session-local snapshot of the user's saved tracks, so opening several
+    /// artist pages in a row does not re-walk the whole library each time to
+    /// check which of its tracks the artist owns. Invalidated on any library
+    /// save/unsave; otherwise good for `SAVED_TRACKS_CACHE_TTL`.
+    pub saved_tracks_cache: RwLock<Option<crate::library::SavedTracksSnapshot>>,
     /// Bounded in-memory ledger of genuine local playback. It never invents
     /// plays and deliberately has no first-party-impersonating Gabo sender.
     pub telemetry: crate::telemetry::TelemetryTracker,

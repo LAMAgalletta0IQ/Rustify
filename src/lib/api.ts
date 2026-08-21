@@ -29,7 +29,7 @@ import type {
   EqualizerPreset,
   FriendFeed,
   UserProfile,
-  ConcertFeed,
+  ArtistOverview,
   TrackCredits,
   EpisodeResume,
   TelemetryStatus,
@@ -186,14 +186,13 @@ export const getArtistsSaved = (ids: string[]) =>
   invoke<boolean[]>("get_artists_saved", { ids });
 export const getLikedTracksByArtist = (artistId: string) =>
   invoke<TrackSummary[]>("get_liked_tracks_by_artist", { artistId });
-export const getArtistTopTracks = (artistId: string) =>
-  invoke<TrackSummary[]>("get_artist_top_tracks", { artistId });
 export const getArtistAlbums = (artistId: string, limit = 10, offset = 0) =>
   invoke<AlbumPage>("get_artist_albums", { artistId, limit, offset });
 export const getArtist = (artistId: string) =>
   invoke<ArtistSummary>("get_artist", { artistId });
-export const getArtistConcerts = (artistId: string) =>
-  invoke<ConcertFeed>("get_artist_concerts", {
+/** Stats, top tracks and concerts from one Pathfinder call. */
+export const getArtistOverview = (artistId: string) =>
+  invoke<ArtistOverview>("get_artist_overview", {
     artistId,
     locale: navigator.language || "en",
   });

@@ -1028,14 +1028,40 @@ pub async fn get_playlist_tracks(
     offset: Option<u32>,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::playlist_tracks(
-        &WebApi::new(),
-        &t,
-        &playlist_id,
-        limit.unwrap_or(100),
-        offset.unwrap_or(0),
-    )
-    .await
+    let limit = limit.unwrap_or(100);
+    let offset = offset.unwrap_or(0);
+    match library::playlist_tracks(&WebApi::new(), &t, &playlist_id, limit, offset).await {
+        // Spotify's generated/personalized playlists (Daily Mix, Discover
+        // Weekly, Release Radar, Daylist…) carry an ordinary spotify:playlist:
+        // URI everywhere else, but the public REST endpoint 404s on their id
+        // specifically. Only that exact failure falls back to Pathfinder —
+        // any other error (auth, rate limit, a genuinely missing playlist)
+        // is returned as-is rather than masked by a second, different error.
+        Err(AppError::Unavailable(rest_message)) => {
+            let session = state
+                .spotify
+                .read()
+                .await
+                .as_ref()
+                .map(|spotify| spotify.session.clone())
+                .ok_or(AppError::NotLoggedIn)?;
+            match state
+                .internal_spotify
+                .playlist_contents(&session, &playlist_id, limit, offset)
+                .await
+            {
+                Ok(page) => Ok(page.tracks),
+                Err(error) => {
+                    log::warn!(
+                        target: "spotify.playlist",
+                        "playlist {playlist_id} 404'd via REST ({rest_message}) and Pathfinder fallback also failed: {error}"
+                    );
+                    Err(AppError::Unavailable(rest_message))
+                }
+            }
+        }
+        other => other,
+    }
 }
 
 #[tauri::command]
@@ -1162,7 +1188,9 @@ pub async fn set_tracks_saved(
     saved: bool,
 ) -> AppResult<()> {
     let t = token(&state).await?;
-    library::set_tracks_saved(&WebApi::new(), &t, &ids, saved).await
+    library::set_tracks_saved(&WebApi::new(), &t, &ids, saved).await?;
+    library::invalidate_saved_tracks_cache(&state.saved_tracks_cache).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1218,16 +1246,8 @@ pub async fn get_liked_tracks_by_artist(
     artist_id: String,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::liked_tracks_by_artist(&WebApi::new(), &t, &artist_id).await
-}
-
-#[tauri::command]
-pub async fn get_artist_top_tracks(
-    state: State<'_, AppState>,
-    artist_id: String,
-) -> AppResult<Vec<TrackSummary>> {
-    let t = token(&state).await?;
-    library::artist_tracks(&WebApi::new(), &t, &artist_id).await
+    library::liked_tracks_by_artist(&WebApi::new(), &t, &artist_id, &state.saved_tracks_cache)
+        .await
 }
 
 #[tauri::command]
@@ -1254,12 +1274,20 @@ pub async fn get_artist(state: State<'_, AppState>, artist_id: String) -> AppRes
     library::artist(&WebApi::new(), &t, &artist_id).await
 }
 
+/// Stats, top tracks and concerts in one call. Replaces what used to be a
+/// REST-only top-tracks implementation that fetched five albums and then
+/// every track of each — `/artists/{id}/top-tracks` was retired in
+/// February 2026, so that fan-out was the whole implementation, not a cache
+/// miss path. This uses the same `queryArtistOverview` Pathfinder operation
+/// the concerts feature already calls; if its topTracks field ever goes
+/// empty (a private, undocumented API can rename fields under us) this falls
+/// back to the old REST reconstruction rather than showing nothing.
 #[tauri::command]
-pub async fn get_artist_concerts(
+pub async fn get_artist_overview(
     state: State<'_, AppState>,
     artist_id: String,
     locale: Option<String>,
-) -> AppResult<crate::spotify::ConcertFeed> {
+) -> AppResult<crate::spotify::ArtistOverview> {
     let session = state
         .spotify
         .read()
@@ -1267,10 +1295,40 @@ pub async fn get_artist_concerts(
         .as_ref()
         .map(|spotify| spotify.session.clone())
         .ok_or(AppError::NotLoggedIn)?;
-    state
+    let mut overview = match state
         .internal_spotify
-        .artist_concerts(&session, &artist_id, locale.as_deref().unwrap_or(""))
+        .artist_overview(&session, &artist_id, locale.as_deref().unwrap_or(""))
         .await
+    {
+        Ok(overview) => overview,
+        // Pathfinder itself can be unreachable/rate-limited/hash-rejected —
+        // distinct from the field-level "topTracks was empty" case below.
+        // Top tracks must not go missing just because concerts (which was
+        // always allowed to fail) shares a request with it now; concerts is
+        // the only piece genuinely lost here.
+        Err(error) => {
+            log::warn!(
+                target: "spotify.artist",
+                "artist overview via Pathfinder failed for {artist_id}, falling back to REST-only: {error}"
+            );
+            crate::spotify::ArtistOverview {
+                stats: Default::default(),
+                top_tracks: Vec::new(),
+                concerts: crate::spotify::ConcertFeed::unavailable(),
+            }
+        }
+    };
+    if overview.top_tracks.is_empty() {
+        let t = token(&state).await?;
+        match library::artist_tracks(&WebApi::new(), &t, &artist_id).await {
+            Ok(fallback) => overview.top_tracks = fallback,
+            Err(error) => log::warn!(
+                target: "spotify.artist",
+                "Pathfinder top tracks empty and REST fallback failed for {artist_id}: {error}"
+            ),
+        }
+    }
+    Ok(overview)
 }
 
 #[tauri::command]

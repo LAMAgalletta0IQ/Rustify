@@ -1,8 +1,23 @@
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use crate::error::AppResult;
 use crate::search::ArtistSummary;
 use crate::webapi::WebApi;
+
+/// How long a cached saved-tracks snapshot is trusted before re-fetching.
+/// Saves are rare relative to page views, and any explicit save/unsave
+/// invalidates the cache immediately anyway — this bound only covers passive
+/// drift from another device liking a track mid-session.
+const SAVED_TRACKS_CACHE_TTL: Duration = Duration::from_secs(300);
+
+#[derive(Debug, Clone)]
+pub struct SavedTracksSnapshot {
+    tracks: Vec<TrackSummary>,
+    fetched_at: Instant,
+}
 
 /// Flattened shape the UI renders. Keeping the Web API's nested envelopes out
 /// of the frontend keeps serialisation cheap and the Svelte components dumb.
@@ -474,22 +489,50 @@ pub async fn liked_tracks_by_artist(
     api: &WebApi,
     token: &str,
     artist_id: &str,
+    cache: &RwLock<Option<SavedTracksSnapshot>>,
 ) -> AppResult<Vec<TrackSummary>> {
+    let tracks = saved_tracks_snapshot(api, token, cache).await?;
+    Ok(tracks
+        .into_iter()
+        .filter(|track| track.artist_ids.iter().any(|id| id == artist_id))
+        .collect())
+}
+
+/// Every saved track, from cache when fresh. A cold or expired cache costs the
+/// same bounded walk `liked_tracks_by_artist` always did; a warm one costs
+/// nothing, which is what makes browsing several artists in a row affordable.
+async fn saved_tracks_snapshot(
+    api: &WebApi,
+    token: &str,
+    cache: &RwLock<Option<SavedTracksSnapshot>>,
+) -> AppResult<Vec<TrackSummary>> {
+    if let Some(snapshot) = cache.read().await.as_ref() {
+        if snapshot.fetched_at.elapsed() < SAVED_TRACKS_CACHE_TTL {
+            return Ok(snapshot.tracks.clone());
+        }
+    }
     let mut result = Vec::new();
     // Bound the walk so an enormous library cannot monopolize the API quota.
     // The UI describes the result as the checked portion when this cap is hit.
     for offset in (0..500).step_by(50) {
         let page = saved_tracks(api, token, 50, offset).await?;
         let count = page.len();
-        result.extend(
-            page.into_iter()
-                .filter(|track| track.artist_ids.iter().any(|id| id == artist_id)),
-        );
+        result.extend(page);
         if count < 50 {
             break;
         }
     }
+    *cache.write().await = Some(SavedTracksSnapshot {
+        tracks: result.clone(),
+        fetched_at: Instant::now(),
+    });
     Ok(result)
+}
+
+/// Drops the saved-tracks snapshot. Call after any save/unsave so the next
+/// artist page reflects it immediately instead of waiting out the TTL.
+pub async fn invalidate_saved_tracks_cache(cache: &RwLock<Option<SavedTracksSnapshot>>) {
+    *cache.write().await = None;
 }
 
 async fn library_saved(
