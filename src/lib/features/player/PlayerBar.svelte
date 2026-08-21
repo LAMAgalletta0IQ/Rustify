@@ -313,8 +313,6 @@
     color: var(--ink);
   }
   .pp:hover {
-    background: #fff;
-    color: var(--ink);
     transform: scale(1.05);
   }
   .dots {
