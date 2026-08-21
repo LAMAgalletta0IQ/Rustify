@@ -467,6 +467,19 @@ export interface SearchResults {
   hasMore: boolean;
 }
 
+export interface UserSearchHit {
+  uri: string;
+  username: string;
+  displayName: string;
+  imageUrl: string | null;
+}
+
+export interface UserSearchPage {
+  users: UserSearchHit[];
+  total: number;
+  nextOffset: number | null;
+}
+
 export interface QueueView {
   currentlyPlaying: TrackSummary | null;
   previous: TrackSummary[];

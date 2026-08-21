@@ -23,6 +23,7 @@ import type {
   QueueView,
   RecentActivityItem,
   SearchResults,
+  UserSearchPage,
   SleepTimerStatus,
   TrackSummary,
   EqualizerPreset,
@@ -223,6 +224,8 @@ export const getFriendActivity = () =>
   invoke<FriendFeed>("get_friend_activity");
 export const getUserProfile = (username?: string) =>
   invoke<UserProfile>("get_user_profile", { username });
+export const searchUsers = (query: string, limit = 12, offset = 0) =>
+  invoke<UserSearchPage>("search_users", { query, limit, offset });
 
 // ---- search -------------------------------------------------------------
 export const searchSpotify = (query: string, limit?: number, offset?: number) =>

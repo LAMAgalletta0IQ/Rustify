@@ -1373,6 +1373,26 @@ pub async fn get_user_profile(
     Ok(profile)
 }
 
+#[tauri::command]
+pub async fn search_users(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> AppResult<crate::spotify::UserSearchPage> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    state
+        .internal_spotify
+        .search_users(&session, &query, limit.unwrap_or(12), offset.unwrap_or(0))
+        .await
+}
+
 // ---- search -------------------------------------------------------------
 
 #[tauri::command]

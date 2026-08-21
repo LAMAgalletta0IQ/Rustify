@@ -7,11 +7,13 @@ mod credits;
 mod dj;
 mod home;
 mod pathfinder;
+mod users;
 
 pub use concerts::ConcertFeed;
 pub use credits::TrackCredits;
 pub use dj::DjSession;
 pub use home::HomeFeed;
+pub use users::UserSearchPage;
 
 use librespot::core::session::Session;
 
@@ -47,6 +49,27 @@ async fn first_party_auth(session: &Session) -> AppResult<FirstPartyAuth> {
 }
 
 impl InternalSpotify {
+    pub async fn search_users(
+        &self,
+        session: &Session,
+        query: &str,
+        limit: u32,
+        offset: u32,
+    ) -> AppResult<UserSearchPage> {
+        let auth = first_party_auth(session).await?;
+        let data = self
+            .pathfinder
+            .query(
+                "searchUsers",
+                users::variables(query, limit, offset)?,
+                &auth.access_token,
+                &auth.client_token,
+                &auth.connection_id,
+            )
+            .await?;
+        users::parse(&data)
+    }
+
     pub async fn track_credits(
         &self,
         session: &Session,

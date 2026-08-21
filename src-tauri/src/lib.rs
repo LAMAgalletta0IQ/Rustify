@@ -180,6 +180,7 @@ pub fn run() {
             commands::get_lyrics,
             commands::get_friend_activity,
             commands::get_user_profile,
+            commands::search_users,
             // search
             commands::search_spotify,
             // queue

@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as api from "../api";
   import { store } from "../store.svelte";
-  import type { ArtistSummary, PlaylistSummary, TrackSummary, UserProfile } from "../types";
+  import type { ArtistSummary, PlaylistSummary, TrackSummary, UserProfile, UserSearchHit } from "../types";
 
   let { onBack }: { onBack: () => void } = $props();
   let topArtists = $state<ArtistSummary[]>([]);
@@ -11,6 +11,9 @@
   let profileLoading = $state(true);
   let profileError = $state<string | null>(null);
   let profileQuery = $state("");
+  let userResults = $state<UserSearchHit[]>([]);
+  let userSearchLoading = $state(false);
+  let searchTimer: number | null = null;
   let loading = $state(true);
   let partialError = $state<string | null>(null);
 
@@ -46,11 +49,33 @@
     try {
       profile = await api.getUserProfile(username);
       profileQuery = "";
+      userResults = [];
     } catch (error) {
       profileError = store.handleError(error, false).message;
     } finally {
       profileLoading = false;
     }
+  }
+
+  function searchProfileInput() {
+    if (searchTimer !== null) clearTimeout(searchTimer);
+    const query = profileQuery.trim();
+    if (query.length < 2 || query.startsWith("spotify:user:") || query.includes("open.spotify.com/user/")) {
+      userResults = [];
+      return;
+    }
+    searchTimer = window.setTimeout(async () => {
+      userSearchLoading = true;
+      try {
+        userResults = (await api.searchUsers(query)).users;
+      } catch {
+        // Exact profile opening still works when the optional fuzzy operation
+        // is unavailable for this account/region.
+        userResults = [];
+      } finally {
+        userSearchLoading = false;
+      }
+    }, 300);
   }
 
   function submitProfile(event: SubmitEvent) {
@@ -70,7 +95,9 @@
   <button class="back" onclick={onBack}>← Back</button>
   <form class="profile-search" onsubmit={submitProfile}>
     <label for="profile-user">Open a Spotify profile</label>
-    <div><input id="profile-user" bind:value={profileQuery} placeholder="Username, spotify:user: URI, or profile URL" /><button disabled={!profileQuery.trim() || profileLoading}>Open</button></div>
+    <div><input id="profile-user" bind:value={profileQuery} oninput={searchProfileInput} autocomplete="off" placeholder="Name, username, user URI, or profile URL" /><button disabled={!profileQuery.trim() || profileLoading}>Open</button></div>
+    {#if userSearchLoading}<small class="muted">Searching people…</small>{/if}
+    {#if userResults.length}<div class="user-results" role="listbox" aria-label="Spotify users">{#each userResults as user (user.uri)}<button type="button" onclick={() => loadProfile(user.username)}>{#if user.imageUrl}<img src={user.imageUrl} alt="" loading="lazy" />{:else}<span class="result-avatar"></span>{/if}<span><strong>{user.displayName}</strong><small>{user.username}</small></span></button>{/each}</div>{/if}
   </form>
 
   <header style:background={profileColor()}>
@@ -119,6 +146,13 @@
   .profile-search input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--glass); color: var(--fg); }
   .profile-search button { padding: 8px 14px; border-radius: var(--r-sm); background: var(--accent); color: #14100d; font-weight: 700; }
   .profile-search button:disabled { opacity: .45; }
+  .user-results { display: grid !important; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px !important; padding: 8px; border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--glass); }
+  .user-results button { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 7px 8px; text-align: left; border-radius: var(--r-sm); background: transparent; color: var(--fg); }
+  .user-results button:hover { background: var(--glass-strong); }
+  .user-results img,.result-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex: none; background: var(--glass-strong); }
+  .user-results span:not(.result-avatar) { display: flex; min-width: 0; flex-direction: column; }
+  .user-results strong,.user-results small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-results small { color: var(--fg-dim); }
   section { margin-top: 14px; padding: 18px 20px; border: 1px solid var(--hairline); background: var(--glass); border-radius: var(--r-md); }
   h2 { margin: 0 0 10px; font-size: 15px; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -140,5 +174,5 @@
   .notice { padding: 11px 14px; border: 1px solid rgba(220,190,90,.3); border-radius: var(--r-sm); background: rgba(190,160,50,.14); }
   .account { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
   .danger { padding: 8px 13px; border: 1px solid rgba(220,90,100,.4); border-radius: var(--r-sm); color: #ffb3b3; flex: none; }
-  @media (max-width: 700px) { .tiles { grid-template-columns: repeat(3,minmax(0,1fr)); } .stats { grid-template-columns: 1fr; } }
+  @media (max-width: 700px) { .tiles { grid-template-columns: repeat(3,minmax(0,1fr)); } .stats,.user-results { grid-template-columns: 1fr; } }
 </style>
