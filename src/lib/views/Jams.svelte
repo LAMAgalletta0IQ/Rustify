@@ -9,11 +9,8 @@
   let status = $state<JamStatus | null>(null);
   let joinId = $state("");
   let busy = $state(false);
-  let events = $state<JamEventPayload[]>([]);
   let copied = $state(false);
   let unlisten: UnlistenFn | null = null;
-
-  const MAX_EVENTS = 50;
 
   async function refresh() {
     try {
@@ -89,16 +86,12 @@
     }
   }
 
-  /** Keep the feed readable when a payload embeds a whole state object. */
-  function fmt(ev: JamEventPayload): string {
-    const s = JSON.stringify(ev);
-    return s.length > 220 ? `${s.slice(0, 220)}…` : s;
-  }
-
   onMount(async () => {
     await refresh();
-    unlisten = await listen<JamEventPayload>(EVENT_JAMS, (e) => {
-      events = [...events.slice(-(MAX_EVENTS - 1)), e.payload];
+    // Any dealer push (member joined/left, queue changed, permissions
+    // changed…) means the session snapshot is stale; re-fetch rather than
+    // trying to apply the push payload's shape locally.
+    unlisten = await listen<JamEventPayload>(EVENT_JAMS, () => {
       void refresh();
     });
   });
@@ -109,12 +102,10 @@
 </script>
 
 <div class="jams">
-  <h2>Jams</h2>
+  <h2>Jam</h2>
   <p class="muted">
-    Social listening sessions, over Spotify's internal social-connect service.
-    This is experimental: the endpoint paths ship as defaults but are internal
-    and can change, in which case they are overridden from <code>jams.toml</code>
-    in the app data dir rather than in code (see README_jams.md).
+    Listen together — everyone in the jam hears the same track at the same
+    time, and can add to a shared queue.
   </p>
 
   <div class="actions">
@@ -159,27 +150,16 @@
     {/if}
   </div>
 
-  {#if status}
-    <div class="config muted">
-      spclient endpoints: {status.spclientEndpoints} captured · pathfinder
-      hashes: {status.pathfinderHashes} captured
-    </div>
-    {#if status.spclientEndpoints === 0}
-      <p class="hint muted">
-        No jam endpoints configured — create/join will fail with a clear
-        configuration message. Restore the defaults by deleting the
-        <code>[spclient_endpoints]</code> table from <code>jams.toml</code> in
-        the app data dir (see README_jams.md).
-      </p>
-    {/if}
+  {#if status && status.spclientEndpoints === 0}
+    <p class="hint muted">
+      Jam isn’t configured on this install. Restoring the app’s default
+      settings will fix it — see README_jams.md if you customized them.
+    </p>
   {/if}
 
   {#if status?.session}
     <div class="session glass">
       <h3>Session</h3>
-      <p>
-        Jam <code class="mono">{status.session.id}</code>
-      </p>
       <p class="muted">
         {status.session.members.length} member{status.session.members.length === 1 ? "" : "s"} ·{" "}
         {status.session.queue.length} track{status.session.queue.length === 1 ? "" : "s"} in queue
@@ -230,14 +210,6 @@
     </div>
   {/if}
 
-  {#if events.length}
-    <h3 class="sec">Live events</h3>
-    <ul class="feed">
-      {#each events as ev (fmt(ev))}
-        <li class="muted mono">{fmt(ev)}</li>
-      {/each}
-    </ul>
-  {/if}
 </div>
 
 <style>
@@ -262,10 +234,6 @@
   }
   .join .find input {
     width: 220px;
-  }
-  .config {
-    font-size: 12px;
-    margin: 4px 0 14px;
   }
   .hint {
     font-size: 13px;
@@ -342,18 +310,5 @@
   }
   .danger {
     color: #ff9b9b;
-  }
-  .feed {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: grid;
-    gap: 6px;
-  }
-  .feed li {
-    padding: 8px 12px;
-    border-radius: var(--r-sm);
-    background: var(--glass);
-    border: 1px solid var(--hairline);
   }
 </style>
