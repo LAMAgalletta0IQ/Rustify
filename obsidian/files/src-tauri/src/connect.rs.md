@@ -3,10 +3,15 @@ tags: [file, backend, webapi, playback, rust]
 ---
 # `src-tauri/src/connect.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **94 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **~114 lines**
 
 Lists Connect devices, moves playback between them, and reads what is playing
 account-wide.
+
+> `RemotePlayback` gained a `context: Option<RemoteContext>` field (just a
+> `uri`) since this was last reviewed — used by [[player.rs]]'s
+> `apply_remote` to populate `PlaybackState.context_uri` from a remote poll,
+> same field a local `SetQueue` event populates from the Spirc side.
 
 ## Key items
 
@@ -27,9 +32,11 @@ The `/me/player` payload: `device`, `is_playing`, `progress_ms`, `item`,
 `artists`/`album`, hence the `#[serde(default)]`s.
 
 ### `async fn current_playback(api, token) -> Option<RemotePlayback>`
-`GET /me/player`. `Ok(None)` on HTTP 204 — nothing playing anywhere. Driven by
-`spawn_remote_poller` in [[player.rs]]; the only way to see playback on another
-device, since `PlayerEvent`s describe only this app's own audio.
+`GET /me/player`. `Ok(None)` on HTTP 204 — nothing playing anywhere. Called by
+`spawn_remote_poller` in [[player.rs]], which is now a **fallback**, not the
+primary source — [[remote_state.rs]]'s Dealer-driven cluster mirror covers
+most of what this endpoint used to be the only way to see. `PlayerEvent`s
+still describe only this app's own audio either way.
 
 ### `async fn list_devices(api, token) -> Vec<Device>`
 `GET /me/player/devices`, unwrapping the `{devices: [...]}` envelope. Includes
