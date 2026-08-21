@@ -612,6 +612,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
     *state.playback.write().await = PlaybackState::default();
     *state.queue.write().await = QueueView::default();
     state.lyrics_cache.write().await.clear();
+    state.lyrics_requests.lock().await.clear();
     state.audio_capability_cache.write().await.clear();
     *state.friend_activity.write().await = crate::friends::FriendFeed::default();
 
@@ -1353,6 +1354,23 @@ pub async fn get_lyrics(
     album_name: String,
     duration_ms: u32,
 ) -> AppResult<LyricsResult> {
+    crate::lyrics::validate_track_uri(&track_uri)?;
+    if let Some(cached) = state.lyrics_cache.read().await.get(&track_uri).cloned() {
+        return Ok(cached);
+    }
+
+    const MAX_LYRICS_CACHE_ENTRIES: usize = 64;
+    let request_gate = {
+        let mut requests = state.lyrics_requests.lock().await;
+        if requests.len() >= MAX_LYRICS_CACHE_ENTRIES && !requests.contains_key(&track_uri) {
+            requests.clear();
+        }
+        requests
+            .entry(track_uri.clone())
+            .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    let _request_guard = request_gate.lock().await;
     if let Some(cached) = state.lyrics_cache.read().await.get(&track_uri).cloned() {
         return Ok(cached);
     }
@@ -1378,7 +1396,6 @@ pub async fn get_lyrics(
     .await?;
 
     let mut cache = state.lyrics_cache.write().await;
-    const MAX_LYRICS_CACHE_ENTRIES: usize = 64;
     if cache.len() >= MAX_LYRICS_CACHE_ENTRIES && !cache.contains_key(&track_uri) {
         // Lyrics are immutable enough for a session; clearing at the hard
         // bound is cheap and keeps memory use deterministic without another

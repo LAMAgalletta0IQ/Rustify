@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use librespot::connect::Spirc;
 use librespot::core::session::Session;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{watch, Mutex, RwLock};
 
 use crate::audio::{AudioRuntime, StreamQuality};
 
@@ -206,6 +206,9 @@ pub struct AppState {
     /// but must not trigger another internal lyrics request for the same URI.
     /// The command enforces a fixed upper bound before inserting.
     pub lyrics_cache: RwLock<HashMap<String, crate::lyrics::LyricsResult>>,
+    /// Per-track gates prevent the Now Playing view and a concurrent refresh
+    /// from issuing duplicate first-party/fallback requests for the same URI.
+    pub lyrics_requests: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Per-session format/storage capability snapshots. Storage URLs are never
     /// retained, only safe booleans/counts, so this can have a long TTL.
     pub audio_capability_cache: RwLock<HashMap<String, crate::audio_capabilities::AudioCapability>>,

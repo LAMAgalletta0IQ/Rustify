@@ -18,7 +18,7 @@
   let lyricsPanel=$state<HTMLElement|null>(null); let autoFollow=$state(true); let fullscreen=$state(false); let panel=$state<"lyrics"|"queue">("lyrics"); let volumeDraft=$state<number|null>(null);
   const volumePct=$derived(volumeDraft??volumeToPercent(pb.volume)); const pct=$derived(pb.durationMs?pb.positionMs/pb.durationMs*100:0);
   const sleepRemainingSeconds=$derived(sleepTimer?.mode==="duration"&&sleepTimer.endsAtUnixMs!==null?Math.max(0,Math.ceil((sleepTimer.endsAtUnixMs-sleepClockMs)/1000)):sleepTimer?.remainingSeconds??null);
-  const activeLine=$derived.by(()=>{if(!lyrics?.synced.length)return -1;let active=-1;for(let i=0;i<lyrics.synced.length;i++){if(lyrics.synced[i].startMs>pb.positionMs)break;active=i}return active});
+  const activeLine=$derived.by(()=>{if(!lyrics?.synced.length)return -1;let active=-1;for(let i=0;i<lyrics.synced.length;i++){const line=lyrics.synced[i];if(line.startMs>pb.positionMs)break;active=line.endMs===null||pb.positionMs<line.endMs?i:-1}return active});
   function rgbFromArgb(value:number){return `#${((value>>>0)&0xffffff).toString(16).padStart(6,"0")}`}
   const lyricsStyle=$derived(lyrics?.colors?`--lyrics-bg:${rgbFromArgb(lyrics.colors.background)};--lyrics-text:${rgbFromArgb(lyrics.colors.text)};--lyrics-highlight:${rgbFromArgb(lyrics.colors.highlightText)}`:undefined);
   async function refresh(){loading=true;try{queue=await api.getQueue()}catch(e){store.handleError(e)}finally{loading=false}}
