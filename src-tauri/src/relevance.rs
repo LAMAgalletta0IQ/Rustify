@@ -121,6 +121,18 @@ pub fn rank(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+
+    fn fixture_dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "rustify-relevance-{}-{}-{}",
+            std::process::id(),
+            now_ms(),
+            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
 
     fn item(uri: &str, frequency: u32) -> RecentActivityItem {
         RecentActivityItem {
@@ -138,7 +150,7 @@ mod tests {
 
     #[test]
     fn repeated_recent_contexts_rank_above_single_older_items() {
-        let dir = std::env::temp_dir().join(format!("rustify-relevance-{}", now_ms()));
+        let dir = fixture_dir();
         std::fs::create_dir_all(&dir).unwrap();
         let ranked = rank(
             &dir,
@@ -152,7 +164,7 @@ mod tests {
 
     #[test]
     fn ranking_deduplicates_uris() {
-        let dir = std::env::temp_dir().join(format!("rustify-relevance-{}", now_ms()));
+        let dir = fixture_dir();
         std::fs::create_dir_all(&dir).unwrap();
         let ranked = rank(&dir, "account", vec![item("same", 1), item("same", 2)], 6);
         assert_eq!(ranked.len(), 1);
