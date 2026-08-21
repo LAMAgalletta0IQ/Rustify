@@ -14,6 +14,7 @@ mod library;
 mod lyrics;
 mod media_keys;
 mod player;
+mod podcasts;
 mod profiles;
 mod queue;
 mod relevance;
@@ -163,6 +164,8 @@ pub fn run() {
             commands::get_artist,
             commands::get_artist_concerts,
             commands::get_track_credits,
+            commands::get_episode_resume,
+            commands::set_episode_completed,
             commands::get_top_tracks,
             commands::get_top_artists,
             commands::get_personalized_home,

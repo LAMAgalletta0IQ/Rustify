@@ -376,6 +376,13 @@ export interface TrackCredits {
   groups: CreditGroup[];
 }
 
+export interface EpisodeResume {
+  uri: string;
+  positionMs: number;
+  completed: boolean;
+  hasState: boolean;
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

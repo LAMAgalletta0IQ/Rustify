@@ -32,6 +32,10 @@ pub fn percent_to_volume(percent: u8) -> u16 {
 fn playback_config(quality: StreamQuality, crossfade_seconds: u8) -> PlayerConfig {
     PlayerConfig {
         bitrate: quality.bitrate(),
+        // Besides keeping long-form UI state fresh, this gives podcast
+        // resumption a bounded one-minute checkpoint if the process exits
+        // without a normal pause/unload event.
+        position_update_interval: Some(std::time::Duration::from_secs(60)),
         // The player owns both decoders, so overlap happens before Rustify's
         // output-device/EQ sink and remains a single continuous sink stream.
         // PlayerConfig's default keeps gapless playback enabled; crossfade
@@ -119,7 +123,7 @@ pub async fn start_session(
         log::info!("spirc task ended");
     });
 
-    spawn_event_pump(app.clone(), event_rx, tokens);
+    spawn_event_pump(app.clone(), event_rx, tokens, session.clone());
 
     // Deliberately NOT activated here. `Spirc::activate` makes this the active
     // Connect device, which pauses whatever is playing on the user's phone or
@@ -161,6 +165,7 @@ fn spawn_event_pump(
     app: AppHandle,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>,
     tokens: TokenStore,
+    session: Session,
 ) {
     tauri::async_runtime::spawn(async move {
         let api = WebApi::new();
@@ -171,6 +176,8 @@ fn spawn_event_pump(
             let mut pb = state.playback.write().await;
 
             let mut track_to_resolve: Option<SpotifyUri> = None;
+            let mut resume_report: Option<(String, u64)> = None;
+            let mut resume_lookup: Option<String> = None;
 
             match event {
                 PlayerEvent::SessionConnected { .. } => {
@@ -203,6 +210,9 @@ fn spawn_event_pump(
                     pb.is_active_device = true;
                     state.active_device.set(true);
                     pb.set_position(position_ms);
+                    if track_id.item_type() == "episode" && position_ms > 0 {
+                        resume_report = Some((track_id.to_uri(), u64::from(position_ms)));
+                    }
                     track_to_resolve = Some(track_id);
                 }
                 PlayerEvent::Loading {
@@ -214,17 +224,37 @@ fn spawn_event_pump(
                     pb.is_active_device = true;
                     state.active_device.set(true);
                     pb.set_position(position_ms);
+                    if track_id.item_type() == "episode" && position_ms == 0 {
+                        resume_lookup = Some(track_id.to_uri());
+                    }
                     track_to_resolve = Some(track_id);
                 }
-                PlayerEvent::Stopped { .. } => {
+                PlayerEvent::Stopped { track_id, .. } => {
+                    pb.refresh_position();
+                    if track_id.item_type() == "episode" && pb.position_ms > 0 {
+                        resume_report = Some((track_id.to_uri(), u64::from(pb.position_ms)));
+                    }
                     pb.is_playing = false;
                     pb.is_loading = false;
                     pb.set_position(0);
                 }
-                PlayerEvent::PositionCorrection { position_ms, .. }
-                | PlayerEvent::PositionChanged { position_ms, .. }
-                | PlayerEvent::Seeked { position_ms, .. } => {
+                PlayerEvent::PositionCorrection { position_ms, .. } => {
                     pb.set_position(position_ms);
+                }
+                PlayerEvent::PositionChanged {
+                    track_id,
+                    position_ms,
+                    ..
+                }
+                | PlayerEvent::Seeked {
+                    track_id,
+                    position_ms,
+                    ..
+                } => {
+                    pb.set_position(position_ms);
+                    if track_id.item_type() == "episode" && position_ms > 0 {
+                        resume_report = Some((track_id.to_uri(), u64::from(position_ms)));
+                    }
                 }
                 PlayerEvent::VolumeChanged { volume } => {
                     pb.volume = volume;
@@ -243,12 +273,23 @@ fn spawn_event_pump(
                     // Spirc emits this when a Connect cluster update shows a
                     // different device took over as active — see
                     // `ActiveDeviceSignal`'s doc comment for the code path.
+                    pb.refresh_position();
+                    if let Some(track) = pb
+                        .track
+                        .as_ref()
+                        .filter(|track| track.uri.starts_with("spotify:episode:"))
+                    {
+                        resume_report = Some((track.uri.clone(), u64::from(pb.position_ms)));
+                    }
                     pb.is_active_device = false;
                     pb.is_playing = false;
                     state.active_device.set(false);
                 }
-                PlayerEvent::EndOfTrack { .. } => {
+                PlayerEvent::EndOfTrack { track_id, .. } => {
                     drop(pb);
+                    if track_id.item_type() == "episode" {
+                        crate::podcasts::spawn_report(session.clone(), track_id.to_uri(), 0, true);
+                    }
                     state.sleep_timer.on_end_of_track(&app).await;
                     continue;
                 }
@@ -299,9 +340,51 @@ fn spawn_event_pump(
             if let Err(e) = app.emit(events::PLAYBACK, &snapshot) {
                 log::warn!("failed to emit playback state: {e}");
             }
+            if let Some((uri, position_ms)) = resume_report {
+                crate::podcasts::spawn_report(session.clone(), uri, position_ms, false);
+            }
+            if let Some(uri) = resume_lookup {
+                spawn_resume_lookup(app.clone(), session.clone(), uri);
+            }
         }
 
         log::info!("player event pump ended");
+    });
+}
+
+fn spawn_resume_lookup(app: AppHandle, session: Session, uri: String) {
+    tauri::async_runtime::spawn(async move {
+        let resume = match crate::podcasts::get(&session, &uri).await {
+            Ok(resume) if !resume.completed && resume.position_ms > 0 => resume,
+            Ok(_) => return,
+            Err(error) => {
+                log::debug!(target: "spotify.podcasts", "automatic resume lookup failed for {uri}: {error}");
+                return;
+            }
+        };
+        let state = app.state::<AppState>();
+        let still_current = {
+            let playback = state.playback.read().await;
+            playback.is_active_device
+                && playback
+                    .track
+                    .as_ref()
+                    .is_some_and(|track| track.uri == uri)
+                && playback.position_ms <= 2_000
+        };
+        if !still_current {
+            return;
+        }
+        let spotify = state.spotify.read().await;
+        let Some(spotify) = spotify.as_ref() else {
+            return;
+        };
+        let position = resume.position_ms.min(u64::from(u32::MAX)) as u32;
+        if let Err(error) = spotify.spirc.set_position_ms(position) {
+            log::debug!(target: "spotify.podcasts", "automatic resume seek failed for {uri}: {error}");
+        } else {
+            log::debug!(target: "spotify.podcasts", "resumed {uri} at {position}ms");
+        }
     });
 }
 

@@ -547,7 +547,19 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
 pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     state.device_auth.cancel().await;
     state.sleep_timer.cancel(None).await;
+    let episode_checkpoint = {
+        let mut playback = state.playback.write().await;
+        playback.refresh_position();
+        playback
+            .track
+            .as_ref()
+            .filter(|track| track.uri.starts_with("spotify:episode:"))
+            .map(|track| (track.uri.clone(), u64::from(playback.position_ms)))
+    };
     if let Some(s) = state.spotify.write().await.take() {
+        if let Some((uri, position_ms)) = episode_checkpoint {
+            crate::podcasts::spawn_report(s.session.clone(), uri, position_ms, false);
+        }
         let _ = s.spirc.shutdown();
         s.refresh_task.abort();
         s.remote_task.abort();
@@ -763,6 +775,34 @@ pub async fn load_context(
     // "SpircCommand::Activate will be ignored while already active".
     let activate = !state.playback.read().await.is_active_device;
 
+    let requested_episode = track_uri
+        .as_deref()
+        .filter(|uri| uri.starts_with("spotify:episode:"))
+        .or_else(|| {
+            context_uri
+                .starts_with("spotify:episode:")
+                .then_some(context_uri.as_str())
+        });
+    let seek_to = if let Some(uri) = requested_episode {
+        let session = state
+            .spotify
+            .read()
+            .await
+            .as_ref()
+            .map(|spotify| spotify.session.clone())
+            .ok_or(AppError::NotLoggedIn)?;
+        match crate::podcasts::get(&session, uri).await {
+            Ok(resume) if !resume.completed => resume.position_ms.min(u64::from(u32::MAX)) as u32,
+            Ok(_) => 0,
+            Err(error) => {
+                log::debug!(target: "spotify.podcasts", "episode resume lookup failed safely: {error}");
+                0
+            }
+        }
+    } else {
+        0
+    };
+
     with_spirc(&state, move |s| {
         if activate {
             s.activate()?;
@@ -771,6 +811,7 @@ pub async fn load_context(
             context_uri,
             LoadRequestOptions {
                 start_playing: true,
+                seek_to,
                 playing_track: track_uri.map(PlayingTrack::Uri),
                 ..Default::default()
             },
@@ -794,6 +835,30 @@ pub async fn load_tracks(
     }
     let activate = !state.playback.read().await.is_active_device;
 
+    let requested_episode = start_uri
+        .as_deref()
+        .or_else(|| uris.first().map(String::as_str))
+        .filter(|uri| uri.starts_with("spotify:episode:"));
+    let seek_to = if let Some(uri) = requested_episode {
+        let session = state
+            .spotify
+            .read()
+            .await
+            .as_ref()
+            .map(|spotify| spotify.session.clone())
+            .ok_or(AppError::NotLoggedIn)?;
+        match crate::podcasts::get(&session, uri).await {
+            Ok(resume) if !resume.completed => resume.position_ms.min(u64::from(u32::MAX)) as u32,
+            Ok(_) => 0,
+            Err(error) => {
+                log::debug!(target: "spotify.podcasts", "episode resume lookup failed safely: {error}");
+                0
+            }
+        }
+    } else {
+        0
+    };
+
     with_spirc(&state, move |s| {
         if activate {
             s.activate()?;
@@ -802,6 +867,7 @@ pub async fn load_tracks(
             uris,
             LoadRequestOptions {
                 start_playing: true,
+                seek_to,
                 playing_track: start_uri.map(PlayingTrack::Uri),
                 ..Default::default()
             },
@@ -1115,6 +1181,37 @@ pub async fn get_track_credits(
         .internal_spotify
         .track_credits(&session, &track_uri)
         .await
+}
+
+#[tauri::command]
+pub async fn get_episode_resume(
+    state: State<'_, AppState>,
+    episode_uri: String,
+) -> AppResult<crate::podcasts::EpisodeResume> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    crate::podcasts::get(&session, &episode_uri).await
+}
+
+#[tauri::command]
+pub async fn set_episode_completed(
+    state: State<'_, AppState>,
+    episode_uri: String,
+    completed: bool,
+) -> AppResult<()> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    crate::podcasts::set_completed(&session, &episode_uri, completed).await
 }
 
 #[tauri::command]
