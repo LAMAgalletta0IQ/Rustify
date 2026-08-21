@@ -142,6 +142,14 @@ pub struct Settings {
     pub output_device: Option<String>,
     #[serde(default)]
     pub equalizer: EqualizerSettings,
+    /// Whether the collapsible Friend Activity rail is open. Defaults to
+    /// `true` to match the rail's previous always-visible behaviour on Home.
+    #[serde(default = "default_friends_panel_open")]
+    pub friends_panel_open: bool,
+}
+
+const fn default_friends_panel_open() -> bool {
+    true
 }
 
 const fn default_volume_percent() -> u8 {
@@ -163,6 +171,7 @@ impl Default for Settings {
             crossfade_seconds: 0,
             output_device: None,
             equalizer: EqualizerSettings::default(),
+            friends_panel_open: default_friends_panel_open(),
         }
     }
 }
@@ -983,6 +992,10 @@ mod settings_tests {
         assert_eq!(settings.cache_limit_mb, 2048);
         assert_eq!(settings.crossfade_seconds, 0);
         assert!(!settings.reduce_motion);
+        // A settings.json written before the friends panel existed must not
+        // silently hide it — the rail was always visible until this toggle
+        // existed, so an absent field means "open", not "closed".
+        assert!(settings.friends_panel_open);
     }
 
     #[test]

@@ -98,6 +98,7 @@ export interface AppSettings {
   crossfadeSeconds: number;
   outputDevice: string | null;
   equalizer: EqualizerSettings;
+  friendsPanelOpen: boolean;
 }
 
 export type StreamQuality = "automatic" | "low" | "normal" | "veryHigh";

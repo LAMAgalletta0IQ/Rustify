@@ -51,6 +51,7 @@ const defaultSettings: AppSettings = {
     activePresetId: "flat",
     customPresets: [],
   },
+  friendsPanelOpen: true,
 };
 
 class AppStore {
@@ -129,6 +130,21 @@ class AppStore {
 
   async saveSettings(settings: AppSettings) {
     this.settings = await api.updateSettings(settings);
+  }
+
+  /** Optimistic, rollback-on-failure toggle so the panel animates instantly
+   * instead of waiting on the settings round trip — same pattern TrackList's
+   * like button uses. */
+  async toggleFriendsPanel() {
+    const next = !this.settings.friendsPanelOpen;
+    const previous = this.settings;
+    this.settings = { ...this.settings, friendsPanelOpen: next };
+    try {
+      this.settings = await api.updateSettings(this.settings);
+    } catch (e) {
+      this.settings = previous;
+      this.handleError(e);
+    }
   }
 
   async saveAudioSettings(

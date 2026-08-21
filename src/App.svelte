@@ -10,6 +10,7 @@
   import iconUrl from "../src-tauri/icons/64x64.png";
   import { store } from "./lib/store.svelte";
   import PlayerBar from "./lib/features/player/PlayerBar.svelte";
+  import FriendsPanel from "./lib/features/social/FriendsPanel.svelte";
   import AlbumView from "./lib/views/AlbumView.svelte";
   import Home from "./lib/views/Home.svelte";
   import Jams from "./lib/views/Jams.svelte";
@@ -134,6 +135,16 @@
         <div class="spacer" data-tauri-drag-region></div>
 
         <button
+          class="friends-toggle"
+          class:on={store.settings.friendsPanelOpen}
+          onclick={() => void store.toggleFriendsPanel()}
+          aria-pressed={store.settings.friendsPanelOpen}
+          title={store.settings.friendsPanelOpen ? "Hide Friend Activity" : "Show Friend Activity"}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 20c0-3-2-5-5-5s-5 2-5 5" /><circle cx="12" cy="8" r="4" /></svg>
+        </button>
+
+        <button
           class="who"
           onclick={() => {
             profileOpen = true;
@@ -169,40 +180,46 @@
         </div>
       {/if}
 
-      <main bind:this={main} class:player-view={nowPlayingOpen}>
-        {#if openAlbum}
-          <AlbumView album={openAlbum} onBack={() => (openAlbum = null)} />
-        {:else if profileOpen}
-          <Profile onBack={() => (profileOpen = false)} />
-        {:else if nowPlayingOpen}
-          <NowPlaying
-            onClose={() => {
-              nowPlayingOpen = false;
-              fullscreenLyricsRequested = false;
-            }}
-            onNavigateArtwork={openArtworkDestination}
-            startFullscreen={fullscreenLyricsRequested}
-            onFullscreenChange={(value) => {
-              playerFullscreen = value;
-              if (!value) fullscreenLyricsRequested = false;
-            }}
-          />
-        {:else if tab === "home"}
-          <Home onBrowseLibrary={() => go("library")} onOpenForYou={() => go("forYou")} onOpenReleases={() => go("releases")} />
-        {:else if tab === "search"}
-          <Search />
-        {:else if tab === "releases"}
-          <Releases />
-        {:else if tab === "forYou"}
-          <ForYou />
-        {:else if tab === "library"}
-          <Library />
-        {:else if tab === "jams"}
-          <Jams />
-        {:else}
-          <Settings onReconfigure={reconfigure} />
+      <div class="content-row">
+        <main bind:this={main} class:player-view={nowPlayingOpen}>
+          {#if openAlbum}
+            <AlbumView album={openAlbum} onBack={() => (openAlbum = null)} />
+          {:else if profileOpen}
+            <Profile onBack={() => (profileOpen = false)} />
+          {:else if nowPlayingOpen}
+            <NowPlaying
+              onClose={() => {
+                nowPlayingOpen = false;
+                fullscreenLyricsRequested = false;
+              }}
+              onNavigateArtwork={openArtworkDestination}
+              startFullscreen={fullscreenLyricsRequested}
+              onFullscreenChange={(value) => {
+                playerFullscreen = value;
+                if (!value) fullscreenLyricsRequested = false;
+              }}
+            />
+          {:else if tab === "home"}
+            <Home onBrowseLibrary={() => go("library")} onOpenForYou={() => go("forYou")} onOpenReleases={() => go("releases")} />
+          {:else if tab === "search"}
+            <Search />
+          {:else if tab === "releases"}
+            <Releases />
+          {:else if tab === "forYou"}
+            <ForYou />
+          {:else if tab === "library"}
+            <Library />
+          {:else if tab === "jams"}
+            <Jams />
+          {:else}
+            <Settings onReconfigure={reconfigure} />
+          {/if}
+        </main>
+
+        {#if !playerFullscreen}
+          <FriendsPanel />
         {/if}
-      </main>
+      </div>
 
       {#if !playerFullscreen}
         <PlayerBar
@@ -391,6 +408,29 @@
     align-self: stretch;
   }
 
+  .friends-toggle {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    margin-right: 8px;
+    border-radius: 50%;
+    color: var(--fg-dim);
+    background: var(--glass);
+    border: 1px solid var(--hairline);
+    backdrop-filter: blur(var(--blur));
+  }
+  .friends-toggle:hover {
+    color: var(--fg);
+    background: var(--glass-hover);
+  }
+  .friends-toggle.on {
+    color: var(--accent);
+    background: var(--glass-strong);
+    border-color: var(--control-border-hover);
+  }
+
   .who {
     display: flex;
     align-items: center;
@@ -448,8 +488,18 @@
     backdrop-filter: blur(var(--blur));
   }
 
+  /* Row so the friends rail sits beside <main> as a real layout column
+     (pushing content, per the collapsible-panel design) rather than
+     overlapping it — the panel switches to a fixed overlay drawer under its
+     own breakpoint instead, at which point it no longer participates here. */
+  .content-row {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
   main {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
     min-height: 0;
     padding: 0 30px 8px;

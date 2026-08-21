@@ -1,14 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import * as api from "../api";
   import { store } from "../store.svelte";
   import type {
     AlbumSummary,
     ArtistSummary,
     DjSession,
-    FriendActivity,
-    FriendFeed,
     HomeFeed,
     HomeItem,
     PlaylistSummary,
@@ -32,9 +28,6 @@
   let discovery = $state<AlbumSummary[]>([]);
   let personalized = $state<HomeFeed | null>(null);
   let dj = $state<DjSession | null>(null);
-  let friends = $state<FriendFeed | null>(null);
-  let friendsLoading = $state(true);
-  let friendNow = $state(Date.now());
   let loadingRecent = $state(true);
   let loadingMix = $state(true);
   let loadingDiscovery = $state(true);
@@ -46,21 +39,6 @@
   let personalizedError = $state<string | null>(null);
   let djError = $state<string | null>(null);
   let reloadKey = $state(0);
-
-  onMount(() => {
-    let disposed = false;
-    let unlisten: UnlistenFn | undefined;
-    void api.getFriendActivity()
-      .then((feed) => { if (!disposed) friends = feed; })
-      .catch(() => {})
-      .finally(() => { if (!disposed) friendsLoading = false; });
-    void listen<FriendFeed>(api.EVENT_FRIENDS, (event) => {
-      friends = event.payload;
-      friendsLoading = false;
-    }).then((stop) => { if (disposed) stop(); else unlisten = stop; });
-    const clock = window.setInterval(() => friendNow = Date.now(), 30_000);
-    return () => { disposed = true; unlisten?.(); window.clearInterval(clock); };
-  });
 
   // Tracks image URLs that failed to *load* (wrong field, CSP block, expired
   // link…), as opposed to items with no URL at all — which already fall back
@@ -227,24 +205,6 @@
     store.run(() => api.loadTracks(topTracks.map((x) => x.uri), track.uri));
   }
 
-  function playFriend(entry: FriendActivity) {
-    if (entry.contextUri) store.run(() => api.loadContext(entry.contextUri!, entry.trackUri));
-    else store.run(() => api.loadTracks([entry.trackUri], entry.trackUri));
-  }
-
-  function friendTime(entry: FriendActivity) {
-    const age = Math.max(0, friendNow - entry.timestampMs);
-    if (age <= 2 * 60_000) return "Listening now";
-    if (age < 60 * 60_000) return `${Math.floor(age / 60_000)} min`;
-    if (age < 24 * 60 * 60_000) return `${Math.floor(age / 3_600_000)} hr`;
-    return `${Math.floor(age / 86_400_000)} d`;
-  }
-
-  function friendIsLive(entry: FriendActivity) {
-    const age = friendNow - entry.timestampMs;
-    return age >= 0 && age <= 120_000;
-  }
-
   function openPersonalized(item: HomeItem) {
     if (item.kind === "playlist") {
       openPlaylist = {
@@ -310,7 +270,6 @@
     onOpenAlbum={(album) => (openAlbum = album)}
   />
 {:else}
-  <div class="home-layout">
   <div class="home">
     <h1 class="greet">{greeting}</h1>
     <p class="greet-sub muted">
@@ -477,30 +436,6 @@
       {:else}<p class="muted">No supported release suggestions are available yet.</p>{/if}
     </section>
   </div>
-  <aside class="friends-rail" aria-labelledby="friends-heading">
-    <div class="section-head"><div><h2 id="friends-heading">Friends</h2></div></div>
-    {#if friendsLoading || friends?.status === "connecting"}
-      <div class="state compact"><span>Connecting…</span></div>
-    {:else if friends?.entries.length}
-      {#if friends.status === "stale"}<p class="muted rail-note">Showing cached activity while presence reconnects.</p>{/if}
-      <div class="friends">
-        {#each friends.entries as entry (entry.userUri)}
-          <button class="friend" onclick={() => playFriend(entry)}>
-            <span class="friend-avatar">{#if entry.userImageUrl && !brokenImages.has(entry.userImageUrl)}<img src={entry.userImageUrl} alt="" loading="lazy" onerror={() => onArtworkError(entry.userImageUrl)} />{:else}{entry.userName.slice(0,1).toUpperCase()}{/if}<i class:live={friendIsLive(entry)}></i></span>
-            <span class="friend-copy"><strong class="truncate">{entry.userName}</strong><span class="truncate">{entry.trackName}{entry.artistName?` · ${entry.artistName}`:""}</span><small class="truncate">{entry.contextName??entry.albumName??"Spotify"}</small></span>
-            <time>{friendTime(entry)}</time>
-          </button>
-        {/each}
-      </div>
-    {:else if friends?.status === "empty"}
-      <div class="state compact"><span>No friends are listening right now.</span></div>
-    {:else if friends?.status === "unavailable"}
-      <div class="state compact"><span>Friend activity isn’t available for this account or region.</span></div>
-    {:else}
-      <div class="state compact"><span>Unable to refresh friend activity. Retrying…</span></div>
-    {/if}
-  </aside>
-  </div>
 {/if}
 
 <style>
@@ -528,31 +463,7 @@
   .dj-copy p.dj-note { margin-top: 2px; font-size: 11px; color: var(--fg-faint); }
   .dj-action { flex: none; }
   .state { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--glass); border: 1px solid var(--hairline); border-radius: var(--r-md); color: var(--fg-dim); }
-  .home-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 260px); align-items: start; gap: 22px; }
-  .friends-rail { position: sticky; top: 0; padding-top: 18px; }
-  .friends-rail .section-head { margin-bottom: 10px; }
-  .friends-rail .section-head h2 { font-size: 15px; }
-  .rail-note { margin: 0 0 8px; font-size: 11px; }
-  .state.compact { flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; font-size: 12px; }
-  .friends { display: flex; flex-direction: column; gap: 8px; }
-  .friend { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 11px; text-align: left; border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--glass); }
-  .friend:hover { background: var(--glass-hover); }
-  .friend-avatar { position: relative; display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 50%; overflow: visible; background: var(--glass-strong); color: var(--fg-dim); }
-  .friend-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
-  .friend-avatar i { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--ink); background: var(--fg-dim); }
-  .friend-avatar i.live { background: var(--accent); }
-  .friend-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
-  .friend-copy span,.friend-copy small,.friend time { color: var(--fg-dim); font-size: 11px; }
-  .friend time { flex: none; align-self: flex-start; }
   .state button, .link { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
   @media (max-width: 900px) { .jump { grid-template-columns: repeat(2, minmax(0,1fr)); } }
   @media (max-width: 600px) { .jump { grid-template-columns: 1fr; } }
-  /* Below this the rail has no room to sit beside main content without
-     squeezing it; stack instead of shrinking the rail into uselessness. */
-  @media (max-width: 860px) {
-    .home-layout { display: block; }
-    .friends-rail { position: static; margin-top: 24px; padding-top: 0; }
-    .friends { flex-direction: row; flex-wrap: wrap; }
-    .friend { flex: 1 1 260px; }
-  }
 </style>

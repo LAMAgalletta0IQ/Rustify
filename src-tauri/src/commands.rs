@@ -237,6 +237,7 @@ pub struct AppSettings {
     pub crossfade_seconds: u8,
     pub output_device: Option<String>,
     pub equalizer: EqualizerSettings,
+    pub friends_panel_open: bool,
 }
 
 fn validate_crossfade(seconds: u8) -> AppResult<()> {
@@ -258,6 +259,7 @@ impl From<auth::Settings> for AppSettings {
             crossfade_seconds: value.crossfade_seconds,
             output_device: value.output_device,
             equalizer: value.equalizer,
+            friends_panel_open: value.friends_panel_open,
         }
     }
 }
@@ -330,6 +332,7 @@ pub fn update_settings(
     persisted.crossfade_seconds = settings.crossfade_seconds;
     persisted.output_device = settings.output_device;
     persisted.equalizer = settings.equalizer;
+    persisted.friends_panel_open = settings.friends_panel_open;
     auth::save_settings(&data_dir, &persisted)?;
     state
         .audio
@@ -1248,8 +1251,7 @@ pub async fn get_liked_tracks_by_artist(
     artist_id: String,
 ) -> AppResult<Vec<TrackSummary>> {
     let t = token(&state).await?;
-    library::liked_tracks_by_artist(&state.web_api, &t, &artist_id, &state.saved_tracks_cache)
-        .await
+    library::liked_tracks_by_artist(&state.web_api, &t, &artist_id, &state.saved_tracks_cache).await
 }
 
 #[tauri::command]
