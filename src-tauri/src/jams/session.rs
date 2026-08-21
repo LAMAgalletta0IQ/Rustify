@@ -15,21 +15,40 @@ use super::spclient::JamApiClient;
 use super::token::{AccessToken, TokenProvider};
 use super::{ClientIdentity, ConnectionId};
 
-/// A member of a jam, decoded best-effort from the API response. Field names
-/// follow the common casing; confirm against a live capture.
+/// A member of a social-connect session. This is the union of librespot's
+/// `social_connect_v2.proto` and the additional fields returned by the v3 HTTP
+/// session endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct JamMember {
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub is_host: bool,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+    #[serde(default)]
+    pub large_image_url: Option<String>,
+    #[serde(default)]
+    pub joined_timestamp: Option<i64>,
+    #[serde(default)]
+    pub is_listening: bool,
+    #[serde(default)]
+    pub is_controlling: bool,
+    #[serde(default)]
+    pub playback_control: Option<String>,
+    #[serde(default)]
+    pub is_current_user: bool,
 }
 
 /// A track in a jam queue, decoded best-effort.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct JamTrack {
     pub uri: String,
     #[serde(default)]
@@ -45,9 +64,13 @@ pub struct JamTrack {
 /// A jam and its current state. Parsed defensively: fields the response omits
 /// fall back to their defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct JamSession {
     pub id: String,
+    #[serde(default)]
+    pub timestamp: Option<i64>,
+    #[serde(default)]
+    pub owner_id: Option<String>,
     #[serde(default)]
     pub host: Option<JamMember>,
     #[serde(default)]
@@ -62,6 +85,37 @@ pub struct JamSession {
     /// Shareable invite link, `https://open.spotify.com/socialsession/<token>`.
     #[serde(default)]
     pub join_url: Option<String>,
+    /// Spotify URI form of the invite (`spotify:socialsession:<token>`).
+    #[serde(default)]
+    pub join_uri: Option<String>,
+    #[serde(default)]
+    pub is_session_owner: bool,
+    #[serde(default)]
+    pub is_listening: bool,
+    #[serde(default)]
+    pub is_controlling: bool,
+    #[serde(default)]
+    pub is_discoverable: bool,
+    #[serde(default)]
+    pub session_type: Option<String>,
+    #[serde(default)]
+    pub host_active_device_id: Option<String>,
+    #[serde(default)]
+    pub max_member_count: Option<u32>,
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default)]
+    pub queue_only_mode: bool,
+    #[serde(default = "default_true")]
+    pub queue_control_allowed: bool,
+    #[serde(default)]
+    pub wifi_broadcast: bool,
+    #[serde(default)]
+    pub host_device_info: Option<Value>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Everything the module needs to authenticate, gathered in one place because
@@ -136,6 +190,26 @@ impl JamManager {
         config: JamConfig,
         credentials: JamCredentials,
     ) -> Result<Self, JamError> {
+        Self::build(http, config, credentials, true)
+    }
+
+    /// Builds the HTTP clients without opening another Dealer websocket.
+    /// Host applications that already run librespot must use this and consume
+    /// social-connect updates from librespot's authenticated Dealer manager.
+    pub fn new_http_only(
+        http: reqwest::Client,
+        config: JamConfig,
+        credentials: JamCredentials,
+    ) -> Result<Self, JamError> {
+        Self::build(http, config, credentials, false)
+    }
+
+    fn build(
+        http: reqwest::Client,
+        config: JamConfig,
+        credentials: JamCredentials,
+        start_dealer: bool,
+    ) -> Result<Self, JamError> {
         let JamCredentials {
             identity,
             access_token,
@@ -168,14 +242,19 @@ impl JamManager {
             access_token.clone(),
             client_token.clone(),
         );
-        let (dealer, events) = DealerClient::new(
-            config.dealer_url.clone(),
-            connection_id,
-            access_token,
-            client_token,
-            256,
-        );
-        let dealer_task = Some(dealer.spawn());
+        let (dealer_task, events) = if start_dealer {
+            let (dealer, events) = DealerClient::new(
+                config.dealer_url.clone(),
+                connection_id,
+                access_token,
+                client_token,
+                256,
+            );
+            (Some(dealer.spawn()), events)
+        } else {
+            let (_tx, events) = mpsc::channel(1);
+            (None, events)
+        };
         Ok(Self {
             http,
             api,
@@ -191,12 +270,23 @@ impl JamManager {
     }
 
     /// Runs a registered Pathfinder persisted query by operation name.
-    pub async fn pathfinder_query(&self, operation_name: &str, variables: Value) -> Result<Value, JamError> {
-        self.pathfinder.query_registered(operation_name, variables).await
+    pub async fn pathfinder_query(
+        &self,
+        operation_name: &str,
+        variables: Value,
+    ) -> Result<Value, JamError> {
+        self.pathfinder
+            .query_registered(operation_name, variables)
+            .await
     }
 
     pub async fn create(&self, context_uri: Option<&str>) -> Result<JamSession, JamError> {
         let resp = self.api.create_jam(context_uri).await?;
+        self.hydrate(resp).await
+    }
+
+    pub async fn current(&self) -> Result<JamSession, JamError> {
+        let resp = self.api.current_jam().await?;
         self.hydrate(resp).await
     }
 
@@ -246,6 +336,21 @@ impl JamManager {
         Ok(())
     }
 
+    pub async fn set_queue_control(&self, allowed: bool) -> Result<JamSession, JamError> {
+        self.api.set_queue_control(allowed).await?;
+        self.current().await
+    }
+
+    pub async fn kick(&self, jam_id: &str, member_id: &str) -> Result<JamSession, JamError> {
+        let response = self.api.kick_member(jam_id, member_id).await?;
+        self.hydrate(response).await
+    }
+
+    pub async fn end(&self, jam_id: &str) -> Result<(), JamError> {
+        self.api.end_jam(jam_id).await?;
+        Ok(())
+    }
+
     /// Returns the dealer event stream. Ownership transfers to the caller, so
     /// call this exactly once and pass the receiver onward.
     pub fn events(&self) -> mpsc::Receiver<JamEvent> {
@@ -261,7 +366,7 @@ impl JamManager {
     /// shape unchanged. Pathfinder failure is logged, not fatal — the SpClient
     /// response already carries the jam id.
     async fn hydrate(&self, raw: Value) -> Result<JamSession, JamError> {
-        let mut session: JamSession = serde_json::from_value(normalize(raw))?;
+        let mut session = session_from_value(raw)?;
 
         match self
             .pathfinder
@@ -299,7 +404,6 @@ impl JamManager {
     }
 }
 
-
 /// Extracts the join token from whatever the user pasted: an invite link
 /// (`https://open.spotify.com/socialsession/<token>`, query string and all),
 /// a `spotify:socialsession:<token>` URI, or the bare token.
@@ -329,53 +433,162 @@ pub fn join_token(input: &str) -> &str {
         .unwrap_or(path)
 }
 
-/// Maps a social-connect session payload onto [`JamSession`]'s shape.
-///
-/// The service names its fields `session_id` / `session_members` /
-/// `session_owner_id`; deserialising it directly yields a session with an
-/// empty id and no members, which the UI shows as a jam that exists but has
-/// nobody in it. A payload already in our shape (or wrapped in a `jam` key)
-/// passes through untouched.
-fn normalize(raw: Value) -> Value {
+fn value<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a Value> {
+    names.iter().find_map(|name| raw.get(*name))
+}
+
+fn string(raw: &Value, names: &[&str]) -> Option<String> {
+    value(raw, names).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn boolean(raw: &Value, names: &[&str]) -> bool {
+    value(raw, names).and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Decodes a member from either protobuf-JSON snake_case or Web API
+/// camelCase. Internal services have used both representations.
+pub(crate) fn member_from_value(raw: &Value, owner_id: Option<&str>) -> JamMember {
+    let id = string(raw, &["id"]).unwrap_or_default();
+    let username = string(raw, &["username"]);
+    let display_name = string(raw, &["display_name", "displayName"]);
+    JamMember {
+        name: display_name.clone().or_else(|| username.clone()),
+        is_host: owner_id.is_some_and(|owner| owner == id),
+        id,
+        username,
+        display_name,
+        image_url: string(raw, &["image_url", "imageUrl"]),
+        large_image_url: string(raw, &["large_image_url", "largeImageUrl"]),
+        joined_timestamp: value(raw, &["joined_timestamp", "joinedTimestamp", "timestamp"])
+            .and_then(Value::as_i64),
+        is_listening: boolean(raw, &["is_listening", "isListening"]),
+        is_controlling: boolean(raw, &["is_controlling", "isControlling"]),
+        playback_control: string(raw, &["playbackControl", "playback_control"]),
+        is_current_user: boolean(raw, &["is_current_user", "isCurrentUser"]),
+    }
+}
+
+/// Maps a v2/v3 social-connect session response onto the stable application
+/// model while retaining the untouched payload for newly introduced fields.
+pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
     let raw = raw.get("jam").cloned().unwrap_or(raw);
-    let Some(id) = raw.get("session_id").and_then(Value::as_str) else {
-        return raw;
-    };
-    let owner = raw
-        .get("session_owner_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let members: Vec<Value> = raw
-        .get("session_members")
+    let id = string(&raw, &["session_id", "sessionId", "id"])
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| JamError::DecodeMessage("session payload has no session_id".into()))?;
+    let owner_id = string(&raw, &["session_owner_id", "sessionOwnerId", "ownerId"]);
+    let members = value(&raw, &["session_members", "sessionMembers", "members"])
         .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .map(|m| {
-                    let mid = m.get("id").and_then(Value::as_str).unwrap_or_default();
-                    json!({
-                        "id": mid,
-                        "name": m
-                            .get("display_name")
-                            .or_else(|| m.get("username"))
-                            .and_then(Value::as_str),
-                        "isHost": mid == owner,
-                    })
-                })
-                .collect()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| member_from_value(item, owner_id.as_deref()))
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    json!({
-        "id": id,
-        "host": members.iter().find(|m| m["isHost"] == json!(true)).cloned(),
-        "members": members,
-        // The queue is the Connect queue, which this payload does not carry.
-        "queue": [],
-        "joinToken": raw.get("join_session_token"),
-        "joinUrl": raw.get("join_session_url"),
-        // Keep the untouched payload: it holds fields we do not model yet
-        // (`active`, `host_active_device_id`, per-member flags).
-        "activeState": raw,
+    let host = members.iter().find(|member| member.is_host).cloned();
+    let queue_only_mode = boolean(&raw, &["queue_only_mode", "queueOnlyMode"]);
+    let join_token = string(
+        &raw,
+        &["join_session_token", "joinSessionToken", "joinToken"],
+    );
+    let join_uri = string(&raw, &["join_session_uri", "joinSessionUri", "joinUri"]).or_else(|| {
+        join_token
+            .as_ref()
+            .map(|token| format!("spotify:socialsession:{token}"))
+    });
+    let join_url = string(&raw, &["join_session_url", "joinSessionUrl", "joinUrl"]).or_else(|| {
+        join_token
+            .as_ref()
+            .map(|token| format!("https://open.spotify.com/socialsession/{token}"))
+    });
+    let session_type = value(
+        &raw,
+        &["initialSessionType", "initial_session_type", "sessionType"],
+    )
+    .and_then(|v| {
+        v.as_str()
+            .map(str::to_owned)
+            .or_else(|| v.as_i64().map(|n| n.to_string()))
+    });
+
+    Ok(JamSession {
+        id,
+        timestamp: value(&raw, &["timestamp"]).and_then(Value::as_i64),
+        owner_id,
+        host,
+        members,
+        queue: Vec::new(),
+        active_state: raw.clone(),
+        join_token,
+        join_url,
+        join_uri,
+        is_session_owner: boolean(&raw, &["is_session_owner", "isSessionOwner"]),
+        is_listening: boolean(&raw, &["is_listening", "isListening"]),
+        is_controlling: boolean(&raw, &["is_controlling", "isControlling"]),
+        is_discoverable: boolean(&raw, &["is_discoverable", "isDiscoverable"]),
+        session_type,
+        host_active_device_id: string(&raw, &["host_active_device_id", "hostActiveDeviceId"]),
+        max_member_count: value(&raw, &["maxMemberCount", "max_member_count"])
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok()),
+        active: boolean(&raw, &["active"]),
+        queue_only_mode,
+        queue_control_allowed: !queue_only_mode,
+        wifi_broadcast: boolean(&raw, &["wifi_broadcast", "wifiBroadcast"]),
+        host_device_info: value(&raw, &["host_device_info", "hostDeviceInfo"]).cloned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_complete_social_connect_session() {
+        let session = session_from_value(json!({
+            "timestamp": 123,
+            "session_id": "session-1",
+            "join_session_token": "token-1",
+            "session_owner_id": "owner",
+            "session_members": [{
+                "id": "owner",
+                "username": "owner-user",
+                "display_name": "Owner",
+                "image_url": "small",
+                "large_image_url": "large",
+                "is_listening": true,
+                "is_controlling": true,
+                "is_current_user": true
+            }],
+            "is_session_owner": true,
+            "is_discoverable": true,
+            "initialSessionType": "REMOTE_V2",
+            "queue_only_mode": true,
+            "active": true
+        }))
+        .unwrap();
+
+        assert_eq!(session.id, "session-1");
+        assert_eq!(
+            session.join_uri.as_deref(),
+            Some("spotify:socialsession:token-1")
+        );
+        assert_eq!(
+            session.host.as_ref().and_then(|m| m.name.as_deref()),
+            Some("Owner")
+        );
+        assert!(!session.queue_control_allowed);
+        assert!(session.is_session_owner);
+        assert!(session.members[0].is_current_user);
+    }
+
+    #[test]
+    fn rejects_payload_without_session_id() {
+        assert!(matches!(
+            session_from_value(json!({"active": true})),
+            Err(JamError::DecodeMessage(_))
+        ));
+    }
 }
 
 impl Drop for JamManager {

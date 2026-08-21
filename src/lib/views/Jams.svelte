@@ -39,6 +39,10 @@
     run(() => api.createJam());
   }
 
+  function onRefreshSession() {
+    run(() => api.refreshJam());
+  }
+
   async function onJoin() {
     const id = joinId.trim();
     if (!id) return;
@@ -58,9 +62,23 @@
     run(() => api.addTrackToJam());
   }
 
+  function onToggleQueueControl() {
+    const session = status?.session;
+    if (!session) return;
+    run(() => api.setJamQueueControl(!session.queueControlAllowed));
+  }
+
+  function onKick(memberId: string) {
+    run(() => api.kickJamMember(memberId));
+  }
+
+  function onEnd() {
+    run(() => api.endJam());
+  }
+
   /** Copies the invite link so it can be pasted to whoever is joining. */
   async function onCopyInvite() {
-    const url = status?.session?.joinUrl;
+    const url = status?.session?.joinUrl ?? status?.session?.joinUri;
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
@@ -81,6 +99,7 @@
     await refresh();
     unlisten = await listen<JamEventPayload>(EVENT_JAMS, (e) => {
       events = [...events.slice(-(MAX_EVENTS - 1)), e.payload];
+      void refresh();
     });
   });
 
@@ -121,6 +140,9 @@
     <button class="chip" disabled={busy || !status?.session} onclick={onLeave}>
       Leave
     </button>
+    <button class="chip" disabled={busy || !status?.session} onclick={onRefreshSession}>
+      Refresh
+    </button>
     <button
       class="chip"
       disabled={busy || !status?.session}
@@ -129,6 +151,12 @@
     >
       Add current track
     </button>
+    {#if status?.session?.isSessionOwner}
+      <button class="chip" disabled={busy} onclick={onToggleQueueControl}>
+        {status.session.queueControlAllowed ? "Lock participant queue" : "Allow participant queue"}
+      </button>
+      <button class="chip danger" disabled={busy} onclick={onEnd}>End jam</button>
+    {/if}
   </div>
 
   {#if status}
@@ -156,14 +184,41 @@
         {status.session.members.length} member{status.session.members.length === 1 ? "" : "s"} ·{" "}
         {status.session.queue.length} track{status.session.queue.length === 1 ? "" : "s"} in queue
       </p>
-      {#if status.session.joinUrl}
+      {#if status.session.joinUrl || status.session.joinUri}
         <p class="invite">
           <span class="muted">Invite</span>
-          <code class="mono">{status.session.joinUrl}</code>
+          <code class="mono">{status.session.joinUrl ?? status.session.joinUri}</code>
           <button class="chip" onclick={onCopyInvite}>
             {copied ? "Copied" : "Copy"}
           </button>
         </p>
+      {/if}
+      <p class="muted">
+        {status.session.isSessionOwner ? "You are the host" : "Participant"}
+        · queue control {status.session.queueControlAllowed ? "allowed" : "host only"}
+        {status.session.sessionType ? ` · ${status.session.sessionType}` : ""}
+      </p>
+      {#if status.session.members.length}
+        <ul class="members">
+          {#each status.session.members as member (member.id)}
+            <li>
+              {#if member.imageUrl || member.largeImageUrl}
+                <img src={member.imageUrl ?? member.largeImageUrl ?? ""} alt="" />
+              {/if}
+              <span>
+                <strong>{member.displayName ?? member.name ?? member.username ?? member.id}</strong>
+                <small class="muted">
+                  {member.isHost ? "Host" : "Participant"}
+                  {member.isListening ? " · listening" : ""}
+                  {member.isControlling ? " · controlling" : ""}
+                </small>
+              </span>
+              {#if status.session.isSessionOwner && !member.isHost && !member.isCurrentUser}
+                <button class="chip danger" disabled={busy} onclick={() => onKick(member.id)}>Kick</button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
       {/if}
       {#if status.session.queue.length}
         <ul class="queue">
@@ -255,6 +310,38 @@
     color: var(--fg-dim);
     display: grid;
     gap: 4px;
+  }
+  .members {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+  .members li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: var(--r-sm);
+    background: var(--glass);
+  }
+  .members img {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .members span {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+  }
+  .members small {
+    font-size: 11px;
+  }
+  .danger {
+    color: #ff9b9b;
   }
   .feed {
     list-style: none;

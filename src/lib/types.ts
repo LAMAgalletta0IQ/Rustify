@@ -226,6 +226,15 @@ export interface JamMember {
   id: string;
   name: string | null;
   isHost: boolean;
+  username: string | null;
+  displayName: string | null;
+  imageUrl: string | null;
+  largeImageUrl: string | null;
+  joinedTimestamp: number | null;
+  isListening: boolean;
+  isControlling: boolean;
+  playbackControl: string | null;
+  isCurrentUser: boolean;
 }
 
 export interface JamTrack {
@@ -238,6 +247,8 @@ export interface JamTrack {
 
 export interface JamSession {
   id: string;
+  timestamp: number | null;
+  ownerId: string | null;
   host: JamMember | null;
   members: JamMember[];
   queue: JamTrack[];
@@ -246,6 +257,19 @@ export interface JamSession {
   joinToken: string | null;
   /** Shareable `https://open.spotify.com/socialsession/<token>` link. */
   joinUrl: string | null;
+  joinUri: string | null;
+  isSessionOwner: boolean;
+  isListening: boolean;
+  isControlling: boolean;
+  isDiscoverable: boolean;
+  sessionType: string | null;
+  hostActiveDeviceId: string | null;
+  maxMemberCount: number | null;
+  active: boolean;
+  queueOnlyMode: boolean;
+  queueControlAllowed: boolean;
+  wifiBroadcast: boolean;
+  hostDeviceInfo: unknown | null;
 }
 
 /** Status of the jam backend, from `get_jam_status`. */

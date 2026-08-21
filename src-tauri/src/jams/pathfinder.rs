@@ -101,7 +101,11 @@ impl PathfinderClient {
         }
 
         let v: Value = serde_json::from_str(&text)?;
-        if let Some(errors) = v.get("errors").and_then(|e| e.as_array()).filter(|e| !e.is_empty()) {
+        if let Some(errors) = v
+            .get("errors")
+            .and_then(|e| e.as_array())
+            .filter(|e| !e.is_empty())
+        {
             return Err(JamError::PersistedQueryExpired {
                 operation: operation_name.to_owned(),
                 hash: hash.to_owned(),
@@ -120,14 +124,19 @@ impl PathfinderClient {
         operation_name: &str,
         variables: Value,
     ) -> Result<Value, JamError> {
-        let hash = self.hashes.get(operation_name).ok_or_else(|| JamError::PersistedQueryExpired {
+        let hash =
+            self.hashes
+                .get(operation_name)
+                .ok_or_else(|| {
+                    JamError::PersistedQueryExpired {
             operation: operation_name.to_owned(),
             hash: "<unregistered>".to_owned(),
             message:
                 "no sha256 hash is registered for this operation; capture it from the official \
                  client and add it to JamConfig.pathfinder_hashes"
                     .into(),
-        })?;
+        }
+                })?;
         self.query(operation_name, variables, hash).await
     }
 }

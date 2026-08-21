@@ -26,7 +26,10 @@ use tokio::time::timeout;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).try_init().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .try_init()
+        .ok();
 
     // Optional path to a jams.toml; falls back to defaults (no endpoints).
     let config = std::env::args()
@@ -57,14 +60,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "spclient endpoints: {}",
         match config.spclient_endpoints.is_empty() {
             true => "<none configured>".to_owned(),
-            false => config.spclient_endpoints.keys().cloned().collect::<Vec<_>>().join(", "),
+            false => config
+                .spclient_endpoints
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
         }
     );
     println!(
         "pathfinder hashes : {}",
         match config.pathfinder_hashes.is_empty() {
             true => "<none - capture them with a proxy>".to_owned(),
-            false => config.pathfinder_hashes.keys().cloned().collect::<Vec<_>>().join(", "),
+            false => config
+                .pathfinder_hashes
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
         }
     );
 

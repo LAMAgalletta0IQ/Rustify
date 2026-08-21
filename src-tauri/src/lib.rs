@@ -160,9 +160,13 @@ pub fn run() {
             // jams (experimental)
             commands::get_jam_status,
             commands::create_jam,
+            commands::refresh_jam,
             commands::join_jam,
             commands::leave_jam,
             commands::add_track_to_jam,
+            commands::set_jam_queue_control,
+            commands::kick_jam_member,
+            commands::end_jam,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

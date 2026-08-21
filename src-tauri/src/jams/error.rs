@@ -51,6 +51,9 @@ pub enum JamError {
     #[error("failed to decode jam payload: {0}")]
     Decode(#[from] serde_json::Error),
 
+    #[error("failed to decode jam payload: {0}")]
+    DecodeMessage(String),
+
     /// The receiver end of the dealer event channel is gone.
     #[error("jam event channel closed: {0}")]
     ChannelClosed(String),

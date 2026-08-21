@@ -176,8 +176,14 @@ export const addToQueue = (uri: string) => invoke<void>("add_to_queue", { uri })
 // ---- jams (experimental) -------------------------------------------------
 export const getJamStatus = () => invoke<JamStatus>("get_jam_status");
 export const createJam = () => invoke<JamSession>("create_jam");
+export const refreshJam = () => invoke<JamSession>("refresh_jam");
 export const joinJam = (jamId: string) =>
   invoke<JamSession>("join_jam", { jamId });
 export const leaveJam = () => invoke<void>("leave_jam");
 /** Adds whatever is currently playing to the active jam. */
 export const addTrackToJam = () => invoke<void>("add_track_to_jam");
+export const setJamQueueControl = (allowed: boolean) =>
+  invoke<JamSession>("set_jam_queue_control", { allowed });
+export const kickJamMember = (memberId: string) =>
+  invoke<JamSession>("kick_jam_member", { memberId });
+export const endJam = () => invoke<void>("end_jam");

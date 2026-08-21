@@ -903,7 +903,18 @@ pub async fn create_jam(app: AppHandle, state: State<'_, AppState>) -> AppResult
 }
 
 #[tauri::command]
-pub async fn join_jam(app: AppHandle, state: State<'_, AppState>, jam_id: String) -> AppResult<JamSession> {
+pub async fn refresh_jam(app: AppHandle, state: State<'_, AppState>) -> AppResult<JamSession> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    ctrl.refresh_session().await.map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn join_jam(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    jam_id: String,
+) -> AppResult<JamSession> {
     let ctrl = ensure_jams(&app, &state).await?;
     ctrl.sync_token(&state.tokens).await;
     ctrl.join(&jam_id).await.map_err(AppError::from)
@@ -925,4 +936,35 @@ pub async fn add_track_to_jam(app: AppHandle, state: State<'_, AppState>) -> App
         return Err(AppError::Playback("Nothing is playing.".to_string()));
     };
     ctrl.add_track(&track.uri).await.map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn set_jam_queue_control(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    allowed: bool,
+) -> AppResult<JamSession> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    ctrl.set_queue_control(allowed)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn kick_jam_member(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    member_id: String,
+) -> AppResult<JamSession> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    ctrl.kick(&member_id).await.map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn end_jam(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    ctrl.end().await.map_err(AppError::from)
 }

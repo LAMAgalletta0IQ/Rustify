@@ -77,7 +77,11 @@ impl ClientTokenManager {
     /// identity must carry a real one — an invented value (this used to send
     /// `"rustify-jams"`) is rejected and every jam call then fails on the
     /// header rather than the endpoint.
-    pub fn with_identity(http: Client, endpoint: impl Into<String>, identity: ClientIdentity) -> Self {
+    pub fn with_identity(
+        http: Client,
+        endpoint: impl Into<String>,
+        identity: ClientIdentity,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 http,
@@ -175,12 +179,12 @@ impl ClientTokenManager {
         // The mint service nests the grant under `granted_token`. If the shape
         // ever changes this fails loudly instead of minting a bogus token.
         let granted = &v["granted_token"];
-        let token = granted["token"]
-            .as_str()
-            .ok_or_else(|| JamError::ClientTokenExpired(format!("unexpected clienttoken response: {text}")))?;
-        let expires_in = granted["expires_after_secs"]
-            .as_u64()
-            .ok_or_else(|| JamError::ClientTokenExpired(format!("clienttoken response missing expiry: {text}")))?;
+        let token = granted["token"].as_str().ok_or_else(|| {
+            JamError::ClientTokenExpired(format!("unexpected clienttoken response: {text}"))
+        })?;
+        let expires_in = granted["expires_after_secs"].as_u64().ok_or_else(|| {
+            JamError::ClientTokenExpired(format!("clienttoken response missing expiry: {text}"))
+        })?;
 
         debug!("minted client token, expires in {expires_in}s");
         Ok(ClientToken {
@@ -192,6 +196,9 @@ impl ClientTokenManager {
 
     fn cached_valid(&self) -> Option<String> {
         let state = self.inner.state.lock().ok()?;
-        state.as_ref().filter(|t| t.is_valid()).map(|t| t.token.clone())
+        state
+            .as_ref()
+            .filter(|t| t.is_valid())
+            .map(|t| t.token.clone())
     }
 }

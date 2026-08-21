@@ -106,7 +106,10 @@ impl ConnectionId {
     /// The current id, or an empty string when none has been supplied (or the
     /// lock is poisoned); the HTTPS clients then omit the header.
     pub fn current(&self) -> String {
-        self.inner.read().map(|guard| guard.clone()).unwrap_or_default()
+        self.inner
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
     }
 
     /// Records the id the server assigned. Called by the host app whenever it

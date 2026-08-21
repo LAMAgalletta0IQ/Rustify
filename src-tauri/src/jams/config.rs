@@ -96,6 +96,23 @@ pub fn default_spclient_endpoints() -> HashMap<String, String> {
         ("join_jam", "/social-connect/v2/sessions/join/{jam_id}"),
         // POST; leaves whatever session this device is in.
         ("leave", "/social-connect/v2/sessions/leave"),
+        // PUT; the names are expressed from the UI perspective, while the
+        // server path uses the inverse queue-only-mode flag.
+        (
+            "queue_control_allowed",
+            "/social-connect/v2/sessions/current/queue_only_mode/disabled",
+        ),
+        (
+            "queue_control_denied",
+            "/social-connect/v2/sessions/current/queue_only_mode/enabled",
+        ),
+        // v3 host moderation actions, independently confirmed by the
+        // spotify-jam 0.2 package and the current social-connect schema.
+        (
+            "kick_member",
+            "/social-connect/v3/sessions/{jam_id}/member/{member_id}/kick",
+        ),
+        ("end_jam", "/social-connect/v3/sessions/{jam_id}"),
         // POST; a jam's queue *is* the Connect queue, so this is the ordinary
         // public Web API endpoint (absolute, so it bypasses the spclient host).
         ("add_track", "https://api.spotify.com/v1/me/player/queue"),

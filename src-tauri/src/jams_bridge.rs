@@ -10,14 +10,18 @@
 
 use std::sync::Arc;
 
+use futures_util::StreamExt;
+use librespot::core::dealer::protocol::{Message as DealerMessage, PayloadValue};
+use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
 use librespot::core::session::Session;
 
 use crate::jams::{
-    AccessToken, ClientIdentity, ConnectionId, JamConfig, JamCredentials, JamError, JamManager,
-    JamSession,
+    session::{member_from_value, session_from_value},
+    AccessToken, ClientIdentity, ConnectionId, JamConfig, JamCredentials, JamError, JamEvent,
+    JamManager, JamSession,
 };
 use crate::state::{events, TokenStore};
 
@@ -66,6 +70,70 @@ async fn refresh(
     connection_id.set(conn);
 }
 
+fn dealer_json(message: DealerMessage) -> Result<Value, JamError> {
+    match message.payload {
+        PayloadValue::Json(json) => serde_json::from_str(&json).map_err(JamError::from),
+        PayloadValue::Raw(bytes) => serde_json::from_slice(&bytes).map_err(JamError::from),
+        PayloadValue::Empty => Err(JamError::DecodeMessage(
+            "social-connect dealer update had an empty payload".into(),
+        )),
+    }
+}
+
+fn session_update_event(raw: Value) -> Result<JamEvent, JamError> {
+    let reason = raw
+        .get("reason")
+        .and_then(|value| {
+            value.as_str().map(str::to_owned).or_else(|| {
+                value.as_i64().map(|number| {
+                    match number {
+                        1 => "NEW_SESSION",
+                        2 => "USER_JOINED",
+                        3 => "USER_LEFT",
+                        4 => "SESSION_DELETED",
+                        5 => "YOU_LEFT",
+                        6 => "YOU_WERE_KICKED",
+                        7 => "YOU_JOINED",
+                        8 => "PARTICIPANT_PROMOTED_TO_HOST",
+                        9 => "DISCOVERABILITY_CHANGED",
+                        10 => "USER_KICKED",
+                        _ => "UNKNOWN_UPDATE_TYPE",
+                    }
+                    .to_owned()
+                })
+            })
+        })
+        .unwrap_or_else(|| "UNKNOWN_UPDATE_TYPE".to_owned());
+    let session = raw
+        .get("session")
+        .cloned()
+        .map(session_from_value)
+        .transpose()?;
+    let owner_id = session
+        .as_ref()
+        .and_then(|session| session.owner_id.as_deref());
+    let updated_members = raw
+        .get("updated_session_members")
+        .or_else(|| raw.get("updatedSessionMembers"))
+        .and_then(Value::as_array)
+        .map(|members| {
+            members
+                .iter()
+                .map(|member| member_from_value(member, owner_id))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(JamEvent::SessionUpdate {
+        reason,
+        session,
+        updated_members,
+    })
+}
+
+fn terminal_update(reason: &str) -> bool {
+    matches!(reason, "SESSION_DELETED" | "YOU_LEFT" | "YOU_WERE_KICKED")
+}
+
 pub struct JamController {
     manager: JamManager,
     /// The live librespot session. Jams need three things only it has: the
@@ -84,7 +152,7 @@ pub struct JamController {
     /// Mirrors librespot's `Spotify-Connection-Id`.
     connection_id: ConnectionId,
     config: JamConfig,
-    session: tokio::sync::RwLock<Option<JamSession>>,
+    session: Arc<tokio::sync::RwLock<Option<JamSession>>>,
     /// Kept only so the task is dropped with the controller; the loop ends on
     /// its own once the dealer's sender is gone.
     _forward: tauri::async_runtime::JoinHandle<()>,
@@ -123,9 +191,17 @@ impl JamController {
         let web_token = AccessToken::default();
         let client_token = AccessToken::default();
         let connection_id = ConnectionId::new();
-        refresh(&session, tokens, &token, &web_token, &client_token, &connection_id).await;
+        refresh(
+            &session,
+            tokens,
+            &token,
+            &web_token,
+            &client_token,
+            &connection_id,
+        )
+        .await;
 
-        let manager = JamManager::new(
+        let manager = JamManager::new_http_only(
             reqwest::Client::new(),
             config.clone(),
             JamCredentials {
@@ -138,11 +214,54 @@ impl JamController {
         )
         .map_err(AppError::from)?;
 
-        let mut events = manager.events();
+        // Reuse librespot's authenticated Dealer connection. Opening a second
+        // websocket here would create a different server-assigned connection
+        // id than the Connect device and social-connect HTTP requests use.
+        let mut session_updates = session
+            .dealer()
+            .add_listen_for("social-connect/v2/session_update")
+            .map_err(|error| {
+                AppError::Other(format!("subscribe to Jam session updates: {error}"))
+            })?;
+        let mut broadcast_updates = session
+            .dealer()
+            .add_listen_for("social-connect/v2/broadcast_status_update")
+            .map_err(|error| {
+                AppError::Other(format!("subscribe to Jam broadcast updates: {error}"))
+            })?;
+        let session_state = Arc::new(tokio::sync::RwLock::new(None));
+        let state_for_updates = session_state.clone();
         let app = app.clone();
         let forward = tauri::async_runtime::spawn(async move {
-            while let Some(event) = events.recv().await {
-                let _ = app.emit(events::JAMS, &event);
+            let mut sessions_open = true;
+            let mut broadcasts_open = true;
+            while sessions_open || broadcasts_open {
+                tokio::select! {
+                    message = session_updates.next(), if sessions_open => match message {
+                        Some(message) => match dealer_json(message).and_then(session_update_event) {
+                            Ok(event) => {
+                                if let JamEvent::SessionUpdate { reason, session, .. } = &event {
+                                    let next = if terminal_update(reason) { None } else { session.clone() };
+                                    if terminal_update(reason) || next.is_some() {
+                                        *state_for_updates.write().await = next;
+                                    }
+                                }
+                                let _ = app.emit(events::JAMS, &event);
+                            }
+                            Err(error) => log::warn!("jams: invalid session_update: {error}"),
+                        },
+                        None => sessions_open = false,
+                    },
+                    message = broadcast_updates.next(), if broadcasts_open => match message {
+                        Some(message) => match dealer_json(message) {
+                            Ok(payload) => {
+                                let _ = app.emit(events::JAMS, JamEvent::BroadcastStatus(payload));
+                            }
+                            Err(error) => log::warn!("jams: invalid broadcast_status_update: {error}"),
+                        },
+                        None => broadcasts_open = false,
+                    },
+                }
             }
         });
 
@@ -154,7 +273,7 @@ impl JamController {
             client_token,
             connection_id,
             config,
-            session: Default::default(),
+            session: session_state,
             _forward: forward,
         })
     }
@@ -190,6 +309,12 @@ impl JamController {
         Ok(session)
     }
 
+    pub async fn refresh_session(&self) -> Result<JamSession, JamError> {
+        let session = self.manager.current().await?;
+        *self.session.write().await = Some(session.clone());
+        Ok(session)
+    }
+
     pub async fn leave(&self) -> Result<(), JamError> {
         let Some(session) = self.session().await else {
             return Err(JamError::JamNotFound(
@@ -210,7 +335,90 @@ impl JamController {
         self.manager.add_track(&session.id, track_uri).await
     }
 
+    pub async fn set_queue_control(&self, allowed: bool) -> Result<JamSession, JamError> {
+        let session = self.manager.set_queue_control(allowed).await?;
+        *self.session.write().await = Some(session.clone());
+        Ok(session)
+    }
+
+    pub async fn kick(&self, member_id: &str) -> Result<JamSession, JamError> {
+        let Some(current) = self.session().await else {
+            return Err(JamError::JamNotFound(
+                "no active jam; create or join one first".into(),
+            ));
+        };
+        if !current.is_session_owner {
+            return Err(JamError::PermissionDenied(
+                "only the Jam host can remove participants".into(),
+            ));
+        }
+        let session = self.manager.kick(&current.id, member_id).await?;
+        *self.session.write().await = Some(session.clone());
+        Ok(session)
+    }
+
+    pub async fn end(&self) -> Result<(), JamError> {
+        let Some(current) = self.session().await else {
+            return Err(JamError::JamNotFound(
+                "no active jam; create one first".into(),
+            ));
+        };
+        if !current.is_session_owner {
+            return Err(JamError::PermissionDenied(
+                "only the Jam host can end the session".into(),
+            ));
+        }
+        self.manager.end(&current.id).await?;
+        *self.session.write().await = None;
+        Ok(())
+    }
+
     pub async fn session(&self) -> Option<JamSession> {
         self.session.read().await.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn decodes_authoritative_session_update() {
+        let event = session_update_event(json!({
+            "reason": "USER_JOINED",
+            "session": {
+                "session_id": "jam-1",
+                "session_owner_id": "host",
+                "session_members": [{"id": "host", "display_name": "Host"}]
+            },
+            "updated_session_members": [{"id": "guest", "display_name": "Guest"}]
+        }))
+        .unwrap();
+
+        match event {
+            JamEvent::SessionUpdate {
+                reason,
+                session: Some(session),
+                updated_members,
+            } => {
+                assert_eq!(reason, "USER_JOINED");
+                assert_eq!(session.id, "jam-1");
+                assert_eq!(updated_members[0].display_name.as_deref(), Some("Guest"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_numeric_terminal_reason() {
+        let event = session_update_event(json!({"reason": 6})).unwrap();
+        match event {
+            JamEvent::SessionUpdate { reason, .. } => {
+                assert_eq!(reason, "YOU_WERE_KICKED");
+                assert!(terminal_update(&reason));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 }

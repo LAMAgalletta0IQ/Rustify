@@ -5,8 +5,8 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
 use super::client_token::ClientTokenManager;
@@ -25,31 +25,26 @@ use super::ConnectionId;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum JamEvent {
+    /// Authoritative social-connect update delivered on librespot's Dealer
+    /// connection. `reason` matches `SessionUpdateReason` names.
     #[serde(rename_all = "camelCase")]
-    TrackAdded {
-        jam_id: String,
-        track: Value,
+    SessionUpdate {
+        reason: String,
+        session: Option<super::session::JamSession>,
+        updated_members: Vec<super::session::JamMember>,
     },
+    /// Device discoverability/exposure update from social-connect.
+    BroadcastStatus(Value),
     #[serde(rename_all = "camelCase")]
-    QueueReordered {
-        jam_id: String,
-        queue: Value,
-    },
+    TrackAdded { jam_id: String, track: Value },
     #[serde(rename_all = "camelCase")]
-    MemberJoined {
-        jam_id: String,
-        member: Value,
-    },
+    QueueReordered { jam_id: String, queue: Value },
     #[serde(rename_all = "camelCase")]
-    MemberLeft {
-        jam_id: String,
-        member_id: String,
-    },
+    MemberJoined { jam_id: String, member: Value },
     #[serde(rename_all = "camelCase")]
-    VoteUpdated {
-        jam_id: String,
-        vote: Value,
-    },
+    MemberLeft { jam_id: String, member_id: String },
+    #[serde(rename_all = "camelCase")]
+    VoteUpdated { jam_id: String, vote: Value },
     /// Full jam state push.
     JamState(Value),
     /// Any payload whose `type` is not recognised.
@@ -291,7 +286,10 @@ impl DealerClient {
             .and_then(|t| t.as_str())
             .unwrap_or("unknown")
             .to_owned();
-        let body = payload.get("body").cloned().unwrap_or_else(|| payload.clone());
+        let body = payload
+            .get("body")
+            .cloned()
+            .unwrap_or_else(|| payload.clone());
         let jam_id = payload
             .get("uri")
             .and_then(|u| u.as_str())
@@ -325,7 +323,11 @@ impl DealerClient {
                 vote: body,
             },
             "state" | "jam_state" => JamEvent::JamState(body),
-            _ => JamEvent::Unknown { jam_id, kind, payload: body },
+            _ => JamEvent::Unknown {
+                jam_id,
+                kind,
+                payload: body,
+            },
         }
     }
 }

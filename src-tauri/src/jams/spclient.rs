@@ -56,7 +56,9 @@ impl JamApiClient {
         client_token: ClientTokenManager,
     ) -> Result<Self, JamError> {
         if config.spclient_base_url.trim().is_empty() {
-            return Err(JamError::Config("spclient_base_url must not be empty".into()));
+            return Err(JamError::Config(
+                "spclient_base_url must not be empty".into(),
+            ));
         }
         Ok(Self {
             http,
@@ -102,7 +104,11 @@ impl JamApiClient {
             None => "empty body, content-length: 0",
         };
         debug!("spclient POST {url} {query:?} ({shape})");
-        let mut req = self.http.post(url).headers(self.headers(&url_for_log).await?).query(query);
+        let mut req = self
+            .http
+            .post(url)
+            .headers(self.headers(&url_for_log).await?)
+            .query(query);
         // An empty body is not the same as `{}` to every endpoint, so only
         // send one when the caller supplied it — but a POST with no body at
         // all carries no `Content-Length` either, and Google's frontend in
@@ -130,7 +136,10 @@ impl JamApiClient {
         let url = self.absolute(endpoint);
         let url_for_log = url.clone();
         debug!("spclient GET {url}");
-        let mut req = self.http.get(url).headers(self.headers(&url_for_log).await?);
+        let mut req = self
+            .http
+            .get(url)
+            .headers(self.headers(&url_for_log).await?);
         for (key, value) in query {
             req = req.query(&[(key, value)]);
         }
@@ -138,13 +147,46 @@ impl JamApiClient {
         self.drain(resp, "GET", &url_for_log).await
     }
 
+    /// PUT action with an explicit zero-length body. Social-connect's
+    /// queue-only toggle uses this shape.
+    pub async fn put_empty(&self, endpoint: &str) -> Result<Value, JamError> {
+        let url = self.absolute(endpoint);
+        let url_for_log = url.clone();
+        debug!("spclient PUT {url} (content-length: 0)");
+        let resp = self
+            .http
+            .put(url)
+            .headers(self.headers(&url_for_log).await?)
+            .header(reqwest::header::CONTENT_LENGTH, "0")
+            .body(Vec::<u8>::new())
+            .send()
+            .await?;
+        self.drain(resp, "PUT", &url_for_log).await
+    }
+
+    /// DELETE action used by a host to terminate a v3 social-connect session.
+    pub async fn delete(&self, endpoint: &str) -> Result<Value, JamError> {
+        let url = self.absolute(endpoint);
+        let url_for_log = url.clone();
+        debug!("spclient DELETE {url}");
+        let resp = self
+            .http
+            .delete(url)
+            .headers(self.headers(&url_for_log).await?)
+            .send()
+            .await?;
+        self.drain(resp, "DELETE", &url_for_log).await
+    }
+
     /// Resolves a named endpoint template to an absolute URL, substituting
     /// `{name}` placeholders. Errors when the name has no configured path.
     fn resolve(&self, name: &str, vars: &[(&str, &str)]) -> Result<String, JamError> {
-        let template = self.endpoints.get(name).ok_or_else(|| JamError::Config(format!(
+        let template = self.endpoints.get(name).ok_or_else(|| {
+            JamError::Config(format!(
             "no endpoint path configured for '{name}'; capture it with a traffic proxy and add it \
              to JamConfig.spclient_endpoints"
-        )))?;
+        ))
+        })?;
         let mut path = template.clone();
         for (key, value) in vars {
             path = path.replace(&format!("{{{key}}}"), value);
@@ -203,17 +245,23 @@ impl JamApiClient {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            format!("Bearer {token}").parse().expect("valid authorization header"),
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| {
+                JamError::Config("OAuth token contains invalid header bytes".into())
+            })?,
         );
         headers.insert(
             "client-token",
-            client_token.parse().expect("valid client-token header"),
+            reqwest::header::HeaderValue::from_str(&client_token).map_err(|_| {
+                JamError::Config("client-token contains invalid header bytes".into())
+            })?,
         );
         let conn_id = self.connection_id.current();
         if !conn_id.is_empty() {
             headers.insert(
                 "Spotify-Connection-Id",
-                conn_id.parse().expect("valid connection id header"),
+                reqwest::header::HeaderValue::from_str(&conn_id).map_err(|_| {
+                    JamError::Config("connection id contains invalid header bytes".into())
+                })?,
             );
         }
         Ok(headers)
@@ -240,10 +288,13 @@ impl JamApiClient {
             }
             return Ok(serde_json::from_str(&text)?);
         }
-        warn!("spclient {method} {url} -> {status}: {}", match text.trim().is_empty() {
-            true => "<empty body>",
-            false => text.trim(),
-        });
+        warn!(
+            "spclient {method} {url} -> {status}: {}",
+            match text.trim().is_empty() {
+                true => "<empty body>",
+                false => text.trim(),
+            }
+        );
         let detail = match text.trim().is_empty() {
             true => format!("{method} {url} (no response body)"),
             false => format!("{method} {url}: {text}"),
@@ -251,7 +302,10 @@ impl JamApiClient {
         match status.as_u16() {
             401 | 403 => Err(JamError::PermissionDenied(detail)),
             404 => Err(JamError::JamNotFound(detail)),
-            _ => Err(JamError::Http { status, body: detail }),
+            _ => Err(JamError::Http {
+                status,
+                body: detail,
+            }),
         }
     }
 }
@@ -295,7 +349,8 @@ impl JamApiClient {
     /// [`JamError::JamNotFound`], which is the normal "not in a jam" answer.
     pub async fn current_jam(&self) -> Result<Value, JamError> {
         let url = self.resolve("current_jam", &[])?;
-        self.get(&url, &[("local_device_id", self.device_id()?)]).await
+        self.get(&url, &[("local_device_id", self.device_id()?)])
+            .await
     }
 
     /// Joins by **join token** — the trailing segment of an invite link
@@ -339,7 +394,11 @@ impl JamApiClient {
     /// Not available: no captured path exists for reordering a jam queue, so
     /// this errors rather than guessing one. Add `reorder_queue` to
     /// `[spclient_endpoints]` in `jams.toml` once you have captured it.
-    pub async fn reorder_queue(&self, jam_id: &str, new_order: Vec<usize>) -> Result<Value, JamError> {
+    pub async fn reorder_queue(
+        &self,
+        jam_id: &str,
+        new_order: Vec<usize>,
+    ) -> Result<Value, JamError> {
         let url = self.resolve("reorder_queue", &[("jam_id", jam_id)])?;
         let body = json!({ "jam_id": jam_id, "order": new_order });
         self.post(&url, &body).await
@@ -350,5 +409,35 @@ impl JamApiClient {
         let url = self.resolve("leave", &[("jam_id", jam_id)])?;
         self.post_with_query(&url, &[("local_device_id", self.device_id()?)], None)
             .await
+    }
+
+    /// Allows or denies participant queue control. The service expresses the
+    /// permission inversely as `queue_only_mode`.
+    pub async fn set_queue_control(&self, allowed: bool) -> Result<Value, JamError> {
+        let name = if allowed {
+            "queue_control_allowed"
+        } else {
+            "queue_control_denied"
+        };
+        let url = self.resolve(name, &[])?;
+        self.put_empty(&url).await
+    }
+
+    /// Removes a participant and returns the updated session payload.
+    pub async fn kick_member(&self, jam_id: &str, member_id: &str) -> Result<Value, JamError> {
+        if member_id.trim().is_empty() {
+            return Err(JamError::Config("member id must not be empty".into()));
+        }
+        let url = self.resolve(
+            "kick_member",
+            &[("jam_id", jam_id), ("member_id", member_id)],
+        )?;
+        self.post_with_query(&url, &[], None).await
+    }
+
+    /// Ends a hosted session for every participant.
+    pub async fn end_jam(&self, jam_id: &str) -> Result<Value, JamError> {
+        let url = self.resolve("end_jam", &[("jam_id", jam_id)])?;
+        self.delete(&url).await
     }
 }

@@ -74,7 +74,14 @@ that reports how many endpoints/hashes are captured. The glue is
 `src-tauri/src/jams_bridge.rs` (`JamController`), which builds the module
 lazily on first use, mirrors the session's Web API bearer token into it, and
 forwards dealer events to the webview as `jams:changed`. Commands:
-`get_jam_status`, `create_jam`, `join_jam`, `leave_jam`, `add_track_to_jam`.
+`get_jam_status`, `create_jam`, `refresh_jam`, `join_jam`, `leave_jam`,
+`add_track_to_jam`, `set_jam_queue_control`, `kick_jam_member`, and `end_jam`.
+
+Realtime session state reuses librespot's authenticated Dealer connection and
+subscribes to `social-connect/v2/session_update` plus
+`social-connect/v2/broadcast_status_update`. This is important: a second Dealer
+socket has a different server-assigned connection id and cannot represent the
+Connect device named by `local_device_id`.
 
 `jams.toml` is read from the **app data dir** (next to `settings.json`); absent,
 the built-in defaults apply (social-connect endpoint paths, no hashes). Keys
@@ -95,6 +102,10 @@ not a `/jam/v1/...` API. Those paths are stable enough to ship as defaults
 | `join_jam`    | POST | `/social-connect/v2/sessions/join/{jam_id}`     |
 | `leave`       | POST | `/social-connect/v2/sessions/leave`             |
 | `add_track`   | POST | `https://api.spotify.com/v1/me/player/queue`    |
+| `queue_control_allowed` | PUT | `/social-connect/v2/sessions/current/queue_only_mode/disabled` |
+| `queue_control_denied` | PUT | `/social-connect/v2/sessions/current/queue_only_mode/enabled` |
+| `kick_member` | POST | `/social-connect/v3/sessions/{jam_id}/member/{member_id}/kick` |
+| `end_jam` | DELETE | `/social-connect/v3/sessions/{jam_id}` |
 
 Notes:
 
