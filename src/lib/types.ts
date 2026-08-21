@@ -286,6 +286,29 @@ export interface LyricsResult {
   synced: LyricsLine[];
 }
 
+export interface FriendActivity {
+  timestampMs: number;
+  userUri: string;
+  userName: string;
+  userImageUrl: string | null;
+  trackUri: string;
+  trackName: string;
+  trackImageUrl: string | null;
+  artistUri: string | null;
+  artistName: string | null;
+  albumUri: string | null;
+  albumName: string | null;
+  contextUri: string | null;
+  contextName: string | null;
+}
+
+export interface FriendFeed {
+  status: "connecting" | "available" | "empty" | "stale" | "unavailable";
+  available: boolean;
+  entries: FriendActivity[];
+  updatedAtMs: number | null;
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

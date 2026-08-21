@@ -3,6 +3,7 @@ mod auth;
 mod commands;
 mod connect;
 mod error;
+mod friends;
 // Experimental Spotify Jams module. Self-contained; see README_jams.md. Not yet
 // exposed to the UI — the app only links it so it compiles and can be driven
 // from examples/jam_demo.rs. Remove this line if you want to keep it out of the
@@ -165,6 +166,7 @@ pub fn run() {
             commands::get_dj_status,
             commands::start_dj,
             commands::get_lyrics,
+            commands::get_friend_activity,
             // search
             commands::search_spotify,
             // queue

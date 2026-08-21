@@ -1,10 +1,14 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import * as api from "../api";
   import { store } from "../store.svelte";
   import type {
     AlbumSummary,
     ArtistSummary,
     DjSession,
+    FriendActivity,
+    FriendFeed,
     HomeFeed,
     HomeItem,
     PlaylistSummary,
@@ -28,6 +32,9 @@
   let discovery = $state<AlbumSummary[]>([]);
   let personalized = $state<HomeFeed | null>(null);
   let dj = $state<DjSession | null>(null);
+  let friends = $state<FriendFeed | null>(null);
+  let friendsLoading = $state(true);
+  let friendNow = $state(Date.now());
   let loadingRecent = $state(true);
   let loadingMix = $state(true);
   let loadingDiscovery = $state(true);
@@ -39,6 +46,21 @@
   let personalizedError = $state<string | null>(null);
   let djError = $state<string | null>(null);
   let reloadKey = $state(0);
+
+  onMount(() => {
+    let disposed = false;
+    let unlisten: UnlistenFn | undefined;
+    void api.getFriendActivity()
+      .then((feed) => { if (!disposed) friends = feed; })
+      .catch(() => {})
+      .finally(() => { if (!disposed) friendsLoading = false; });
+    void listen<FriendFeed>(api.EVENT_FRIENDS, (event) => {
+      friends = event.payload;
+      friendsLoading = false;
+    }).then((stop) => { if (disposed) stop(); else unlisten = stop; });
+    const clock = window.setInterval(() => friendNow = Date.now(), 30_000);
+    return () => { disposed = true; unlisten?.(); window.clearInterval(clock); };
+  });
 
   let openPlaylist = $state<PlaylistSummary | null>(null);
   let openAlbum = $state<AlbumSummary | null>(null);
@@ -192,6 +214,24 @@
 
   function playMix(track: TrackSummary) {
     store.run(() => api.loadTracks(topTracks.map((x) => x.uri), track.uri));
+  }
+
+  function playFriend(entry: FriendActivity) {
+    if (entry.contextUri) store.run(() => api.loadContext(entry.contextUri!, entry.trackUri));
+    else store.run(() => api.loadTracks([entry.trackUri], entry.trackUri));
+  }
+
+  function friendTime(entry: FriendActivity) {
+    const age = Math.max(0, friendNow - entry.timestampMs);
+    if (age <= 2 * 60_000) return "Listening now";
+    if (age < 60 * 60_000) return `${Math.floor(age / 60_000)} min`;
+    if (age < 24 * 60 * 60_000) return `${Math.floor(age / 3_600_000)} hr`;
+    return `${Math.floor(age / 86_400_000)} d`;
+  }
+
+  function friendIsLive(entry: FriendActivity) {
+    const age = friendNow - entry.timestampMs;
+    return age >= 0 && age <= 120_000;
   }
 
   function openPersonalized(item: HomeItem) {
@@ -394,8 +434,25 @@
       {:else}<p class="muted">No supported release suggestions are available yet.</p>{/if}
     </section>
     <section aria-labelledby="friends-heading">
-      <div class="section-head"><div><h2 id="friends-heading">Friend activity</h2><p>Private by design when Spotify does not expose presence.</p></div></div>
-      <div class="state"><span>Friend listening activity is unavailable. Spotify’s public Web API has no friend-presence endpoint, and librespot 0.8 does not implement its private buddy-list protocol. Rustify will not infer or fabricate activity.</span></div>
+      <div class="section-head"><div><h2 id="friends-heading">Friend activity</h2><p>Live updates from your Spotify presence feed.</p></div></div>
+      {#if friendsLoading || friends?.status === "connecting"}
+        <div class="state"><span>Connecting to friend activity…</span></div>
+      {:else if friends?.entries.length}
+        {#if friends.status === "stale"}<p class="muted">Showing the latest cached activity while presence reconnects.</p>{/if}
+        <div class="friends">
+          {#each friends.entries as entry (entry.userUri)}
+            <button class="friend" onclick={() => playFriend(entry)}>
+              <span class="friend-avatar">{#if entry.userImageUrl}<img src={entry.userImageUrl} alt="" loading="lazy" />{:else}{entry.userName.slice(0,1).toUpperCase()}{/if}<i class:live={friendIsLive(entry)}></i></span>
+              <span class="friend-copy"><strong class="truncate">{entry.userName}</strong><span class="truncate">{entry.trackName}{entry.artistName?` · ${entry.artistName}`:""}</span><small class="truncate">{entry.contextName??entry.albumName??"Spotify"}</small></span>
+              <time>{friendTime(entry)}</time>
+            </button>
+          {/each}
+        </div>
+      {:else if friends?.status === "empty"}
+        <div class="state"><span>No visible friend listening activity right now.</span></div>
+      {:else}
+        <div class="state"><span>Friend activity is not available for this account or region. Rustify does not infer or fabricate presence.</span></div>
+      {/if}
     </section>
   </div>
 {/if}
@@ -423,7 +480,17 @@
   .dj-action { flex: none; padding: 10px 16px; border-radius: 999px; color: #fff; background: rgba(126, 95, 255, .75); }
   .dj-action:disabled { opacity: .45; cursor: default; }
   .state { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--glass); border: 1px solid var(--hairline); border-radius: var(--r-md); color: var(--fg-dim); }
+  .friends { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .friend { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 11px; text-align: left; border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--glass); }
+  .friend:hover { background: var(--glass-hover); }
+  .friend-avatar { position: relative; display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 50%; overflow: visible; background: var(--glass-strong); color: var(--fg-dim); }
+  .friend-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+  .friend-avatar i { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #17100a; background: var(--fg-dim); }
+  .friend-avatar i.live { background: var(--accent); }
+  .friend-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+  .friend-copy span,.friend-copy small,.friend time { color: var(--fg-dim); font-size: 11px; }
+  .friend time { flex: none; align-self: flex-start; }
   .state button, .link { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
-  @media (max-width: 900px) { .jump { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-  @media (max-width: 600px) { .jump { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .jump,.friends { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (max-width: 600px) { .jump,.friends { grid-template-columns: 1fr; } }
 </style>

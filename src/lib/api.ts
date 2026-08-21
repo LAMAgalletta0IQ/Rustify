@@ -26,6 +26,7 @@ import type {
   SleepTimerStatus,
   TrackSummary,
   EqualizerPreset,
+  FriendFeed,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -34,6 +35,7 @@ export const EVENT_AUTH = "auth:changed";
 export const EVENT_JAMS = "jams:changed";
 export const EVENT_QUEUE = "queue:changed";
 export const EVENT_SLEEP_TIMER = "sleep-timer:changed";
+export const EVENT_FRIENDS = "friends:changed";
 
 /**
  * Tauri rejects with the serialised `AppError`. Normalise it so callers always
@@ -193,6 +195,8 @@ export const getLyrics = (
     albumName,
     durationMs,
   });
+export const getFriendActivity = () =>
+  invoke<FriendFeed>("get_friend_activity");
 
 // ---- search -------------------------------------------------------------
 export const searchSpotify = (query: string, limit?: number, offset?: number) =>

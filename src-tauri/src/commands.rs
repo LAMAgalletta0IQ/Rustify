@@ -412,6 +412,9 @@ async fn establish(
         old.refresh_task.abort();
         old.remote_task.abort();
         old.connect_state_task.abort();
+        if let Some(task) = old.friends_task {
+            task.abort();
+        }
     }
 
     // Reflects playback on the user's other devices, so opening the app while
@@ -428,6 +431,22 @@ async fn establish(
             return Err(error);
         }
     };
+    *state.friend_activity.write().await = crate::friends::FriendFeed::default();
+    let friends_task = match crate::friends::spawn(app.clone(), started.session.clone()) {
+        Ok(task) => Some(task),
+        Err(error) => {
+            // Friend presence is an optional capability. A changed/disabled
+            // endpoint must not take down authentication or playback.
+            log::debug!(target: "spotify.social", "friend activity unavailable: {error}");
+            *state.friend_activity.write().await = crate::friends::FriendFeed {
+                status: crate::friends::FriendFeedStatus::Unavailable,
+                available: false,
+                entries: Vec::new(),
+                updated_at_ms: None,
+            };
+            None
+        }
+    };
 
     state.playback.write().await.connection_status = ConnectionStatus::Connected;
 
@@ -437,6 +456,7 @@ async fn establish(
         refresh_task,
         remote_task,
         connect_state_task,
+        friends_task,
     });
     *state.auth.write().await = auth_state.clone();
 
@@ -532,6 +552,9 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
         s.refresh_task.abort();
         s.remote_task.abort();
         s.connect_state_task.abort();
+        if let Some(task) = s.friends_task {
+            task.abort();
+        }
     }
     // Drop the jam controller too: its dealer listener and event forwarder
     // must not outlive the session they authenticate against.
@@ -541,6 +564,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
     *state.playback.write().await = PlaybackState::default();
     *state.queue.write().await = QueueView::default();
     state.lyrics_cache.write().await.clear();
+    *state.friend_activity.write().await = crate::friends::FriendFeed::default();
 
     if let Ok(dir) = app.path().app_data_dir() {
         auth::clear_stored_tokens(&dir);
@@ -1117,6 +1141,16 @@ pub async fn get_lyrics(
     }
     cache.insert(track_uri, result.clone());
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_friend_activity(
+    state: State<'_, AppState>,
+) -> AppResult<crate::friends::FriendFeed> {
+    if state.spotify.read().await.is_none() {
+        return Err(AppError::NotLoggedIn);
+    }
+    Ok(state.friend_activity.read().await.clone())
 }
 
 // ---- search -------------------------------------------------------------

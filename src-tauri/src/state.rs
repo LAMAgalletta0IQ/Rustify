@@ -14,6 +14,7 @@ pub mod events {
     pub const JAMS: &str = "jams:changed";
     pub const QUEUE: &str = "queue:changed";
     pub const SLEEP_TIMER: &str = "sleep-timer:changed";
+    pub const FRIENDS: &str = "friends:changed";
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -151,6 +152,9 @@ pub struct SpotifySession {
     /// Event-first mirror of the Connect cluster/player/queue protobuf. The
     /// slower Web API task above is only a recovery and metadata fallback.
     pub connect_state_task: tauri::async_runtime::JoinHandle<()>,
+    /// Dealer-driven friend-presence feed; optional because this feature must
+    /// never make an otherwise healthy login fail.
+    pub friends_task: Option<tauri::async_runtime::JoinHandle<()>>,
 }
 
 /// Canonical, authoritative signal for whether this app is the active
@@ -202,6 +206,7 @@ pub struct AppState {
     /// but must not trigger another internal lyrics request for the same URI.
     /// The command enforces a fixed upper bound before inserting.
     pub lyrics_cache: RwLock<HashMap<String, crate::lyrics::LyricsResult>>,
+    pub friend_activity: RwLock<crate::friends::FriendFeed>,
     pub auth: RwLock<AuthState>,
     pub device_auth: crate::auth::DeviceAuthStore,
     pub sleep_timer: crate::sleep_timer::SleepTimerController,
