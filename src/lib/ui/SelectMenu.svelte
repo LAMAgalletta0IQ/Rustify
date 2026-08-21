@@ -9,7 +9,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, type Snippet } from "svelte";
 
   let {
     value = $bindable<string | null>(),
@@ -23,6 +23,13 @@
     // mode is just "which item last fired", not a selection to redisplay.
     triggerLabel,
     onChange = (_value: string | null) => {},
+    // Compact triggers used to always draw the same hardcoded speaker glyph,
+    // which was wrong wherever compact mode meant something other than audio
+    // output (the sleep timer showed a speaker; the player bar showed two
+    // speakers back to back — this one and the volume rail's own icon,
+    // sitting right next to each other). The icon is now purely opt-in per
+    // caller: no icon prop means no icon, just label + chevron.
+    icon,
   }: {
     value?: string | null;
     options: SelectOption[];
@@ -31,6 +38,7 @@
     compact?: boolean;
     triggerLabel?: string;
     onChange?: (value: string | null) => void;
+    icon?: Snippet;
   } = $props();
 
   let open = $state(false);
@@ -164,9 +172,7 @@
   onkeydown={onTriggerKeydown}
 >
   {#if compact}
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M5 9v6h4l5 4V5L9 9z" /><path d="M18 9.5a4 4 0 0 1 0 5" />
-    </svg>
+    {#if icon}{@render icon()}{/if}
     <span class="compact-label truncate">{displayLabel}</span>
   {:else}
     <span class="truncate">{displayLabel}</span>

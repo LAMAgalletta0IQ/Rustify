@@ -539,7 +539,7 @@
   .friend:hover { background: var(--glass-hover); }
   .friend-avatar { position: relative; display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 50%; overflow: visible; background: var(--glass-strong); color: var(--fg-dim); }
   .friend-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
-  .friend-avatar i { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #17100a; background: var(--fg-dim); }
+  .friend-avatar i { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--ink); background: var(--fg-dim); }
   .friend-avatar i.live { background: var(--accent); }
   .friend-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
   .friend-copy span,.friend-copy small,.friend time { color: var(--fg-dim); font-size: 11px; }

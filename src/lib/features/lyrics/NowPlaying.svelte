@@ -550,7 +550,13 @@
           label="Sleep timer"
           compact
           onChange={chooseSleep}
-        />
+        >
+          {#snippet icon()}
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="13" r="8" /><path d="M12 9v4l3 2" /><path d="M9 2h6" />
+            </svg>
+          {/snippet}
+        </SelectMenu>
         {#if panel === "lyrics" && lyrics?.provider}
           <span class="provider">{lyrics.provider}{lyrics.language ? ` · ${lyrics.language}` : ""}</span>
         {/if}
