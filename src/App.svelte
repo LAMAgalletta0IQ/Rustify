@@ -11,6 +11,7 @@
   import { store } from "./lib/store.svelte";
   import PlayerBar from "./lib/components/PlayerBar.svelte";
   import Home from "./lib/views/Home.svelte";
+  import Jams from "./lib/views/Jams.svelte";
   import Library from "./lib/views/Library.svelte";
   import Login from "./lib/views/Login.svelte";
   import NowPlaying from "./lib/views/NowPlaying.svelte";
@@ -21,7 +22,7 @@
   import Releases from "./lib/views/Releases.svelte";
   import ForYou from "./lib/views/ForYou.svelte";
 
-  type Tab = "home" | "search" | "releases" | "library" | "forYou" | "settings";
+  type Tab = "home" | "search" | "releases" | "library" | "forYou" | "jams" | "settings";
 
   let tab = $state<Tab>("home");
   let nowPlayingOpen = $state(false);
@@ -92,6 +93,9 @@
           <button class:on={tab === "library"} aria-current={tab === "library" ? "page" : undefined} onclick={() => go("library")}>
             Library
           </button>
+          <button class:on={tab === "jams"} aria-current={tab === "jams" ? "page" : undefined} onclick={() => go("jams")}>
+            Jams
+          </button>
           <button class:on={tab === "settings"} aria-current={tab === "settings" ? "page" : undefined} onclick={() => go("settings")}>
             Settings
           </button>
@@ -148,6 +152,8 @@
           <ForYou />
         {:else if tab === "library"}
           <Library />
+        {:else if tab === "jams"}
+          <Jams />
         {:else}
           <Settings onReconfigure={reconfigure} />
         {/if}

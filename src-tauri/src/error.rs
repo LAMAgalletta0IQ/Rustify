@@ -56,6 +56,25 @@ pub enum AppError {
 
     #[error("{0}")]
     Other(String),
+
+    /// A feature that only exists via Spotify's private, unofficial internal
+    /// APIs (Jams, queue reorder/remove, Blend creation, ...). Never reachable
+    /// through the public Web API or a supported librespot API, so it is not
+    /// implemented rather than half-implemented against something unstable.
+    #[error("{0} is not available: {1}")]
+    FeatureUnsupported(String, String),
+
+    /// The public Web API used to support this, but Spotify has since removed
+    /// or restricted it (e.g. `/artists/{{id}}/top-tracks`, Feb 2026). Distinct
+    /// from `FeatureUnsupported`, which never had a public endpoint at all.
+    #[error("{0}")]
+    PublicApiLimitation(String),
+
+    /// A specific documented endpoint has no reachable equivalent for this
+    /// request shape right now (e.g. it requires a private endpoint, or a
+    /// scope/product tier this account lacks).
+    #[error("{0}")]
+    EndpointNotAvailable(String),
 }
 
 impl AppError {
@@ -73,6 +92,9 @@ impl AppError {
             Self::ServiceUnavailable { .. } => "ServiceUnavailable",
             Self::RateLimited { .. } => "RateLimited",
             Self::Other(_) => "Other",
+            Self::FeatureUnsupported(..) => "FeatureUnsupported",
+            Self::PublicApiLimitation(_) => "PublicApiLimitation",
+            Self::EndpointNotAvailable(_) => "EndpointNotAvailable",
         }
     }
 }
@@ -107,6 +129,21 @@ impl From<librespot::core::Error> for AppError {
 impl From<reqwest::Error> for AppError {
     fn from(e: reqwest::Error) -> Self {
         Self::WebApi(e.to_string())
+    }
+}
+
+/// Jams uses its own error taxonomy for the internal services (client token,
+/// persisted queries, dealer). Map it onto the app's kinds so the UI can branch
+/// on them the same way it does for every other command.
+impl From<crate::jams::JamError> for AppError {
+    fn from(e: crate::jams::JamError) -> Self {
+        match e {
+            crate::jams::JamError::JamNotFound(m) => Self::Unavailable(m),
+            crate::jams::JamError::PermissionDenied(m) => Self::Forbidden(m),
+            crate::jams::JamError::ClientTokenExpired(m) => Self::Auth(m),
+            crate::jams::JamError::Config(m) => Self::BadRequest(m),
+            other => Self::Other(other.to_string()),
+        }
     }
 }
 

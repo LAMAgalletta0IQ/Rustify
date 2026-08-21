@@ -22,8 +22,17 @@
           api.getAlbumsSaved([id]),
         ]);
         if (cancelled) return;
-        if (tracksResult.status === "fulfilled") tracks = tracksResult.value;
-        else throw tracksResult.reason;
+        if (tracksResult.status === "fulfilled") {
+          // `/albums/{id}/tracks` returns simplified track objects with no
+          // album object of their own, so each row otherwise has no cover
+          // art. The header (`album`) was already fetched by whoever opened
+          // this view — reuse it instead of an extra request per track.
+          tracks = tracksResult.value.map((t) => ({
+            ...t,
+            album: t.album || album.name,
+            imageUrl: t.imageUrl ?? album.imageUrl,
+          }));
+        } else throw tracksResult.reason;
         if (savedResult.status === "fulfilled") saved = savedResult.value[0] ?? false;
       } catch (e) {
         if (!cancelled) store.handleError(e);
@@ -81,8 +90,6 @@
   {#if loading}
     <p class="muted">Loading…</p>
   {:else}
-    <!-- Album tracks come back without their own album object, so cover art
-         is absent on each row; the header carries it instead. -->
     <TrackList {tracks} contextUri={album.uri} />
   {/if}
 </div>

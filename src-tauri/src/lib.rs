@@ -3,6 +3,12 @@ mod auth;
 mod commands;
 mod connect;
 mod error;
+// Experimental Spotify Jams module. Self-contained; see README_jams.md. Not yet
+// exposed to the UI — the app only links it so it compiles and can be driven
+// from examples/jam_demo.rs. Remove this line if you want to keep it out of the
+// build for now.
+pub mod jams;
+mod jams_bridge;
 mod library;
 mod lyrics;
 mod media_keys;
@@ -151,6 +157,12 @@ pub fn run() {
             // queue
             commands::get_queue,
             commands::add_to_queue,
+            // jams (experimental)
+            commands::get_jam_status,
+            commands::create_jam,
+            commands::join_jam,
+            commands::leave_jam,
+            commands::add_track_to_jam,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

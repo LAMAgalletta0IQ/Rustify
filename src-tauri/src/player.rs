@@ -162,6 +162,13 @@ fn spawn_event_pump(
             let mut track_to_resolve: Option<SpotifyUri> = None;
 
             match event {
+                PlayerEvent::SessionConnected { .. } => {
+                    // Fired the moment `Spirc::activate` succeeds — the
+                    // authoritative "we are now the active device" signal,
+                    // ahead of any audio actually playing.
+                    pb.is_active_device = true;
+                    state.active_device.set(true);
+                }
                 PlayerEvent::Playing {
                     track_id,
                     position_ms,
@@ -170,6 +177,7 @@ fn spawn_event_pump(
                     pb.is_playing = true;
                     pb.is_loading = false;
                     pb.is_active_device = true;
+                    state.active_device.set(true);
                     pb.set_position(position_ms);
                     track_to_resolve = Some(track_id);
                 }
@@ -181,6 +189,7 @@ fn spawn_event_pump(
                     pb.is_playing = false;
                     pb.is_loading = false;
                     pb.is_active_device = true;
+                    state.active_device.set(true);
                     pb.set_position(position_ms);
                     track_to_resolve = Some(track_id);
                 }
@@ -191,6 +200,7 @@ fn spawn_event_pump(
                 } => {
                     pb.is_loading = true;
                     pb.is_active_device = true;
+                    state.active_device.set(true);
                     pb.set_position(position_ms);
                     track_to_resolve = Some(track_id);
                 }
@@ -218,8 +228,12 @@ fn spawn_event_pump(
                     pb.is_loading = false;
                 }
                 PlayerEvent::SessionDisconnected { .. } => {
+                    // Spirc emits this when a Connect cluster update shows a
+                    // different device took over as active — see
+                    // `ActiveDeviceSignal`'s doc comment for the code path.
                     pb.is_active_device = false;
                     pb.is_playing = false;
+                    state.active_device.set(false);
                 }
                 // Preload/EndOfTrack/PlayRequestIdChanged and the remaining
                 // variants carry no state the UI renders.
@@ -367,6 +381,7 @@ pub fn spawn_remote_poller(
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         let api = WebApi::new();
+        let mut active_rx = app.state::<AppState>().active_device.subscribe();
 
         // Polls before the first sleep: opening the app while music plays on
         // another device must show it immediately, not after a delay.
@@ -374,8 +389,10 @@ pub fn spawn_remote_poller(
             let state = app.state::<AppState>();
 
             // Local playback is authoritative and event-driven; polling over
-            // it would fight the event pump and waste quota.
-            let skip = state.playback.read().await.is_active_device;
+            // it would fight the event pump and waste quota. `active_device`
+            // is the canonical signal (see `ActiveDeviceSignal`), not the
+            // `PlaybackState` copy, though the two are always in sync.
+            let skip = *active_rx.borrow_and_update();
             let token = tokens.get().await;
 
             if skip || token.is_empty() {
@@ -426,6 +443,7 @@ async fn apply_remote(
     };
 
     pb.is_active_device = false;
+    state.active_device.set(false);
     pb.is_playing = r.is_playing;
     pb.set_position(r.progress_ms.unwrap_or(0));
 

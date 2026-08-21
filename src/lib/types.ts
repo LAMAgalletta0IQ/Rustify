@@ -14,7 +14,10 @@ export interface AppErrorPayload {
     | "Unavailable"
     | "ServiceUnavailable"
     | "RateLimited"
-    | "Other";
+    | "Other"
+    | "FeatureUnsupported"
+    | "PublicApiLimitation"
+    | "EndpointNotAvailable";
   message: string;
   /** Seconds to wait, from Spotify's `Retry-After`. Only set for RateLimited. */
   retryAfter?: number | null;
@@ -215,6 +218,49 @@ export interface QueueView {
   currentlyPlaying: TrackSummary | null;
   queue: TrackSummary[];
 }
+
+// ---- jams (experimental) ---------------------------------------------------
+// Mirrors src-tauri/src/jams/session.rs and dealer.rs.
+
+export interface JamMember {
+  id: string;
+  name: string | null;
+  isHost: boolean;
+}
+
+export interface JamTrack {
+  uri: string;
+  name: string | null;
+  artists: string[];
+  addedBy: string | null;
+  addedAt: string | null;
+}
+
+export interface JamSession {
+  id: string;
+  host: JamMember | null;
+  members: JamMember[];
+  queue: JamTrack[];
+  activeState: unknown;
+  /** Token from the invite link — what `joinJam` takes. */
+  joinToken: string | null;
+  /** Shareable `https://open.spotify.com/socialsession/<token>` link. */
+  joinUrl: string | null;
+}
+
+/** Status of the jam backend, from `get_jam_status`. */
+export interface JamStatus {
+  spclientEndpoints: number;
+  pathfinderHashes: number;
+  session: JamSession | null;
+}
+
+/**
+ * Dealer events forwarded as `jams:changed`. Variant/field names are the
+ * serialised `camelCase` form of the Rust `JamEvent` enum; kept loose because
+ * the payload shapes are still being captured.
+ */
+export type JamEventPayload = Record<string, unknown>;
 
 export const MAX_VOLUME = 65535;
 

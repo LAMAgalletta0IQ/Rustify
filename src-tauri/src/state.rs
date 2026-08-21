@@ -3,7 +3,7 @@ use std::sync::Arc;
 use librespot::connect::Spirc;
 use librespot::core::session::Session;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{watch, RwLock};
 
 use crate::audio::{AudioRuntime, StreamQuality};
 
@@ -11,6 +11,7 @@ use crate::audio::{AudioRuntime, StreamQuality};
 pub mod events {
     pub const PLAYBACK: &str = "playback:changed";
     pub const AUTH: &str = "auth:changed";
+    pub const JAMS: &str = "jams:changed";
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -130,6 +131,44 @@ pub struct SpotifySession {
     pub remote_task: tauri::async_runtime::JoinHandle<()>,
 }
 
+/// Canonical, authoritative signal for whether this app is the active
+/// Spotify Connect device.
+///
+/// `PlaybackState::is_active_device` mirrors this for the webview snapshot,
+/// but this channel is the source of truth: it is written from exactly two
+/// places in `player::spawn_event_pump` — `SessionConnected`/`Playing`/
+/// `Loading`/`Paused` (true) and `SessionDisconnected` (false), the latter
+/// fired by librespot's own Spirc when a Connect cluster update reports
+/// another device took over (see `librespot_connect::spirc::handle_cluster_update`,
+/// a fully public/supported code path — no private endpoint is called to
+/// learn this). Anything that needs to react to activation/deactivation
+/// (rather than poll `AppState::playback`) should `subscribe()` here.
+pub struct ActiveDeviceSignal {
+    tx: watch::Sender<bool>,
+}
+
+impl ActiveDeviceSignal {
+    pub fn subscribe(&self) -> watch::Receiver<bool> {
+        self.tx.subscribe()
+    }
+
+    pub fn set(&self, active: bool) {
+        self.tx.send_if_modified(|v| {
+            let changed = *v != active;
+            *v = active;
+            changed
+        });
+    }
+}
+
+impl Default for ActiveDeviceSignal {
+    fn default() -> Self {
+        Self {
+            tx: watch::channel(false).0,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct AppState {
     pub spotify: RwLock<Option<SpotifySession>>,
@@ -141,6 +180,11 @@ pub struct AppState {
     /// Synchronous audio-thread controls. This is separate from the Tokio
     /// state so the sink never blocks on an async runtime lock.
     pub audio: AudioRuntime,
+    pub active_device: ActiveDeviceSignal,
+    /// Experimental jams session, built lazily on the first jam command and
+    /// dropped on logout. `Arc` so commands clone the handle instead of holding
+    /// the read guard across awaits.
+    pub jams: RwLock<Option<Arc<crate::jams_bridge::JamController>>>,
 }
 
 impl AppState {

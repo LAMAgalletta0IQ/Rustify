@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use librespot::connect::{LoadRequest, LoadRequestOptions, PlayingTrack};
 use librespot::core::authentication::Credentials;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -8,6 +10,8 @@ use crate::audio::{
 use crate::auth;
 use crate::connect::{self, Device};
 use crate::error::{AppError, AppResult};
+use crate::jams::JamSession;
+use crate::jams_bridge::JamController;
 use crate::library::{
     self, AlbumPage, AlbumSummary, ArtistPage, FollowedReleasePage, PlaylistSummary,
     RecentActivityItem, TrackSummary,
@@ -365,6 +369,9 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
         s.refresh_task.abort();
         s.remote_task.abort();
     }
+    // Drop the jam controller too: its dealer listener and event forwarder
+    // must not outlive the session they authenticate against.
+    state.jams.write().await.take();
     state.tokens.set(String::new()).await;
     *state.auth.write().await = AuthState::default();
     *state.playback.write().await = PlaybackState::default();
@@ -828,4 +835,94 @@ pub async fn get_queue(state: State<'_, AppState>) -> AppResult<QueueView> {
 pub async fn add_to_queue(state: State<'_, AppState>, uri: String) -> AppResult<()> {
     let t = token(&state).await?;
     queue::add_to_queue(&WebApi::new(), &t, &uri).await
+}
+
+// ---- jams (experimental) --------------------------------------------------
+
+/// Returns the controller, building it lazily. Requires a live session (the
+/// jams module needs the user's bearer token), but the check also keeps a
+/// logged-out app from spawning a dealer listener that would just reconnect
+/// forever with no token.
+async fn ensure_jams(app: &AppHandle, state: &AppState) -> AppResult<Arc<JamController>> {
+    if let Some(ctrl) = state.jams.read().await.as_ref() {
+        return Ok(ctrl.clone());
+    }
+    // Jams hang off the librespot session (device id, client-token, dealer
+    // connection id), so the controller cannot be built before it exists.
+    let session = {
+        let guard = state.spotify.read().await;
+        let Some(session) = guard.as_ref() else {
+            return Err(AppError::NotLoggedIn);
+        };
+        session.session.clone()
+    };
+    let ctrl = Arc::new(JamController::build(app, session, &state.tokens).await?);
+    let mut guard = state.jams.write().await;
+    if let Some(existing) = guard.as_ref() {
+        return Ok(existing.clone());
+    }
+    guard.replace(ctrl.clone());
+    Ok(ctrl)
+}
+
+/// Configuration + current session, so the Jams view can explain what still
+/// needs capturing (endpoints/hashes) without firing a request.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JamStatus {
+    pub spclient_endpoints: usize,
+    pub pathfinder_hashes: usize,
+    pub session: Option<JamSession>,
+}
+
+#[tauri::command]
+pub async fn get_jam_status(app: AppHandle, state: State<'_, AppState>) -> AppResult<JamStatus> {
+    // Not logged in is not an error here: the view only renders while logged
+    // in, but a reload can race that, and a status read must not spawn a
+    // dealer loop on its own.
+    let Ok(ctrl) = ensure_jams(&app, &state).await else {
+        return Ok(JamStatus {
+            spclient_endpoints: 0,
+            pathfinder_hashes: 0,
+            session: None,
+        });
+    };
+    let config = ctrl.config();
+    Ok(JamStatus {
+        spclient_endpoints: config.spclient_endpoints.len(),
+        pathfinder_hashes: config.pathfinder_hashes.len(),
+        session: ctrl.session().await,
+    })
+}
+
+#[tauri::command]
+pub async fn create_jam(app: AppHandle, state: State<'_, AppState>) -> AppResult<JamSession> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    ctrl.create(None).await.map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn join_jam(app: AppHandle, state: State<'_, AppState>, jam_id: String) -> AppResult<JamSession> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    ctrl.join(&jam_id).await.map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn leave_jam(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    ctrl.leave().await.map_err(AppError::from)
+}
+
+/// Adds the currently playing track to the active jam.
+#[tauri::command]
+pub async fn add_track_to_jam(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    let ctrl = ensure_jams(&app, &state).await?;
+    ctrl.sync_token(&state.tokens).await;
+    let Some(track) = state.playback.read().await.track.clone() else {
+        return Err(AppError::Playback("Nothing is playing.".to_string()));
+    };
+    ctrl.add_track(&track.uri).await.map_err(AppError::from)
 }

@@ -11,6 +11,8 @@ import type {
   ArtistSummary,
   AuthState,
   Device,
+  JamSession,
+  JamStatus,
   LoginInfo,
   LyricsResult,
   PlaybackState,
@@ -25,6 +27,7 @@ import type {
 /** Tauri event names — must match `state::events` in Rust. */
 export const EVENT_PLAYBACK = "playback:changed";
 export const EVENT_AUTH = "auth:changed";
+export const EVENT_JAMS = "jams:changed";
 
 /**
  * Tauri rejects with the serialised `AppError`. Normalise it so callers always
@@ -169,3 +172,12 @@ export const searchSpotify = (query: string, limit?: number, offset?: number) =>
 // ---- queue --------------------------------------------------------------
 export const getQueue = () => invoke<QueueView>("get_queue");
 export const addToQueue = (uri: string) => invoke<void>("add_to_queue", { uri });
+
+// ---- jams (experimental) -------------------------------------------------
+export const getJamStatus = () => invoke<JamStatus>("get_jam_status");
+export const createJam = () => invoke<JamSession>("create_jam");
+export const joinJam = (jamId: string) =>
+  invoke<JamSession>("join_jam", { jamId });
+export const leaveJam = () => invoke<void>("leave_jam");
+/** Adds whatever is currently playing to the active jam. */
+export const addTrackToJam = () => invoke<void>("add_track_to_jam");
