@@ -161,6 +161,7 @@ pub fn run() {
             commands::get_artist_top_tracks,
             commands::get_artist_albums,
             commands::get_artist,
+            commands::get_artist_concerts,
             commands::get_top_tracks,
             commands::get_top_artists,
             commands::get_personalized_home,

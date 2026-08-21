@@ -1081,6 +1081,25 @@ pub async fn get_artist(state: State<'_, AppState>, artist_id: String) -> AppRes
 }
 
 #[tauri::command]
+pub async fn get_artist_concerts(
+    state: State<'_, AppState>,
+    artist_id: String,
+    locale: Option<String>,
+) -> AppResult<crate::spotify::ConcertFeed> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    state
+        .internal_spotify
+        .artist_concerts(&session, &artist_id, locale.as_deref().unwrap_or(""))
+        .await
+}
+
+#[tauri::command]
 pub async fn get_top_tracks(
     state: State<'_, AppState>,
     limit: Option<u32>,

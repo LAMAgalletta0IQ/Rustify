@@ -28,6 +28,7 @@ import type {
   EqualizerPreset,
   FriendFeed,
   UserProfile,
+  ConcertFeed,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -170,6 +171,11 @@ export const getArtistAlbums = (artistId: string, limit = 10, offset = 0) =>
   invoke<AlbumPage>("get_artist_albums", { artistId, limit, offset });
 export const getArtist = (artistId: string) =>
   invoke<ArtistSummary>("get_artist", { artistId });
+export const getArtistConcerts = (artistId: string) =>
+  invoke<ConcertFeed>("get_artist_concerts", {
+    artistId,
+    locale: navigator.language || "en",
+  });
 export const getTopTracks = (limit?: number) =>
   invoke<TrackSummary[]>("get_top_tracks", { limit });
 export const getTopArtists = (limit?: number) =>

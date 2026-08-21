@@ -21,6 +21,13 @@ const HOME_HASHES: &[&str] = &[
     "d62af2714f2623c923cc9eeca4b9545b4363abaa9188a9e94e2b63b823419a2c",
 ];
 
+/// The generated libspot registry was refreshed on 2026-08-14. Wavee's
+/// independently captured desktop-XPUI operation remains a useful fallback.
+const ARTIST_OVERVIEW_HASHES: &[&str] = &[
+    "1ac33ddab5d39a3a9c27802774e6d78b9405cc188c6f75aed007df2a32737c72",
+    "7f86ff63e38c24973a2842b672abe44c910c1973978dc8a4a0cb648edef34527",
+];
+
 pub struct PathfinderClient {
     http: Client,
     discovered: RwLock<HashMap<String, String>>,
@@ -116,11 +123,14 @@ impl PathfinderClient {
                 hashes.push(hash);
             }
         }
-        if operation == "home" {
-            for hash in HOME_HASHES {
-                if !hashes.iter().any(|candidate| candidate == hash) {
-                    hashes.push((*hash).to_owned());
-                }
+        let known = match operation {
+            "home" => HOME_HASHES,
+            "queryArtistOverview" => ARTIST_OVERVIEW_HASHES,
+            _ => &[],
+        };
+        for hash in known {
+            if !hashes.iter().any(|candidate| candidate == hash) {
+                hashes.push((*hash).to_owned());
             }
         }
         hashes
@@ -140,15 +150,43 @@ impl PathfinderClient {
             "variables": variables,
             "extensions": {"persistedQuery": {"version": 1, "sha256Hash": hash}}
         });
+        let desktop_artist = operation == "queryArtistOverview";
         let mut request = self
             .http
             .post(ENDPOINT)
             .bearer_auth(access_token)
             .header("client-token", client_token)
-            .header("app-platform", "WebPlayer")
-            .header("Origin", "https://open.spotify.com")
-            .header("Referer", "https://open.spotify.com/")
+            .header(
+                "app-platform",
+                if desktop_artist {
+                    "Win32_x86_64"
+                } else {
+                    "WebPlayer"
+                },
+            )
+            .header(
+                "Origin",
+                if desktop_artist {
+                    "https://xpui.app.spotify.com"
+                } else {
+                    "https://open.spotify.com"
+                },
+            )
+            .header(
+                "Referer",
+                if desktop_artist {
+                    "https://xpui.app.spotify.com/"
+                } else {
+                    "https://open.spotify.com/"
+                },
+            )
             .header("Accept", "application/json");
+        if desktop_artist {
+            request = request
+                .header("spotify-app-version", "896000000")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.179 Spotify/1.2.88.483 Safari/537.36")
+                .header("Accept-Language", "en");
+        }
         if !connection_id.is_empty() {
             request = request.header("Spotify-Connection-Id", connection_id);
         }
@@ -400,6 +438,15 @@ mod tests {
         let js = r#"x={1:"home-web",2:"search-web"};y={1:"abcdef12",2:"1234abcd"}"#;
         let chunks = webpack_chunks(js).unwrap();
         assert!(chunks.contains(&"home-web.abcdef12.js".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn includes_newest_artist_overview_hash_first() {
+        let candidates = PathfinderClient::default()
+            .candidates("queryArtistOverview")
+            .await;
+        assert_eq!(candidates[0], ARTIST_OVERVIEW_HASHES[0]);
+        assert_eq!(candidates.len(), ARTIST_OVERVIEW_HASHES.len());
     }
 
     /// Opt-in because it downloads Spotify's currently deployed Web Player.

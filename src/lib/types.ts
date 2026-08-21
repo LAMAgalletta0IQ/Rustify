@@ -343,6 +343,22 @@ export interface UserProfile {
   following: ProfileArtist[];
 }
 
+export interface ConcertEvent {
+  uri: string;
+  title: string;
+  startDateIso: string | null;
+  venue: string | null;
+  city: string | null;
+  isFestival: boolean;
+  eventUrl: string | null;
+}
+
+export interface ConcertFeed {
+  available: boolean;
+  totalCount: number;
+  events: ConcertEvent[];
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

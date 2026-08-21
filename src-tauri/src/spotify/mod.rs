@@ -2,10 +2,12 @@
 //! features. These clients use credentials from the authenticated librespot
 //! session and never persist or log them.
 
+mod concerts;
 mod dj;
 mod home;
 mod pathfinder;
 
+pub use concerts::ConcertFeed;
 pub use dj::DjSession;
 pub use home::HomeFeed;
 
@@ -43,6 +45,26 @@ async fn first_party_auth(session: &Session) -> AppResult<FirstPartyAuth> {
 }
 
 impl InternalSpotify {
+    pub async fn artist_concerts(
+        &self,
+        session: &Session,
+        artist_id: &str,
+        locale: &str,
+    ) -> AppResult<ConcertFeed> {
+        let auth = first_party_auth(session).await?;
+        let data = self
+            .pathfinder
+            .query(
+                "queryArtistOverview",
+                concerts::variables(artist_id, locale)?,
+                &auth.access_token,
+                &auth.client_token,
+                &auth.connection_id,
+            )
+            .await?;
+        concerts::parse(&data)
+    }
+
     pub async fn home(
         &self,
         session: &Session,
