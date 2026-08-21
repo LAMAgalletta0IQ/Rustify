@@ -221,6 +221,7 @@ fn spawn_event_pump(
                     position_ms,
                     ..
                 } => {
+                    state.sleep_timer.observe_local_playback().await;
                     pb.is_playing = true;
                     pb.is_loading = false;
                     pb.is_active_device = true;
@@ -595,8 +596,10 @@ pub fn spawn_remote_poller(
 
             match connect::current_playback(&api, &token).await {
                 Ok(remote) => {
-                    if apply_remote(&state, remote).await {
-                        let snap = snapshot(&state).await;
+                    let changed = apply_remote(&state, remote).await;
+                    let snap = snapshot(&state).await;
+                    state.sleep_timer.observe_remote_playback(&app, &snap).await;
+                    if changed {
                         let _ = app.emit(events::PLAYBACK, &snap);
                     }
                 }
