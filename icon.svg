@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <!-- 3D Bevel Filter (Inner ONLY, NO outer drop shadow) -->
+    <filter id="gear-3d" x="-10%" y="-10%" width="120%" height="120%">
+      <!-- Blur for edge detection -->
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="blur" />
+      
+      <!-- Top/Left Highlight -->
+      <feOffset dx="-3" dy="-3" in="blur" result="hi-offset" />
+      <feComposite in="SourceAlpha" in2="hi-offset" operator="out" result="hi-mask" />
+      <feFlood flood-color="#FFFFFF" flood-opacity="0.95" result="hi-color" />
+      <feComposite in="hi-color" in2="hi-mask" operator="in" result="highlight" />
+      
+      <!-- Bottom/Right Shadow -->
+      <feOffset dx="4" dy="6" in="blur" result="sh-offset" />
+      <feComposite in="SourceAlpha" in2="sh-offset" operator="out" result="sh-mask" />
+      <feFlood flood-color="#938A7A" flood-opacity="0.85" result="sh-color" />
+      <feComposite in="sh-color" in2="sh-mask" operator="in" result="shadow" />
+      
+      <!-- Soft Overall Depth (Inner Glow) -->
+      <feOffset dx="0" dy="0" in="blur" result="glow-offset" />
+      <feComposite in="SourceAlpha" in2="glow-offset" operator="out" result="glow-mask" />
+      <feFlood flood-color="#FFFFFF" flood-opacity="0.25" result="glow-color" />
+      <feComposite in="glow-color" in2="glow-mask" operator="in" result="inner-glow" />
+
+      <!-- Merge all inner layers -->
+      <feMerge>
+        <feMergeNode in="SourceGraphic" />
+        <feMergeNode in="inner-glow" />
+        <feMergeNode in="shadow" />
+        <feMergeNode in="highlight" />
+      </feMerge>
+    </filter>
+
+    <!-- Deep Inner Shadow for Green Details -->
+    <filter id="inner-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feOffset dx="0" dy="4"/>
+      <feGaussianBlur stdDeviation="3" result="offset-blur"/>
+      <feComposite operator="out" in="SourceGraphic" in2="offset-blur" result="inverse"/>
+      <feFlood flood-color="#000000" flood-opacity="0.6" result="color"/>
+      <feComposite operator="in" in2="inverse" result="shadow"/>
+      <feComposite operator="over" in2="SourceGraphic"/>
+    </filter>
+
+    <!-- Subtle Drop Shadow for Sound Waves on Vinyl -->
+    <filter id="wave-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="2" flood-color="#000000" flood-opacity="0.6" />
+    </filter>
+
+    <!-- Gradients -->
+    <linearGradient id="gear-base" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F4EFE5" />
+      <stop offset="100%" stop-color="#D6CFBF" />
+    </linearGradient>
+
+    <radialGradient id="vinyl-base" cx="50%" cy="50%" r="50%">
+      <stop offset="50%" stop-color="#141415" />
+      <stop offset="85%" stop-color="#1C1D1F" />
+      <stop offset="100%" stop-color="#0C0D0E" />
+    </radialGradient>
+
+    <!-- Anisotropic Vinyl Glare -->
+    <linearGradient id="glare1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0" />
+      <stop offset="47%" stop-color="#FFFFFF" stop-opacity="0" />
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.12" />
+      <stop offset="53%" stop-color="#FFFFFF" stop-opacity="0" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    
+    <linearGradient id="glare2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0" />
+      <stop offset="47%" stop-color="#FFFFFF" stop-opacity="0" />
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.10" />
+      <stop offset="53%" stop-color="#FFFFFF" stop-opacity="0" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Mask to punch the hole in the gear for the vinyl record -->
+    <mask id="hole-mask">
+      <rect width="500" height="500" fill="#FFFFFF" />
+      <circle cx="250" cy="250" r="150" fill="#000000" />
+    </mask>
+  </defs>
+
+  <!-- ==================== 1. VINYL RECORD (Sits underneath the gear) ==================== -->
+  <g id="vinyl">
+    <!-- Outer dark cavity edge -->
+    <circle cx="250" cy="250" r="150" fill="#080808" />
+    <!-- Vinyl disc -->
+    <circle cx="250" cy="250" r="147" fill="url(#vinyl-base)" />
+    <!-- Glares -->
+    <circle cx="250" cy="250" r="147" fill="url(#glare1)" />
+    <circle cx="250" cy="250" r="147" fill="url(#glare2)" />
+    
+    <!-- Concentric Grooves -->
+    <circle cx="250" cy="250" r="135" fill="none" stroke="#333333" stroke-width="1.5" />
+    <circle cx="250" cy="250" r="120" fill="none" stroke="#262626" stroke-width="1" />
+    <circle cx="250" cy="250" r="105" fill="none" stroke="#333333" stroke-width="1.5" />
+    <circle cx="250" cy="250" r="90" fill="none" stroke="#262626" stroke-width="1" />
+    <circle cx="250" cy="250" r="75" fill="none" stroke="#333333" stroke-width="1.5" />
+  </g>
+
+  <!-- ==================== 2. SOUND WAVES (On bottom-left of vinyl) ==================== -->
+  <!-- Rotated 135deg so that X=right becomes Bottom-Left -->
+  <g id="sound-waves" transform="rotate(135 250 250)" fill="none" stroke="#EAE5DA" stroke-width="11" stroke-linecap="round" filter="url(#wave-shadow)">
+    <!-- Inner Arc -->
+    <path d="M 318,219 A 75,75 0 0,1 318,281" />
+    <!-- Middle Arc -->
+    <path d="M 336.6,200 A 100,100 0 0,1 336.6,300" />
+    <!-- Outer Arc -->
+    <path d="M 352,179 A 125,125 0 0,1 352,321" />
+  </g>
+
+  <!-- ==================== 3. 3D GEAR BODY & LABEL (Seamless boolean merge) ==================== -->
+  <g filter="url(#gear-3d)">
+    
+    <!-- A. Masked Gear Base (Creates the angular teeth and inner valley curve) -->
+    <g mask="url(#hole-mask)" fill="url(#gear-base)">
+      <!-- Center solid filling (creates the rounded valleys between teeth) -->
+      <circle cx="250" cy="250" r="180" />
+      <!-- The 8 angular teeth (created via 4 rotated rounded rectangles) -->
+      <rect x="207.5" y="15" width="85" height="470" rx="14" />
+      <rect x="207.5" y="15" width="85" height="470" rx="14" transform="rotate(45 250 250)" />
+      <rect x="207.5" y="15" width="85" height="470" rx="14" transform="rotate(90 250 250)" />
+      <rect x="207.5" y="15" width="85" height="470" rx="14" transform="rotate(135 250 250)" />
+    </g>
+
+    <!-- B. Tonearm Extension (Unmasked, visually merges with the top-right tooth) -->
+    <g transform="rotate(45 250 250)" fill="url(#gear-base)">
+      <!-- Overlaps the tooth at y=90, cleanly arcs inward to y=160 to house the green pill -->
+      <path d="M 207.5,90 L 207.5,100 Q 225,100 225,115 L 225, 160 A 25 25 0 0 0 275 160 L 275, 115 Q 275,100 292.5,100 L 292.5,90 Z" />
+    </g>
+
+    <!-- C. Center Record Label -->
+    <circle cx="250" cy="250" r="50" fill="url(#gear-base)" />
+    <!-- Engraved ring detail on center label -->
+    <circle cx="250" cy="250" r="30" fill="none" stroke="#D1CBBF" stroke-width="2" />
+  </g>
+
+  <!-- ==================== 4. GREEN INDICATOR DETAILS ==================== -->
+  <!-- Center Green Dot -->
+  <circle cx="250" cy="250" r="18" fill="#258C46" filter="url(#inner-shadow)" />
+  
+  <!-- Tonearm Green Pill (Inside the rotated Tonearm group) -->
+  <g transform="rotate(45 250 250)">
+    <rect x="238" y="115" width="24" height="40" rx="12" fill="#258C46" filter="url(#inner-shadow)" />
+  </g>
+
+</svg>
