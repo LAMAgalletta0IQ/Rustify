@@ -75,6 +75,9 @@ pub async fn start_session(
         // Raw 0..=u16::MAX scale, NOT a percentage — librespot's own default
         // is u16::MAX / 2. Passing 50 here yields ~0.08% volume, i.e. silence.
         initial_volume: percent_to_volume(initial_volume_percent),
+        // Local loads, remote set_queue commands and queue additions are
+        // projected immediately instead of waiting for the next cluster push.
+        emit_set_queue_events: true,
         ..Default::default()
     };
 
@@ -174,6 +177,30 @@ fn spawn_event_pump(
         while let Some(event) = rx.recv().await {
             let state = app.state::<AppState>();
             state.telemetry.observe(&event).await;
+
+            if let PlayerEvent::SetQueue {
+                context_uri,
+                current_track,
+                next_tracks,
+                prev_tracks,
+            } = &event
+            {
+                let projected = {
+                    let existing = state.queue.read().await;
+                    crate::queue::from_player_event(
+                        current_track.as_ref(),
+                        next_tracks,
+                        prev_tracks,
+                        &existing,
+                    )
+                };
+                *state.queue.write().await = projected.clone();
+                if !context_uri.is_empty() && context_uri != "-" {
+                    state.playback.write().await.context_uri = Some(context_uri.clone());
+                }
+                let _ = app.emit(events::QUEUE, projected);
+                continue;
+            }
             let mut pb = state.playback.write().await;
 
             let mut track_to_resolve: Option<SpotifyUri> = None;

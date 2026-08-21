@@ -8,8 +8,12 @@
 //! queue for the *active* device. It is accurate while this app is the active
 //! Connect device, which is the normal case.
 
+use std::collections::BTreeMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use serde::{Deserialize, Serialize};
 
+use librespot::playback::player::QueueTrack;
 use librespot::protocol::player::{PlayerState, ProvidedTrack};
 
 use crate::error::AppResult;
@@ -29,6 +33,7 @@ pub struct QueueView {
 #[derive(Debug, Deserialize)]
 struct WireQueue {
     currently_playing: Option<WireTrack>,
+    #[serde(default)]
     queue: Vec<WireTrack>,
 }
 
@@ -46,6 +51,7 @@ struct WireNamed {
 #[derive(Debug, Deserialize)]
 struct WireAlbum {
     name: String,
+    #[serde(default)]
     images: Vec<WireImage>,
 }
 
@@ -120,10 +126,14 @@ pub fn merge_metadata(protocol: &QueueView, web: QueueView) -> QueueView {
             .map(replacement)
             .or(fallback_current),
         previous: protocol.previous.iter().map(replacement).collect(),
-        queue: if protocol.queue.is_empty() {
-            fallback_queue
-        } else {
+        queue: if protocol.revision.is_some()
+            || !protocol.previous.is_empty()
+            || protocol.currently_playing.is_some()
+            || !protocol.autoplay.is_empty()
+        {
             protocol.queue.iter().map(replacement).collect()
+        } else {
+            fallback_queue
         },
         autoplay: protocol.autoplay.iter().map(replacement).collect(),
         revision: protocol.revision.clone(),
@@ -137,7 +147,12 @@ pub fn merge_metadata(protocol: &QueueView, web: QueueView) -> QueueView {
 pub fn from_player_state(player: &PlayerState) -> QueueView {
     let mut queue = Vec::new();
     let mut autoplay = Vec::new();
-    for track in player.next_tracks.iter().map(provided_track) {
+    for track in player
+        .next_tracks
+        .iter()
+        .filter(|track| valid_queue_uri(&track.uri))
+        .map(provided_track)
+    {
         if track.1 {
             autoplay.push(track.0);
         } else {
@@ -145,7 +160,12 @@ pub fn from_player_state(player: &PlayerState) -> QueueView {
         }
     }
 
-    let mut currently_playing = player.track.as_ref().map(provided_track).map(|v| v.0);
+    let mut currently_playing = player
+        .track
+        .as_ref()
+        .filter(|track| valid_queue_uri(&track.uri))
+        .map(provided_track)
+        .map(|v| v.0);
     if let Some(current) = currently_playing.as_mut() {
         current.duration_ms = current
             .duration_ms
@@ -157,6 +177,7 @@ pub fn from_player_state(player: &PlayerState) -> QueueView {
         previous: player
             .prev_tracks
             .iter()
+            .filter(|track| valid_queue_uri(&track.uri))
             .map(provided_track)
             .map(|v| v.0)
             .collect(),
@@ -166,9 +187,76 @@ pub fn from_player_state(player: &PlayerState) -> QueueView {
     }
 }
 
+/// Immediate local queue projection from librespot's opt-in SetQueue event.
+/// Existing metadata is retained by URI; new entries use safe placeholders
+/// until the normal Web API hydration completes.
+pub fn from_player_event(
+    current: Option<&QueueTrack>,
+    next: &[QueueTrack],
+    previous: &[QueueTrack],
+    existing: &QueueView,
+) -> QueueView {
+    let catalog: Vec<_> = existing
+        .currently_playing
+        .iter()
+        .chain(&existing.previous)
+        .chain(&existing.queue)
+        .chain(&existing.autoplay)
+        .collect();
+    let summary = |track: &QueueTrack| {
+        catalog
+            .iter()
+            .find(|candidate| candidate.uri == track.uri)
+            .map(|track| (*track).clone())
+            .unwrap_or_else(|| placeholder(&track.uri))
+    };
+    let mut queue = Vec::new();
+    let mut autoplay = Vec::new();
+    for track in next.iter().filter(|track| valid_queue_uri(&track.uri)) {
+        if is_autoplay_provider(&track.provider) {
+            autoplay.push(summary(track));
+        } else {
+            queue.push(summary(track));
+        }
+    }
+    QueueView {
+        currently_playing: current
+            .filter(|track| valid_queue_uri(&track.uri))
+            .map(summary),
+        previous: previous
+            .iter()
+            .filter(|track| valid_queue_uri(&track.uri))
+            .map(summary)
+            .collect(),
+        queue,
+        autoplay,
+        revision: Some(queue_revision(next)),
+    }
+}
+
+fn placeholder(uri: &str) -> TrackSummary {
+    TrackSummary {
+        id: uri.rsplit(':').next().unwrap_or_default().to_owned(),
+        uri: uri.to_owned(),
+        name: "Spotify track".to_owned(),
+        artists: Vec::new(),
+        artist_ids: Vec::new(),
+        album: String::new(),
+        image_url: None,
+        duration_ms: 0,
+        explicit: false,
+    }
+}
+
+fn queue_revision(next: &[QueueTrack]) -> String {
+    let mut state = DefaultHasher::new();
+    next.iter().for_each(|track| track.uri.hash(&mut state));
+    state.finish().to_string()
+}
+
 fn provided_track(track: &ProvidedTrack) -> (TrackSummary, bool) {
     let metadata = &track.metadata;
-    let mut artists: Vec<(usize, String)> = metadata
+    let artists: BTreeMap<usize, String> = metadata
         .iter()
         .filter_map(|(key, value)| {
             if key == "artist_name" {
@@ -180,7 +268,6 @@ fn provided_track(track: &ProvidedTrack) -> (TrackSummary, bool) {
             }
         })
         .collect();
-    artists.sort_by_key(|(index, _)| *index);
 
     let image_url = ["image_url", "image_large_url", "image_xlarge_url"]
         .iter()
@@ -188,7 +275,7 @@ fn provided_track(track: &ProvidedTrack) -> (TrackSummary, bool) {
         .and_then(|uri| spotify_image_url(uri));
     let id = track.uri.rsplit(':').next().unwrap_or_default().to_string();
     let provider = track.provider.to_ascii_lowercase();
-    let autoplay = provider.contains("autoplay")
+    let autoplay = is_autoplay_provider(&provider)
         || metadata
             .get("autoplay.is_autoplay")
             .is_some_and(|value| value == "true");
@@ -201,7 +288,7 @@ fn provided_track(track: &ProvidedTrack) -> (TrackSummary, bool) {
                 .get("title")
                 .cloned()
                 .unwrap_or_else(|| "Spotify track".to_string()),
-            artists: artists.into_iter().map(|(_, name)| name).collect(),
+            artists: artists.into_values().collect(),
             artist_ids: Vec::new(),
             album: metadata.get("album_title").cloned().unwrap_or_default(),
             image_url,
@@ -234,12 +321,36 @@ fn spotify_image_url(value: &str) -> Option<String> {
 }
 
 pub async fn add_to_queue(api: &WebApi, token: &str, uri: &str) -> AppResult<()> {
+    validate_queue_uri(uri)?;
     api.post(
         token,
         &format!("/me/player/queue?uri={}", urlencode(uri)),
         serde_json::Value::Null,
     )
     .await
+}
+
+pub fn validate_queue_uri(uri: &str) -> AppResult<()> {
+    if valid_queue_uri(uri) {
+        Ok(())
+    } else {
+        Err(crate::error::AppError::BadRequest(
+            "queue items must be canonical Spotify track or episode URIs".into(),
+        ))
+    }
+}
+
+fn valid_queue_uri(uri: &str) -> bool {
+    let mut parts = uri.split(':');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some("spotify"), Some("track" | "episode"), Some(id), None)
+            if !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    )
+}
+
+fn is_autoplay_provider(provider: &str) -> bool {
+    provider.to_ascii_lowercase().contains("autoplay")
 }
 
 fn urlencode(s: &str) -> String {
@@ -294,5 +405,62 @@ mod tests {
             queue.queue[0].image_url.as_deref(),
             Some("https://i.scdn.co/image/abc")
         );
+    }
+
+    #[test]
+    fn authoritative_empty_revision_does_not_restore_stale_web_queue() {
+        let protocol = QueueView {
+            revision: Some("empty-revision".into()),
+            ..Default::default()
+        };
+        let web = QueueView {
+            queue: vec![placeholder("spotify:track:stale")],
+            ..Default::default()
+        };
+        assert!(merge_metadata(&protocol, web).queue.is_empty());
+    }
+
+    #[test]
+    fn local_set_queue_preserves_metadata_duplicates_and_autoplay() {
+        let known = TrackSummary {
+            name: "Known title".into(),
+            ..placeholder("spotify:track:known")
+        };
+        let existing = QueueView {
+            queue: vec![known],
+            ..Default::default()
+        };
+        let next = vec![
+            QueueTrack {
+                uri: "spotify:track:known".into(),
+                provider: "queue".into(),
+            },
+            QueueTrack {
+                uri: "spotify:track:known".into(),
+                provider: "queue".into(),
+            },
+            QueueTrack {
+                uri: "spotify:delimiter".into(),
+                provider: "context".into(),
+            },
+            QueueTrack {
+                uri: "spotify:track:recommended".into(),
+                provider: "autoplay".into(),
+            },
+        ];
+        let queue = from_player_event(None, &next, &[], &existing);
+        assert_eq!(queue.queue.len(), 2);
+        assert_eq!(queue.queue[0].name, "Known title");
+        assert_eq!(queue.autoplay.len(), 1);
+        assert!(queue.revision.is_some());
+    }
+
+    #[test]
+    fn rejects_noncanonical_queue_uris() {
+        assert!(validate_queue_uri("spotify:track:abc123").is_ok());
+        assert!(validate_queue_uri("spotify:episode:abc123").is_ok());
+        assert!(validate_queue_uri("spotify:playlist:abc123").is_err());
+        assert!(validate_queue_uri("spotify:track:abc/../def").is_err());
+        assert!(validate_queue_uri("https://open.spotify.com/track/abc").is_err());
     }
 }

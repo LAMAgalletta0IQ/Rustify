@@ -1427,9 +1427,17 @@ pub async fn add_to_queue(
     state: State<'_, AppState>,
     uri: String,
 ) -> AppResult<()> {
+    queue::validate_queue_uri(&uri)?;
+    let local = state.playback.read().await.is_active_device;
     let t = token(&state).await?;
     let api = WebApi::new();
-    queue::add_to_queue(&api, &t, &uri).await?;
+    if local {
+        let parsed = librespot::core::SpotifyUri::from_uri(&uri)
+            .map_err(|error| AppError::BadRequest(format!("invalid queue URI: {error}")))?;
+        with_spirc(&state, move |spirc| spirc.add_to_queue(parsed)).await?;
+    } else {
+        queue::add_to_queue(&api, &t, &uri).await?;
+    }
     if let Ok(web) = queue::get_queue(&api, &t).await {
         let merged = queue::merge_metadata(&*state.queue.read().await, web);
         *state.queue.write().await = merged.clone();
