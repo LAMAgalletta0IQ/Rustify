@@ -3,7 +3,14 @@ tags: [file, backend, auth, rust]
 ---
 # `src-tauri/src/auth.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **412 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **~1104 lines**
+
+> Until 2026-08 this was a 412-line file covering only the two interactive
+> (loopback-redirect) OAuth flows. A full RFC 8628 Device Authorization Grant
+> flow — `start_device_authorization`/`complete_device_authorization`/
+> `cancel_device_authorization`, backing a "pair with a code" login path
+> alongside the browser-redirect one — very roughly doubled it. The rest of
+> this note is unchanged; the new section below covers only the addition.
 
 ## Purpose
 
@@ -107,21 +114,71 @@ The background loop, operating on whichever token serves the Web API role:
 Mode apps; in that case librespot's streaming handshake is authoritative.
 Returns identity/avatar and preserves an absent product as `None`.
 
+### Device Authorization Grant (RFC 8628) — "pair with a code" login
+A second, alternative login path added since the original `interactive_login`
+this note describes above — for a device where opening a browser and
+catching a loopback redirect isn't practical. Always runs under
+`streaming_client_id()` (Spotify's desktop ID) and the full `STREAMING_SCOPES`
+list, so a successful pairing produces one token good for **both** roles via
+`SessionTokens::shared` — there is no separate Web API device-grant step.
+
+- **`struct DeviceAuthorization`** — the public shape handed to the frontend:
+  `user_code`, `verification_uri`(`_complete`), a resolved `url` (prefers the
+  "complete" one-click link when Spotify supplies it), `expires_in`/
+  `expires_at_ms`, and the poll `interval`.
+- **`struct DeviceAuthStore`** — holds at most **one** pending pairing at a
+  time (`Option<Arc<PendingDeviceAuthorization>>` behind a `tokio::sync::RwLock`),
+  owned by `AppState.device_auth`. `replace()` implicitly cancels whatever was
+  already pending; `cancel()` flips an `AtomicBool` and wakes a
+  `tokio::sync::Notify` so an in-flight poller (see `poll_device_token` below)
+  can stop immediately instead of waiting out its next sleep interval.
+- **`async fn start_device_authorization(store) -> DeviceAuthorization`** —
+  `POST` to Spotify's device-authorization endpoint, validates every field
+  Spotify returns is actually usable (`device_code` non-empty, `user_code`
+  matches `valid_user_code` — 4–32 ASCII alphanumeric/hyphen chars,
+  `expires_in`/`interval` non-zero) before trusting any of it, then
+  `validate_pairing_url`s the verification URL(s): must be `https://`, host
+  exactly `spotify.com` or a `*.spotify.com` subdomain, and carry no
+  userinfo (`user:pass@host`) — Spotify handing back an attacker-controlled
+  URL and this app rendering it as the code-entry link is exactly the
+  failure mode being guarded against. Stores the pairing in `store` and
+  returns the public half.
+- **`async fn poll_device_token(pending) -> OAuthToken`** — the RFC 8628 poll
+  loop: waits `interval` (or until woken by cancellation) before each
+  attempt, honours `slow_down` by extending the interval, treats
+  `authorization_pending` as a no-op retry, and stops on cancellation or
+  code expiry. On a genuine token response, cross-checks `token_type` is
+  `bearer`, every required field is non-empty, and — critically — that the
+  granted `scope` actually includes `streaming`; a token that authenticated
+  successfully but wasn't granted the streaming scope is rejected rather
+  than handed to librespot to fail more confusingly later.
+- **`async fn complete_device_authorization(store) -> SessionTokens`** —
+  guards against a second concurrent completion attempt on the same pairing
+  (`pending.polling` swap), awaits `poll_device_token`, and clears the
+  pairing from `store` whether it succeeded or not.
+- **`async fn cancel_device_authorization`** *(on `DeviceAuthStore`, called
+  by [[commands.rs]]'s command of the same name)* — lets the UI abandon a
+  pairing the user backed out of without waiting for it to time out.
+
 ## Inputs / outputs / side effects
 
-- **Network:** Spotify OAuth endpoints (two client IDs); `GET /v1/me`.
+- **Network:** Spotify OAuth endpoints (two client IDs, plus the device
+  authorization/token-polling endpoints); `GET /v1/me`.
 - **Filesystem:** reads/writes/deletes `tokens.json`; reads/writes `settings.json`.
 - **Environment:** reads `RUSTIFY_CLIENT_ID` (override only — see gotchas).
-- **Binds** loopback ports 8898 / 8899 during login.
+- **Binds** loopback ports 8898 / 8899 during interactive login. The device
+  flow binds no ports — it is entirely outbound HTTP.
 - **Spawns** a long-lived tokio task (the refresher).
-- **Opens the system browser** — twice when the split is active.
+- **Opens the system browser** — twice when the split is active, for
+  interactive login only.
 
 ## Dependencies
 
 **Imports:** `librespot_oauth`, `librespot::core::config::SessionConfig`,
-`serde`, `std::net::TcpListener`, `tokio::time`, [[state.rs]] (`AuthState`,
-`TokenStore`), [[webapi.rs]], [[error.rs]]
-**Imported by:** [[commands.rs]], [[lib.rs]]
+`serde`, `std::net::TcpListener`, `tokio::time`, `tokio::sync::Notify`,
+`reqwest`, [[state.rs]] (`AuthState`, `TokenStore`), [[webapi.rs]], [[error.rs]]
+**Imported by:** [[commands.rs]], [[lib.rs]], [[state.rs]] (`DeviceAuthStore`
+lives on `AppState.device_auth`)
 
 ## Notable logic / gotchas
 
@@ -174,6 +231,21 @@ Returns identity/avatar and preserves an absent product as `None`.
 - **Password login is not implementable.** `Credentials::with_password` exists
   in librespot 0.8 and compiles, but Spotify disabled it server-side in July
   2024. See [[known-limitations]].
+- **`validate_pairing_url` is a real trust boundary, not defensive
+  boilerplate.** The device-authorization response is the one place this app
+  renders a URL from Spotify directly to the user as something to open/trust.
+  Restricting it to `https://(*.)spotify.com` with no embedded credentials
+  means a compromised or spoofed response can't turn the pairing screen into
+  a phishing link.
+- **The device flow always grants `streaming`, and that's checked, not
+  assumed.** `poll_device_token` rejects a token whose granted `scope`
+  doesn't include `streaming` rather than handing it to
+  `player::start_session`, which would otherwise fail later with a much less
+  legible error.
+- **Only one device-authorization pairing can be pending at a time.**
+  `DeviceAuthStore::replace` cancels any prior pairing first — starting a
+  second one while the first is still showing a code on screen silently
+  invalidates the first rather than running two in parallel.
 
 ## See also
 

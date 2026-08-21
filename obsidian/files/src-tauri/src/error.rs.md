@@ -3,7 +3,12 @@ tags: [file, backend, rust]
 ---
 # `src-tauri/src/error.rs`
 
-**Module:** [[backend-rust]] · **Language:** Rust · **71 lines**
+**Module:** [[backend-rust]] · **Language:** Rust · **~166 lines**
+
+> Until 2026-08 this had 12 variants and one `From` conversion besides
+> `librespot`/`reqwest`. Five variants and a `From<crate::jams::JamError>`
+> conversion were added as later features (Jam, DJ, Pathfinder-backed
+> features) needed finer-grained failure reporting than `Other` gave them.
 
 ## Purpose
 
@@ -29,6 +34,11 @@ machine-readable shape.
 | `ServiceUnavailable { status }` | Spotify/provider HTTP 5xx |
 | `RateLimited { retry_after: Option<u64> }` | HTTP 429, carrying Spotify's `Retry-After` in seconds |
 | `Other(String)` | Everything else |
+| `FeatureUnsupported(String, String)` | A feature that only exists via Spotify's private, unofficial internal APIs (queue reorder/remove, Blend creation, ...) — never reachable through the public Web API or a supported librespot API, so it was never implemented rather than half-implemented against something unstable. `#[allow(dead_code)]` — reserved for a feature the app deliberately doesn't attempt yet |
+| `PublicApiLimitation(String)` | The public Web API used to support this but Spotify has since removed/restricted it (e.g. `/artists/{id}/top-tracks`, Feb 2026) — distinct from `FeatureUnsupported`, which never had a public endpoint at all. Also `#[allow(dead_code)]` |
+| `EndpointNotAvailable(String)` | A specific documented endpoint has no reachable equivalent for this request shape right now (private endpoint required, or a scope/product tier this account lacks) |
+| `PersistedQueryExpired(String)` | Spotify rotated a Pathfinder persisted-query hash out from under the app — see [[spotify/pathfinder.rs]]'s multi-candidate-hash resilience pattern |
+| `LexiconUnavailable(String)` | DJ's dynamic `your_dj` Lexicon context failed to resolve — see [[spotify/dj.rs]] |
 
 Derives `thiserror::Error`, so each variant carries a `Display` message. The
 `PremiumRequired` message explicitly explains that librespot cannot play the
@@ -61,6 +71,14 @@ of the message text.
 - `librespot::core::Error` → `Playback`
 - `reqwest::Error` → `WebApi`
 - `std::io::Error` → `Other`
+- `crate::jams::JamError` → `Unavailable`/`Forbidden`/`Auth`/`BadRequest`/`Other`,
+  mapped per-variant (`JamNotFound` → `Unavailable`, `PermissionDenied` →
+  `Forbidden`, `ClientTokenExpired` → `Auth`, `Config` → `BadRequest`,
+  everything else → `Other`) so the Jams module's own error taxonomy still
+  lets the UI branch on `kind` the same way it does for every other command.
+  `friends.rs`'s `classify_spclient_error` (see [[friends.rs]]) follows the
+  same pattern for librespot's structured `http_client` errors, mapping them
+  onto these variants explicitly instead of flattening through `Playback`.
 
 These make `?` work throughout the backend.
 
@@ -72,10 +90,12 @@ Pure. No I/O.
 
 ## Dependencies
 
-**Imports:** `serde`, `thiserror`, `librespot::core::Error`, `reqwest::Error`
+**Imports:** `serde`, `thiserror`, `librespot::core::Error`, `reqwest::Error`,
+`crate::jams::JamError`
 **Imported by:** every backend module — [[commands.rs]], [[auth.rs]],
 [[player.rs]], [[webapi.rs]], [[library.rs]], [[search.rs]], [[connect.rs]],
-[[queue.rs]]
+[[queue.rs]], [[friends.rs]], [[jams_bridge.rs]], and the rest of the modules
+added since 2026-08 (see [[backend-rust]])
 
 ## Notable logic / gotchas
 
