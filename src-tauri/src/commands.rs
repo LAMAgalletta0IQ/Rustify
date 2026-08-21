@@ -198,8 +198,19 @@ pub struct AppSettings {
     pub reduce_motion: bool,
     pub cache_limit_mb: u32,
     pub audio_quality: StreamQuality,
+    pub crossfade_seconds: u8,
     pub output_device: Option<String>,
     pub equalizer: EqualizerSettings,
+}
+
+fn validate_crossfade(seconds: u8) -> AppResult<()> {
+    if seconds <= 12 {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(
+            "Crossfade must be between 0 and 12 seconds.".into(),
+        ))
+    }
 }
 
 impl From<auth::Settings> for AppSettings {
@@ -209,6 +220,7 @@ impl From<auth::Settings> for AppSettings {
             reduce_motion: value.reduce_motion,
             cache_limit_mb: value.cache_limit_mb,
             audio_quality: value.audio_quality,
+            crossfade_seconds: value.crossfade_seconds,
             output_device: value.output_device,
             equalizer: value.equalizer,
         }
@@ -278,6 +290,7 @@ pub fn update_settings(
             "Cache size must be between 128 MB and 8192 MB.".into(),
         ));
     }
+    validate_crossfade(settings.crossfade_seconds)?;
     audio::validate_equalizer(&settings.equalizer)?;
     audio::validate_output_device(settings.output_device.as_deref())?;
 
@@ -286,6 +299,7 @@ pub fn update_settings(
     persisted.reduce_motion = settings.reduce_motion;
     persisted.cache_limit_mb = settings.cache_limit_mb;
     persisted.audio_quality = settings.audio_quality;
+    persisted.crossfade_seconds = settings.crossfade_seconds;
     persisted.output_device = settings.output_device;
     persisted.equalizer = settings.equalizer;
     auth::save_settings(&data_dir, &persisted)?;
@@ -371,6 +385,7 @@ async fn establish(
             initial_volume_percent: settings.default_volume_percent,
             cache_limit_mb: settings.cache_limit_mb,
             quality: settings.audio_quality,
+            crossfade_seconds: settings.crossfade_seconds,
         },
     )
     .await?;
@@ -589,9 +604,28 @@ pub async fn previous_track(state: State<'_, AppState>) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn seek(state: State<'_, AppState>, position_ms: u32) -> AppResult<()> {
+pub async fn seek(app: AppHandle, state: State<'_, AppState>, position_ms: u32) -> AppResult<()> {
     if state.playback.read().await.is_active_device {
-        with_spirc(&state, |s| s.set_position_ms(position_ms)).await
+        let was_playing = state.playback.read().await.is_playing;
+        let crossfade_enabled = app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|dir| auth::settings_or_default(&dir).crossfade_seconds > 0)
+            .unwrap_or(false);
+
+        // The reviewed librespot PR clears an in-flight fade on Pause but not
+        // on Seek. Bracket an explicit local seek so an outgoing decoder can
+        // never continue underneath audio from the new position. Preserve a
+        // user-paused state by only resuming when playback was running.
+        if crossfade_enabled && was_playing {
+            with_spirc(&state, |s| s.pause()).await?;
+            let seek_result = with_spirc(&state, |s| s.set_position_ms(position_ms)).await;
+            let resume_result = with_spirc(&state, |s| s.play()).await;
+            seek_result.and(resume_result)
+        } else {
+            with_spirc(&state, |s| s.set_position_ms(position_ms)).await
+        }
     } else {
         remote_put(
             &state,
@@ -1228,4 +1262,16 @@ pub async fn end_jam(app: AppHandle, state: State<'_, AppState>) -> AppResult<()
     let ctrl = ensure_jams(&app, &state).await?;
     ctrl.sync_token(&state.tokens).await;
     ctrl.end().await.map_err(AppError::from)
+}
+
+#[cfg(test)]
+mod settings_validation_tests {
+    use super::*;
+
+    #[test]
+    fn crossfade_matches_spotify_supported_range() {
+        assert!(validate_crossfade(0).is_ok());
+        assert!(validate_crossfade(12).is_ok());
+        assert!(validate_crossfade(13).is_err());
+    }
 }

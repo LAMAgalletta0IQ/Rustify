@@ -93,6 +93,7 @@ export interface AppSettings {
   reduceMotion: boolean;
   cacheLimitMb: number;
   audioQuality: StreamQuality;
+  crossfadeSeconds: number;
   outputDevice: string | null;
   equalizer: EqualizerSettings;
 }

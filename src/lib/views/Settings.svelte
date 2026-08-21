@@ -141,6 +141,10 @@
         <option value="veryHigh">Very high · 320 kbps</option>
       </select>
     </label>
+    <label class="field">
+      <span><strong>Crossfade</strong><small>Equal-power decoder overlap between consecutive tracks. Applied to the next local playback session; turn it off for spoken-word listening.</small></span>
+      <span class="inline"><input type="range" min="0" max="12" step="1" bind:value={draft.crossfadeSeconds} aria-label="Crossfade duration" /><output>{draft.crossfadeSeconds === 0 ? "Off" : `${draft.crossfadeSeconds}s`}</output></span>
+    </label>
     <p class="notice">Lossless is not offered: the installed librespot 0.8 player selects only 96, 160, or 320 kbps lossy streams. Rustify never labels those streams as lossless.</p>
   </section>
 

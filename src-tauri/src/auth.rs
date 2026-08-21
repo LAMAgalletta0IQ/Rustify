@@ -128,6 +128,11 @@ pub struct Settings {
     pub cache_limit_mb: u32,
     #[serde(default)]
     pub audio_quality: StreamQuality,
+    /// Decoder-level equal-power overlap. Spotify's clients expose a maximum
+    /// of twelve seconds, which is also the range supported by the pinned
+    /// librespot crossfade implementation.
+    #[serde(default)]
+    pub crossfade_seconds: u8,
     /// None follows the operating-system default. Names are the stable handle
     /// exposed by CPAL 0.16/rodio 0.21 on this pinned stack.
     #[serde(default)]
@@ -152,6 +157,7 @@ impl Default for Settings {
             reduce_motion: false,
             cache_limit_mb: default_cache_limit_mb(),
             audio_quality: StreamQuality::default(),
+            crossfade_seconds: 0,
             output_device: None,
             equalizer: EqualizerSettings::default(),
         }
@@ -891,6 +897,7 @@ mod settings_tests {
         assert_eq!(settings.webapi_client_id.as_deref(), Some("client"));
         assert_eq!(settings.default_volume_percent, 50);
         assert_eq!(settings.cache_limit_mb, 2048);
+        assert_eq!(settings.crossfade_seconds, 0);
         assert!(!settings.reduce_motion);
     }
 

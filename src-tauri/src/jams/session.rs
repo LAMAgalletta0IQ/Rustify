@@ -539,6 +539,14 @@ pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
     })
 }
 
+impl Drop for JamManager {
+    fn drop(&mut self) {
+        if let Some(task) = self.dealer_task.take() {
+            task.abort();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -588,13 +596,5 @@ mod tests {
             session_from_value(json!({"active": true})),
             Err(JamError::DecodeMessage(_))
         ));
-    }
-}
-
-impl Drop for JamManager {
-    fn drop(&mut self) {
-        if let Some(task) = self.dealer_task.take() {
-            task.abort();
-        }
     }
 }

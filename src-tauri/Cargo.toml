@@ -57,11 +57,11 @@ reqwest = { version = "0.12", default-features = false, features = [
 # authenticate via OAuth, and a logged-in Spirc advertises itself through
 # Spotify's dealer/websocket, not mDNS. Dropping it removes a dependency tree
 # we never execute.
-librespot = { version = "0.8.0", default-features = false, features = [
+librespot = { git = "https://github.com/librespot-org/librespot.git", rev = "b5f4631f950068b9521c61fa2255171c97568a3c", default-features = false, features = [
     "native-tls",
     "rodio-backend",
 ] }
-librespot-oauth = { version = "0.8.0", default-features = false, features = [
+librespot-oauth = { git = "https://github.com/librespot-org/librespot.git", rev = "b5f4631f950068b9521c61fa2255171c97568a3c", default-features = false, features = [
     "native-tls",
 ] }
 

@@ -29,6 +29,18 @@ pub fn percent_to_volume(percent: u8) -> u16 {
     ((percent.min(100) as u32 * MAX_VOLUME as u32) / 100) as u16
 }
 
+fn playback_config(quality: StreamQuality, crossfade_seconds: u8) -> PlayerConfig {
+    PlayerConfig {
+        bitrate: quality.bitrate(),
+        // The player owns both decoders, so overlap happens before Rustify's
+        // output-device/EQ sink and remains a single continuous sink stream.
+        // PlayerConfig's default keeps gapless playback enabled; crossfade
+        // depends on that continuous sink and must not regress it when off.
+        crossfade: std::time::Duration::from_secs(crossfade_seconds.into()),
+        ..Default::default()
+    }
+}
+
 /// Builds the librespot session, player, mixer and Spirc, then spawns the
 /// Spirc event loop and the PlayerEvent pump.
 ///
@@ -46,12 +58,10 @@ pub async fn start_session(
         initial_volume_percent,
         cache_limit_mb,
         quality,
+        crossfade_seconds,
     } = options;
     let session_config = SessionConfig::default();
-    let player_config = PlayerConfig {
-        bitrate: quality.bitrate(),
-        ..Default::default()
-    };
+    let player_config = playback_config(quality, crossfade_seconds);
     let audio_format = AudioFormat::default();
     let mixer_config = MixerConfig::default();
 
@@ -137,6 +147,7 @@ pub struct PlaybackOptions {
     pub initial_volume_percent: u8,
     pub cache_limit_mb: u32,
     pub quality: StreamQuality,
+    pub crossfade_seconds: u8,
 }
 
 pub struct StartedSession {
@@ -253,7 +264,7 @@ fn spawn_event_pump(
             // AudioItem: it yields ready-to-use CDN cover URLs and a stable
             // shape. Cached per URI so repeats cost nothing.
             if let Some(uri) = track_to_resolve {
-                let uri_str = uri.to_uri().unwrap_or_default();
+                let uri_str = uri.to_uri();
                 let changed = pb.track.as_ref().map(|t| t.uri != uri_str).unwrap_or(true);
 
                 if changed && !uri_str.is_empty() {
@@ -328,12 +339,8 @@ struct ApiEpisode {
 }
 
 async fn fetch_track_info(api: &WebApi, token: &str, uri: &SpotifyUri) -> AppResult<TrackInfo> {
-    let id = uri
-        .to_id()
-        .map_err(|e| AppError::Other(format!("bad spotify id: {e}")))?;
-    let uri_str = uri
-        .to_uri()
-        .map_err(|e| AppError::Other(format!("bad spotify uri: {e}")))?;
+    let id = uri.to_id();
+    let uri_str = uri.to_uri();
 
     match uri.item_type() {
         "episode" => {
@@ -523,4 +530,20 @@ pub async fn snapshot(state: &AppState) -> PlaybackState {
     let mut pb = state.playback.write().await;
     pb.refresh_position();
     pb.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crossfade_enables_gapless_and_reaches_decoder_config() {
+        let disabled = playback_config(StreamQuality::Normal, 0);
+        assert!(disabled.crossfade.is_zero());
+        assert!(disabled.gapless);
+
+        let enabled = playback_config(StreamQuality::VeryHigh, 7);
+        assert_eq!(enabled.crossfade, std::time::Duration::from_secs(7));
+        assert!(enabled.gapless);
+    }
 }

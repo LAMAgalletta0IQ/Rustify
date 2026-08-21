@@ -271,8 +271,10 @@ mod tests {
             .into(),
             ..Default::default()
         };
-        let mut player = PlayerState::default();
-        player.queue_revision = "rev-2".to_string();
+        let mut player = PlayerState {
+            queue_revision: "rev-2".to_string(),
+            ..Default::default()
+        };
         player
             .prev_tracks
             .push(track("spotify:track:1", "context", "Previous"));

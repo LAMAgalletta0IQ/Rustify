@@ -41,6 +41,7 @@ const defaultSettings: AppSettings = {
   reduceMotion: false,
   cacheLimitMb: 2048,
   audioQuality: "automatic",
+  crossfadeSeconds: 0,
   outputDevice: null,
   equalizer: {
     enabled: false,
