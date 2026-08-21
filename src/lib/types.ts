@@ -402,6 +402,24 @@ export interface TelemetryStatus {
   recent: PlaybackAudit[];
 }
 
+export interface MusicVideoImage {
+  url: string;
+  width: number | null;
+  height: number | null;
+  size: string;
+}
+
+export interface MusicVideoCapability {
+  audioUri: string;
+  available: boolean;
+  videoUri: string | null;
+  manifestId: string | null;
+  images: MusicVideoImage[];
+  openUrl: string | null;
+  playbackSupported: boolean;
+  playbackBlocker: string | null;
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

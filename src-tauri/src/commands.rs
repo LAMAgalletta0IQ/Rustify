@@ -1223,6 +1223,21 @@ pub async fn get_telemetry_status(
 }
 
 #[tauri::command]
+pub async fn get_music_video_capability(
+    state: State<'_, AppState>,
+    track_uri: String,
+) -> AppResult<crate::music_videos::MusicVideoCapability> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    crate::music_videos::capability(&session, &track_uri).await
+}
+
+#[tauri::command]
 pub async fn get_top_tracks(
     state: State<'_, AppState>,
     limit: Option<u32>,

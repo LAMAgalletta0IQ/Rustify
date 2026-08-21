@@ -13,6 +13,7 @@ mod jams_bridge;
 mod library;
 mod lyrics;
 mod media_keys;
+mod music_videos;
 mod player;
 mod podcasts;
 mod profiles;
@@ -168,6 +169,7 @@ pub fn run() {
             commands::get_episode_resume,
             commands::set_episode_completed,
             commands::get_telemetry_status,
+            commands::get_music_video_capability,
             commands::get_top_tracks,
             commands::get_top_artists,
             commands::get_personalized_home,
