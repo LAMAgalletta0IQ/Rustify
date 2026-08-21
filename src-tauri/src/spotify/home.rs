@@ -335,4 +335,43 @@ mod tests {
         assert_eq!(feed.sections[0].items.len(), 1);
         assert_eq!(feed.sections[0].items[0].image_url, None);
     }
+
+    /// Made For You cards (Daily Mix, Discover Weekly, Release Radar, and
+    /// whatever personalized format Spotify adds next) do not all shape their
+    /// artwork the same way — a Pathfinder/Home refactor that only tests the
+    /// `images.items[]` shape would silently break the other three and ship
+    /// cards with no cover. Each variant is checked in isolation so a
+    /// regression here points at exactly which shape broke.
+    #[test]
+    fn finds_artwork_through_every_known_pathfinder_field_shape() {
+        let cases = [
+            (
+                "images.items[].sources[].url — the common shape",
+                json!({"images": {"items": [{"sources": [{"url": "https://i.scdn.co/image/daily-mix"}]}]}}),
+                "https://i.scdn.co/image/daily-mix",
+            ),
+            (
+                "coverArt.sources[].url",
+                json!({"coverArt": {"sources": [{"url": "https://i.scdn.co/image/discover-weekly"}]}}),
+                "https://i.scdn.co/image/discover-weekly",
+            ),
+            (
+                "visuals.avatarImage.sources[].url",
+                json!({"visuals": {"avatarImage": {"sources": [{"url": "https://i.scdn.co/image/release-radar"}]}}}),
+                "https://i.scdn.co/image/release-radar",
+            ),
+            (
+                "coverImage.sources[].url",
+                json!({"coverImage": {"sources": [{"url": "https://i.scdn.co/image/daylist"}]}}),
+                "https://i.scdn.co/image/daylist",
+            ),
+        ];
+        for (label, data, expected) in cases {
+            assert_eq!(image(&data).as_deref(), Some(expected), "shape: {label}");
+        }
+        // A card matching none of the known shapes degrades to no artwork,
+        // not a parse failure — the same "renamed field" resilience as the
+        // rest of this module.
+        assert_eq!(image(&json!({"someNewField": "https://i.scdn.co/x"})), None);
+    }
 }
