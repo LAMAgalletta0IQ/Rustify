@@ -23,10 +23,17 @@ impl Default for WebApi {
 impl WebApi {
     pub fn new() -> Self {
         Self {
+            // Matches PathfinderClient's own builder fallback: a TLS-backend
+            // init failure here would previously panic the whole app at
+            // startup rather than degrade, for a client that's now built
+            // once (see AppState::web_api) rather than per-request.
             http: reqwest::Client::builder()
                 .user_agent(concat!("rustify/", env!("CARGO_PKG_VERSION")))
                 .build()
-                .expect("failed to build HTTP client"),
+                .unwrap_or_else(|error| {
+                    log::error!("failed to build HTTP client with custom config: {error}");
+                    reqwest::Client::new()
+                }),
         }
     }
 
