@@ -21,6 +21,7 @@ use crate::player;
 use crate::queue::{self, QueueView};
 use crate::search::ArtistSummary;
 use crate::search::{self, SearchResults};
+use crate::spotify::HomeFeed;
 use crate::state::{events, AppState, AuthState, PlaybackState, SpotifySession};
 use crate::webapi::WebApi;
 
@@ -60,6 +61,33 @@ fn device_name() -> String {
 #[tauri::command]
 pub async fn get_auth_state(state: State<'_, AppState>) -> AppResult<AuthState> {
     Ok(state.auth.read().await.clone())
+}
+
+/// Returns the authenticated account's actual Web Player Home shelves: Daily
+/// Mixes, Discover Weekly, Release Radar, daylist and other personalized
+/// contexts where Spotify exposes them. This uses semantic card metadata and
+/// never infers a feature from its localized display name.
+#[tauri::command]
+pub async fn get_personalized_home(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+    time_zone: Option<String>,
+) -> AppResult<HomeFeed> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    state
+        .internal_spotify
+        .home(
+            &session,
+            limit.unwrap_or(10),
+            time_zone.as_deref().unwrap_or("UTC"),
+        )
+        .await
 }
 
 /// Shape of the login flow, so the UI can describe it accurately instead of

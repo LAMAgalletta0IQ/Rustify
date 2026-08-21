@@ -4,6 +4,8 @@
   import type {
     AlbumSummary,
     ArtistSummary,
+    HomeFeed,
+    HomeItem,
     PlaylistSummary,
     RecentActivityItem,
     TrackSummary,
@@ -23,12 +25,15 @@
   let quickAccess = $state<RecentActivityItem[]>([]);
   let topTracks = $state<TrackSummary[]>([]);
   let discovery = $state<AlbumSummary[]>([]);
+  let personalized = $state<HomeFeed | null>(null);
   let loadingRecent = $state(true);
   let loadingMix = $state(true);
   let loadingDiscovery = $state(true);
+  let loadingPersonalized = $state(true);
   let recentError = $state<string | null>(null);
   let mixError = $state<string | null>(null);
   let discoveryError = $state<string | null>(null);
+  let personalizedError = $state<string | null>(null);
   let reloadKey = $state(0);
 
   let openPlaylist = $state<PlaylistSummary | null>(null);
@@ -36,6 +41,7 @@
   let openArtist = $state<ArtistSummary | null>(null);
 
   const greeting = $derived.by(() => {
+    if (personalized?.greeting) return personalized.greeting;
     const h = new Date().getHours();
     if (h < 5) return "Still up";
     if (h < 12) return "Good morning";
@@ -53,7 +59,20 @@
     loadingRecent = true;
     loadingMix = true;
     loadingDiscovery = true;
-    recentError = mixError = discoveryError = null;
+    loadingPersonalized = true;
+    recentError = mixError = discoveryError = personalizedError = null;
+
+    const personalizedTask = api
+      .getPersonalizedHome(10)
+      .then((feed) => {
+        if (!cancelled) personalized = feed;
+      })
+      .catch((e) => {
+        if (!cancelled) personalizedError = store.handleError(e, false).message;
+      })
+      .finally(() => {
+        if (!cancelled) loadingPersonalized = false;
+      });
 
     const recentTask = Promise.allSettled([
       api.getPlaylists(50, 0),
@@ -107,7 +126,7 @@
         if (!cancelled) loadingDiscovery = false;
       });
 
-    void Promise.all([recentTask, mixTask, discoveryTask]);
+    void Promise.all([personalizedTask, recentTask, mixTask, discoveryTask]);
     return () => {
       cancelled = true;
     };
@@ -157,6 +176,36 @@
   function playMix(track: TrackSummary) {
     store.run(() => api.loadTracks(topTracks.map((x) => x.uri), track.uri));
   }
+
+  function openPersonalized(item: HomeItem) {
+    if (item.kind === "playlist") {
+      openPlaylist = {
+        uri: item.uri,
+        id: item.id,
+        name: item.name,
+        owner: item.ownerName ?? item.subtitle ?? "Spotify",
+        imageUrl: item.imageUrl,
+        trackCount: item.totalCount ?? 0,
+      };
+    } else if (item.kind === "album") {
+      openAlbum = {
+        uri: item.uri,
+        id: item.id,
+        name: item.name,
+        artists: item.subtitle ? item.subtitle.split(", ") : [],
+        imageUrl: item.imageUrl,
+      };
+    } else if (item.kind === "artist") {
+      openArtist = {
+        uri: item.uri,
+        id: item.id,
+        name: item.name,
+        imageUrl: item.imageUrl,
+      };
+    } else {
+      store.run(() => api.loadContext(item.uri));
+    }
+  }
 </script>
 
 {#if openPlaylist}
@@ -196,6 +245,40 @@
     {:else if !loadingRecent && !recentError}
       <div class="state"><span>Quick access will learn from real listening and navigation activity on this account.</span><button onclick={onBrowseLibrary}>Browse library</button></div>
     {/if}
+
+    <section aria-labelledby="spotify-home-heading">
+      <div class="section-head">
+        <div>
+          <h2 id="spotify-home-heading">Made for you on Spotify</h2>
+          <p>Daily Mixes, weekly recommendations, daylist and personalized shelves from your account.</p>
+        </div>
+      </div>
+      {#if loadingPersonalized}
+        <p class="muted">Loading Spotify Home…</p>
+      {:else if personalizedError}
+        <div class="state"><span>{personalizedError}</span><button onclick={() => reloadKey++}>Retry</button></div>
+      {:else if personalized?.sections.length}
+        <div class="personalized-sections">
+          {#each personalized.sections as section (section.uri || section.title)}
+            <div class="shelf">
+              <h3>{section.title ?? "Recommended"}</h3>
+              <div class="grid">
+                {#each section.items as item (item.uri)}
+                  <button class="card" onclick={() => openPersonalized(item)}>
+                    {#if item.imageUrl}<img src={item.imageUrl} alt="" loading="lazy" />{:else}<span class="art"></span>{/if}
+                    <span class="eyebrow">{item.madeForUsername ? "made for you" : item.kind}</span>
+                    <span class="truncate title">{item.name}</span>
+                    <span class="truncate sub">{item.subtitle ?? item.description ?? "Spotify"}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="muted">Spotify did not return personalized Home shelves for this account or region.</p>
+      {/if}
+    </section>
 
     <section aria-labelledby="recent-heading">
       <div class="section-head">
@@ -287,6 +370,8 @@
   h2 { margin: 0 0 3px; font-size: 18px; }
   .section-head p { margin: 0; color: var(--fg-dim); font-size: 12px; }
   .eyebrow { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .personalized-sections { display: grid; gap: 22px; }
+  .shelf h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
   .state { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--glass); border: 1px solid var(--hairline); border-radius: var(--r-md); color: var(--fg-dim); }
   .state button, .link { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
   @media (max-width: 900px) { .jump { grid-template-columns: repeat(2, minmax(0,1fr)); } }

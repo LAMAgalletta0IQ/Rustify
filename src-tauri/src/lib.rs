@@ -16,6 +16,7 @@ mod player;
 mod queue;
 mod relevance;
 mod search;
+mod spotify;
 mod state;
 mod webapi;
 
@@ -151,6 +152,7 @@ pub fn run() {
             commands::get_artist,
             commands::get_top_tracks,
             commands::get_top_artists,
+            commands::get_personalized_home,
             commands::get_lyrics,
             // search
             commands::search_spotify,

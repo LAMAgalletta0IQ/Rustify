@@ -185,6 +185,9 @@ pub struct AppState {
     /// dropped on logout. `Arc` so commands clone the handle instead of holding
     /// the read guard across awaits.
     pub jams: RwLock<Option<Arc<crate::jams_bridge::JamController>>>,
+    /// Cached first-party clients (Pathfinder now, other internal services as
+    /// they are enabled). Credentials are supplied per request and never kept.
+    pub internal_spotify: crate::spotify::InternalSpotify,
 }
 
 impl AppState {

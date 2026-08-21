@@ -17,7 +17,8 @@ export interface AppErrorPayload {
     | "Other"
     | "FeatureUnsupported"
     | "PublicApiLimitation"
-    | "EndpointNotAvailable";
+    | "EndpointNotAvailable"
+    | "PersistedQueryExpired";
   message: string;
   /** Seconds to wait, from Spotify's `Retry-After`. Only set for RateLimited. */
   retryAfter?: number | null;
@@ -184,6 +185,35 @@ export interface RecentActivityItem {
   lastPlayedAt: string;
   trackUri: string | null;
   frequency: number;
+}
+
+export interface HomeItem {
+  kind: string;
+  uri: string;
+  id: string;
+  name: string;
+  subtitle: string | null;
+  description: string | null;
+  imageUrl: string | null;
+  typeName: string;
+  format: string | null;
+  ownerName: string | null;
+  madeForUsername: string | null;
+  totalCount: number | null;
+  attributes: Record<string, string>;
+}
+
+export interface HomeSection {
+  uri: string;
+  title: string | null;
+  typeName: string;
+  totalCount: number;
+  items: HomeItem[];
+}
+
+export interface HomeFeed {
+  greeting: string | null;
+  sections: HomeSection[];
 }
 
 export interface LyricsLine {

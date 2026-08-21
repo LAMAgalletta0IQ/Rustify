@@ -75,6 +75,9 @@ pub enum AppError {
     /// scope/product tier this account lacks).
     #[error("{0}")]
     EndpointNotAvailable(String),
+
+    #[error("Spotify's persisted query changed: {0}")]
+    PersistedQueryExpired(String),
 }
 
 impl AppError {
@@ -95,6 +98,7 @@ impl AppError {
             Self::FeatureUnsupported(..) => "FeatureUnsupported",
             Self::PublicApiLimitation(_) => "PublicApiLimitation",
             Self::EndpointNotAvailable(_) => "EndpointNotAvailable",
+            Self::PersistedQueryExpired(_) => "PersistedQueryExpired",
         }
     }
 }

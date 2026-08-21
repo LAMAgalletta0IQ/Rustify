@@ -8,6 +8,7 @@ import type {
   AppErrorPayload,
   ArtistPage,
   FollowedReleasePage,
+  HomeFeed,
   ArtistSummary,
   AuthState,
   Device,
@@ -152,6 +153,11 @@ export const getTopTracks = (limit?: number) =>
   invoke<TrackSummary[]>("get_top_tracks", { limit });
 export const getTopArtists = (limit?: number) =>
   invoke<ArtistSummary[]>("get_top_artists", { limit });
+export const getPersonalizedHome = (limit = 10) =>
+  invoke<HomeFeed>("get_personalized_home", {
+    limit,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  });
 export const getLyrics = (
   trackName: string,
   artistName: string,
