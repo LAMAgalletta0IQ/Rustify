@@ -359,6 +359,23 @@ export interface ConcertFeed {
   events: ConcertEvent[];
 }
 
+export interface CreditContributor {
+  name: string;
+  artistUri: string | null;
+  roles: string[];
+}
+
+export interface CreditGroup {
+  roleName: string;
+  contributors: CreditContributor[];
+}
+
+export interface TrackCredits {
+  trackName: string | null;
+  recordLabel: string | null;
+  groups: CreditGroup[];
+}
+
 export interface PlaylistHit {
   uri: string;
   id: string;

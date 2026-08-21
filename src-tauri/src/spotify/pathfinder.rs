@@ -27,6 +27,8 @@ const ARTIST_OVERVIEW_HASHES: &[&str] = &[
     "1ac33ddab5d39a3a9c27802774e6d78b9405cc188c6f75aed007df2a32737c72",
     "7f86ff63e38c24973a2842b672abe44c910c1973978dc8a4a0cb648edef34527",
 ];
+const TRACK_CREDITS_HASHES: &[&str] =
+    &["e2ca40d46cf1fde36562261ccec754f23fb31b561877252e9fe0d6834aabb84b"];
 
 pub struct PathfinderClient {
     http: Client,
@@ -126,6 +128,7 @@ impl PathfinderClient {
         let known = match operation {
             "home" => HOME_HASHES,
             "queryArtistOverview" => ARTIST_OVERVIEW_HASHES,
+            "queryTrackCreditsModal" => TRACK_CREDITS_HASHES,
             _ => &[],
         };
         for hash in known {

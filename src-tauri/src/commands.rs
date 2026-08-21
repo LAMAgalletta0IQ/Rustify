@@ -1100,6 +1100,24 @@ pub async fn get_artist_concerts(
 }
 
 #[tauri::command]
+pub async fn get_track_credits(
+    state: State<'_, AppState>,
+    track_uri: String,
+) -> AppResult<crate::spotify::TrackCredits> {
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    state
+        .internal_spotify
+        .track_credits(&session, &track_uri)
+        .await
+}
+
+#[tauri::command]
 pub async fn get_top_tracks(
     state: State<'_, AppState>,
     limit: Option<u32>,

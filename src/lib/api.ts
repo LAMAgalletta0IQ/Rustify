@@ -29,6 +29,7 @@ import type {
   FriendFeed,
   UserProfile,
   ConcertFeed,
+  TrackCredits,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -176,6 +177,8 @@ export const getArtistConcerts = (artistId: string) =>
     artistId,
     locale: navigator.language || "en",
   });
+export const getTrackCredits = (trackUri: string) =>
+  invoke<TrackCredits>("get_track_credits", { trackUri });
 export const getTopTracks = (limit?: number) =>
   invoke<TrackSummary[]>("get_top_tracks", { limit });
 export const getTopArtists = (limit?: number) =>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as api from "../api";
   import { store } from "../store.svelte";
-  import { formatMs, type TrackSummary } from "../types";
+  import { formatMs, type TrackCredits, type TrackSummary } from "../types";
 
   let {
     tracks,
@@ -13,6 +13,10 @@
   /** id -> saved. Populated lazily; absent means "not yet known". */
   let saved = $state<Record<string, boolean>>({});
   let pending = $state<Record<string, boolean>>({});
+  let creditsTrack = $state<TrackSummary | null>(null);
+  let credits = $state<TrackCredits | null>(null);
+  let creditsLoading = $state(false);
+  let creditsError = $state<string | null>(null);
 
   // Look up saved state for the visible rows whenever the list changes.
   // Spotify caps the generic library endpoint at 40 URIs per request.
@@ -72,7 +76,33 @@
           ),
     );
   }
+
+  async function showCredits(track: TrackSummary) {
+    creditsTrack = track;
+    credits = null;
+    creditsError = null;
+    creditsLoading = true;
+    try {
+      credits = await api.getTrackCredits(track.uri);
+    } catch (error) {
+      creditsError = store.handleError(error, false).message;
+    } finally {
+      creditsLoading = false;
+    }
+  }
+
+  function closeCredits() {
+    creditsTrack = null;
+    credits = null;
+    creditsError = null;
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (creditsTrack && event.key === "Escape") closeCredits();
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="list">
   {#each tracks as t, i (t.uri + i)}
@@ -108,6 +138,12 @@
         onclick={() => toggleSaved(t)}>{saved[t.id] ? "♥" : "♡"}</button
       >
       <button
+        class="credits"
+        title="Show credits"
+        aria-label={`Show credits for ${t.name}`}
+        onclick={() => showCredits(t)}>ⓘ</button
+      >
+      <button
         class="queue"
         title="Add to queue"
         onclick={() => store.run(() => api.addToQueue(t.uri))}>＋</button
@@ -117,6 +153,20 @@
     <p class="muted empty">Nothing here.</p>
   {/each}
 </div>
+
+{#if creditsTrack}
+  <div class="credits-overlay">
+    <div class="credits-modal" role="dialog" aria-modal="true" aria-labelledby="credits-title">
+      <header><div><span class="eyebrow">Track credits</span><h2 id="credits-title">{credits?.trackName ?? creditsTrack.name}</h2></div><button class="close" aria-label="Close credits" onclick={closeCredits}>×</button></header>
+      {#if creditsLoading}<p class="muted">Loading credits…</p>
+      {:else if creditsError}<p class="credit-error">{creditsError}</p>
+      {:else if credits?.groups.length}
+        <div class="credit-groups">{#each credits.groups as group (group.roleName)}<div class="credit-group"><h3>{group.roleName}</h3>{#each group.contributors as contributor (contributor.name + contributor.artistUri)}<div class="contributor"><button disabled={!contributor.artistUri} onclick={() => contributor.artistUri && api.loadContext(contributor.artistUri)}>{contributor.name}</button>{#if contributor.roles.length}<span>{contributor.roles.join(", ")}</span>{/if}</div>{/each}</div>{/each}</div>
+      {:else}<p class="muted">Spotify did not provide detailed credits for this track.</p>{/if}
+      {#if credits?.recordLabel}<footer><span class="muted">Source</span><strong>{credits.recordLabel}</strong></footer>{/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .list {
@@ -174,13 +224,15 @@
     text-align: right;
   }
   .queue,
-  .heart {
+  .heart,
+  .credits {
     padding: 6px 8px;
     color: var(--fg-dim);
     opacity: 0;
   }
   .row:hover .queue,
   .row:hover .heart,
+  .row:hover .credits,
   .heart.on,
   .heart:focus-visible,
   .queue:focus-visible {
@@ -190,11 +242,27 @@
     color: var(--accent);
   }
   .queue:hover,
-  .heart:hover {
+  .heart:hover,
+  .credits:hover {
     color: var(--fg);
   }
   .empty {
     padding: 16px 8px;
   }
   .explicit { display:inline-grid;place-items:center;width:14px;height:14px;margin-right:5px;border-radius:3px;background:rgba(255,241,224,.16);font-size:9px;color:var(--fg); }
+  .credits-overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 22px; background: rgba(7,5,3,.72); backdrop-filter: blur(8px); }
+  .credits-modal { width: min(620px,100%); max-height: min(720px,88vh); overflow: auto; padding: 22px; border: 1px solid var(--hairline); border-radius: var(--r-lg); background: #17110c; box-shadow: 0 24px 90px rgba(0,0,0,.55); }
+  .credits-modal header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  .credits-modal h2 { margin: 3px 0 0; font-size: 22px; }
+  .eyebrow { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+  .close { padding: 2px 8px; color: var(--fg-dim); font-size: 24px; }
+  .credit-groups { display: grid; gap: 20px; }
+  .credit-group h3 { margin: 0 0 8px; font-size: 13px; }
+  .contributor { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid var(--hairline); }
+  .contributor button { text-align: left; font-weight: 650; }
+  .contributor button:not(:disabled):hover { color: var(--accent); }
+  .contributor button:disabled { color: var(--fg); cursor: default; }
+  .contributor span { color: var(--fg-dim); font-size: 11px; text-align: right; }
+  .credit-error { color: #ffb3b3; }
+  .credits-modal footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 12px; }
 </style>

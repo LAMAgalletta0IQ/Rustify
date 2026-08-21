@@ -3,11 +3,13 @@
 //! session and never persist or log them.
 
 mod concerts;
+mod credits;
 mod dj;
 mod home;
 mod pathfinder;
 
 pub use concerts::ConcertFeed;
+pub use credits::TrackCredits;
 pub use dj::DjSession;
 pub use home::HomeFeed;
 
@@ -45,6 +47,25 @@ async fn first_party_auth(session: &Session) -> AppResult<FirstPartyAuth> {
 }
 
 impl InternalSpotify {
+    pub async fn track_credits(
+        &self,
+        session: &Session,
+        track_uri: &str,
+    ) -> AppResult<TrackCredits> {
+        let auth = first_party_auth(session).await?;
+        let data = self
+            .pathfinder
+            .query(
+                "queryTrackCreditsModal",
+                credits::variables(track_uri)?,
+                &auth.access_token,
+                &auth.client_token,
+                &auth.connection_id,
+            )
+            .await?;
+        credits::parse(&data)
+    }
+
     pub async fn artist_concerts(
         &self,
         session: &Session,
