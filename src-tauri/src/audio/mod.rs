@@ -25,7 +25,10 @@ const MAX_PREAMP_DB: f32 = 0.0;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
+#[cfg_attr(
+    feature = "ts-rs-export",
+    ts(export, export_to = "../../src/lib/generated/")
+)]
 pub enum StreamQuality {
     /// Uses librespot's stable default. The installed version does not expose
     /// a bandwidth-adaptive selector, so this currently resolves to 160 kbps.

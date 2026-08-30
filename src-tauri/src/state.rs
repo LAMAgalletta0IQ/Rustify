@@ -24,7 +24,10 @@ pub mod events {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
+#[cfg_attr(
+    feature = "ts-rs-export",
+    ts(export, export_to = "../../src/lib/generated/")
+)]
 pub enum ConnectionStatus {
     #[default]
     Disconnected,
@@ -36,7 +39,10 @@ pub enum ConnectionStatus {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
+#[cfg_attr(
+    feature = "ts-rs-export",
+    ts(export, export_to = "../../src/lib/generated/")
+)]
 pub struct TrackInfo {
     pub uri: String,
     pub name: String,
@@ -55,7 +61,10 @@ pub struct TrackInfo {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
+#[cfg_attr(
+    feature = "ts-rs-export",
+    ts(export, export_to = "../../src/lib/generated/")
+)]
 pub struct PlaybackState {
     pub is_playing: bool,
     pub is_loading: bool,
@@ -126,7 +135,10 @@ impl PlaybackState {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
+#[cfg_attr(
+    feature = "ts-rs-export",
+    ts(export, export_to = "../../src/lib/generated/")
+)]
 pub struct AuthState {
     pub logged_in: bool,
     pub display_name: Option<String>,

@@ -220,7 +220,7 @@ async fn artist_tags(http: &reqwest::Client, api_key: &str, artist: &str) -> Opt
     }
     let parsed: TopTagsResponse = response.json().await.ok()?;
     let mut tags: Vec<Tag> = parsed.toptags?.tag;
-    tags.sort_unstable_by(|left, right| right.count.cmp(&left.count));
+    tags.sort_unstable_by_key(|tag| std::cmp::Reverse(tag.count));
 
     let kept: Vec<String> = tags
         .into_iter()

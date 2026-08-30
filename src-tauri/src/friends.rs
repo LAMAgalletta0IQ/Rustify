@@ -239,7 +239,7 @@ fn parse_feed(bytes: &[u8]) -> AppResult<Vec<FriendActivity>> {
         .take(MAX_ENTRIES)
         .filter_map(|entry| entry.try_into().ok())
         .collect();
-    entries.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.timestamp_ms));
     let mut seen = HashSet::with_capacity(entries.len());
     entries.retain(|entry| seen.insert(entry.user_uri.clone()));
     Ok(entries)
@@ -418,7 +418,7 @@ fn merge_user_result(feed: &mut FriendFeed, user_id: &str, entry: Option<FriendA
         feed.entries.push(entry);
     }
     feed.entries
-        .sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+        .sort_by_key(|entry| std::cmp::Reverse(entry.timestamp_ms));
     feed.status = if feed.entries.is_empty() {
         FriendFeedStatus::Empty
     } else {

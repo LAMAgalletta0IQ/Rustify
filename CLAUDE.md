@@ -17,13 +17,22 @@ cd src-tauri; cargo check --no-default-features   # fast Rust type-check
 different feature set than the app actually runs.
 
 ```powershell
-cd src-tauri; cargo test --no-default-features --lib   # 125 unit tests
+cd src-tauri; cargo test --no-default-features --lib   # 134 unit tests
 npm test                                                # vitest run, store.svelte.ts
 cd src-tauri; cargo fmt --check
 cd src-tauri; cargo clippy --no-default-features -- -D warnings
+cd src-tauri; cargo deny check                          # advisories/bans/licenses/sources, deny.toml
 ```
 
-**There is a Rust unit-test suite (125 tests) and a small Vitest suite for
+`cargo deny check` needs `cargo install cargo-deny` first (not part of the
+default toolchain). It is local-only — there is no CI to run it automatically,
+so it only catches drift when someone remembers to run it. See `deny.toml`'s
+`[advisories.ignore]` for the currently-accepted findings and why each is
+unfixable from this repo (mostly the librespot git pin; a few are Tauri's own
+transitive `urlpattern` -> unmaintained `unic-*` chain) — re-triage that list
+after bumping either dependency.
+
+**There is a Rust unit-test suite (134 tests) and a small Vitest suite for
 `store.svelte.ts`** (10 tests, mocking `@tauri-apps/api/core`/`event`) — no
 component tests, no E2E.
 

@@ -16,7 +16,11 @@ use crate::webapi::WebApi;
 #[serde(rename_all(serialize = "camelCase"))]
 #[cfg_attr(
     feature = "ts-rs-export",
-    ts(export, export_to = "../../src/lib/generated/", rename_all = "camelCase")
+    ts(
+        export,
+        export_to = "../../src/lib/generated/",
+        rename_all = "camelCase"
+    )
 )]
 pub struct Device {
     pub id: Option<String>,

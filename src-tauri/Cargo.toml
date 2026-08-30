@@ -4,6 +4,11 @@ version = "0.2.0"
 description = "Lightweight native Spotify client"
 edition = "2021"
 rust-version = "1.82"
+# Personal project, not published to crates.io or distributed. No `license`
+# field for the same reason (see cargo-deny's [licenses.private] setting in
+# deny.toml, which excludes unpublished workspace crates from the license
+# check rather than requiring one).
+publish = false
 
 [lib]
 name = "rustify_lib"
