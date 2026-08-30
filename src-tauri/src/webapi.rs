@@ -5,6 +5,31 @@ use crate::error::{AppError, AppResult};
 
 const BASE: &str = "https://api.spotify.com/v1";
 
+/// Maps a non-success Spotify HTTP status (and its already-extracted error
+/// message) onto this app's error taxonomy. A free function, pulled out of
+/// [`WebApi::send`], so the mapping itself is testable without standing up an
+/// HTTP server. Does not handle 429 — that is decided before the body is
+/// even read, see [`WebApi::send`] and [`parse_retry_after`].
+fn map_error_status(status: reqwest::StatusCode, msg: String) -> AppError {
+    match status {
+        reqwest::StatusCode::BAD_REQUEST => AppError::BadRequest(msg),
+        reqwest::StatusCode::UNAUTHORIZED => AppError::SessionExpired,
+        reqwest::StatusCode::FORBIDDEN => AppError::Forbidden(msg),
+        reqwest::StatusCode::NOT_FOUND => AppError::Unavailable(msg),
+        s if s.is_server_error() => AppError::ServiceUnavailable { status: s.as_u16() },
+        _ => AppError::WebApi(format!("{status}: {msg}")),
+    }
+}
+
+/// Parses a `Retry-After` header value (already extracted as `Option<&str>`
+/// so this needs no `reqwest::Response`) into whole seconds. Spotify sends
+/// this as a plain integer, never the HTTP-date form, but a malformed or
+/// missing header must fall back to `None` rather than panic or default to a
+/// wait time nobody asked for.
+fn parse_retry_after(value: Option<&str>) -> Option<u64> {
+    value.and_then(|v| v.trim().parse::<u64>().ok())
+}
+
 /// Minimal Spotify Web API client.
 ///
 /// Holds no token of its own: the caller passes the bearer token obtained from
@@ -63,11 +88,11 @@ impl WebApi {
         // on a first request with no prior usage. Surface it as its own variant
         // with the server's own wait hint rather than a generic HTTP error.
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let retry_after = resp
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.trim().parse::<u64>().ok());
+            let retry_after = parse_retry_after(
+                resp.headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok()),
+            );
             log::warn!("rate limited by Spotify (retry_after={retry_after:?})");
             return Err(AppError::RateLimited { retry_after });
         }
@@ -87,14 +112,7 @@ impl WebApi {
                     }
                 });
             log::warn!("{method} {url} -> {status}: {msg}");
-            return Err(match status {
-                reqwest::StatusCode::BAD_REQUEST => AppError::BadRequest(msg),
-                reqwest::StatusCode::UNAUTHORIZED => AppError::SessionExpired,
-                reqwest::StatusCode::FORBIDDEN => AppError::Forbidden(msg),
-                reqwest::StatusCode::NOT_FOUND => AppError::Unavailable(msg),
-                s if s.is_server_error() => AppError::ServiceUnavailable { status: s.as_u16() },
-                _ => AppError::WebApi(format!("{status}: {msg}")),
-            });
+            return Err(map_error_status(status, msg));
         }
 
         // Several write endpoints return an empty 200 as well as 204. Parsing
@@ -222,5 +240,57 @@ impl WebApi {
             .header(reqwest::header::CONTENT_LENGTH, "0")
             .body("");
         self.send::<Value>(req, token).await.map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_known_statuses_to_the_expected_error_kind() {
+        use reqwest::StatusCode;
+
+        assert_eq!(
+            map_error_status(StatusCode::BAD_REQUEST, "bad".into()).kind(),
+            "BadRequest"
+        );
+        assert_eq!(
+            map_error_status(StatusCode::UNAUTHORIZED, "expired".into()).kind(),
+            "SessionExpired"
+        );
+        assert_eq!(
+            map_error_status(StatusCode::FORBIDDEN, "no".into()).kind(),
+            "Forbidden"
+        );
+        assert_eq!(
+            map_error_status(StatusCode::NOT_FOUND, "missing".into()).kind(),
+            "Unavailable"
+        );
+        assert!(matches!(
+            map_error_status(StatusCode::INTERNAL_SERVER_ERROR, "oops".into()),
+            AppError::ServiceUnavailable { status: 500 }
+        ));
+        assert!(matches!(
+            map_error_status(StatusCode::BAD_GATEWAY, "oops".into()),
+            AppError::ServiceUnavailable { status: 502 }
+        ));
+        // Anything not explicitly handled (e.g. 418) falls through to the
+        // generic WebApi variant rather than being silently miscategorised.
+        assert_eq!(
+            map_error_status(StatusCode::IM_A_TEAPOT, "?".into()).kind(),
+            "WebApi"
+        );
+    }
+
+    #[test]
+    fn retry_after_parses_plain_integers_and_rejects_everything_else() {
+        assert_eq!(parse_retry_after(Some("5")), Some(5));
+        assert_eq!(parse_retry_after(Some(" 12 ")), Some(12));
+        // Spotify is documented to send a plain integer, never the HTTP-date
+        // form, but a malformed value must degrade to None, not panic.
+        assert_eq!(parse_retry_after(Some("Wed, 21 Oct 2026 07:28:00 GMT")), None);
+        assert_eq!(parse_retry_after(Some("")), None);
+        assert_eq!(parse_retry_after(None), None);
     }
 }

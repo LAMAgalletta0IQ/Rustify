@@ -300,3 +300,127 @@ impl AppState {
         self.session_generation.load(Ordering::SeqCst)
     }
 }
+
+#[cfg(test)]
+mod playback_state_tests {
+    use super::*;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    #[test]
+    fn refresh_position_does_not_advance_while_paused() {
+        let mut state = PlaybackState {
+            is_playing: false,
+            ..Default::default()
+        };
+        state.set_position(30_000);
+        sleep(Duration::from_millis(20));
+        state.refresh_position();
+        assert_eq!(state.position_ms, 30_000);
+    }
+
+    #[test]
+    fn refresh_position_accumulates_elapsed_time_while_playing() {
+        let mut state = PlaybackState {
+            is_playing: true,
+            duration_ms: 300_000,
+            ..Default::default()
+        };
+        state.set_position(30_000);
+        sleep(Duration::from_millis(30));
+        state.refresh_position();
+        assert!(
+            state.position_ms >= 30_000,
+            "elapsed time must move the position forward, not backward"
+        );
+        assert!(
+            state.position_ms < 30_500,
+            "elapsed accumulation should track wall-clock time, not run away"
+        );
+    }
+
+    #[test]
+    fn refresh_position_clamps_at_duration() {
+        let mut state = PlaybackState {
+            is_playing: true,
+            duration_ms: 1_000,
+            ..Default::default()
+        };
+        state.set_position(999);
+        sleep(Duration::from_millis(50));
+        state.refresh_position();
+        assert_eq!(state.position_ms, 1_000);
+    }
+
+    #[test]
+    fn zero_duration_means_unknown_not_zero_length_and_is_not_clamped() {
+        let mut state = PlaybackState {
+            is_playing: true,
+            duration_ms: 0,
+            ..Default::default()
+        };
+        state.set_position(5_000);
+        sleep(Duration::from_millis(10));
+        state.refresh_position();
+        assert!(state.position_ms >= 5_000);
+    }
+
+    /// The documented bug (see `PlaybackState::position_base_ms`'s doc
+    /// comment): an event that carries no position — `VolumeChanged`,
+    /// `ShuffleChanged`, `RepeatChanged` — must not reset the UI clock. This
+    /// mutates an unrelated field the way that event's handler does and
+    /// confirms the anchor survives it.
+    #[test]
+    fn a_volume_only_style_update_does_not_reset_the_clock() {
+        let mut state = PlaybackState {
+            is_playing: true,
+            duration_ms: 300_000,
+            ..Default::default()
+        };
+        state.set_position(120_000);
+        sleep(Duration::from_millis(20));
+
+        state.volume = 42;
+
+        state.refresh_position();
+        assert!(
+            state.position_ms >= 120_000,
+            "an unrelated field update must not reset position to 0"
+        );
+    }
+}
+
+#[cfg(test)]
+mod session_generation_tests {
+    use super::*;
+
+    #[test]
+    fn next_session_generation_is_monotonically_increasing() {
+        let state = AppState::default();
+        let a = state.next_session_generation();
+        let b = state.next_session_generation();
+        let c = state.next_session_generation();
+        assert!(a < b);
+        assert!(b < c);
+        assert_eq!(state.session_generation(), c);
+    }
+
+    #[test]
+    fn concurrent_callers_each_get_a_distinct_generation() {
+        let state = Arc::new(AppState::default());
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let state = state.clone();
+                std::thread::spawn(move || state.next_session_generation())
+            })
+            .collect();
+        let mut values: Vec<u64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        values.sort_unstable();
+        values.dedup();
+        assert_eq!(
+            values.len(),
+            16,
+            "every concurrent caller must observe a distinct generation"
+        );
+    }
+}

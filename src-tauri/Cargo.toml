@@ -80,6 +80,8 @@ mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
 [dev-dependencies]
 # Only used by examples/jam_demo.rs to show the module's tracing output.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Isolated temp dirs for auth.rs's token-persistence tests.
+tempfile = "3"
 
 [profile.release]
 opt-level = "s"

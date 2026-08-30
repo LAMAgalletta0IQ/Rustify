@@ -1144,3 +1144,145 @@ mod settings_tests {
         store.cancel().await;
     }
 }
+
+#[cfg(test)]
+mod token_persistence_tests {
+    use super::*;
+
+    /// Regression test for the self-sustaining 429 loop documented on
+    /// [`save_stored_tokens`]: a degraded session with no Web API refresh
+    /// token must not erase a previously-stored one.
+    #[test]
+    fn writing_none_preserves_the_previously_stored_webapi_token() {
+        let dir = tempfile::tempdir().unwrap();
+        save_stored_tokens(
+            dir.path(),
+            &StoredTokens {
+                refresh_token: "streaming-1".into(),
+                webapi_refresh_token: Some("private-refresh".into()),
+            },
+        )
+        .unwrap();
+
+        // A later session degrades to the shared token and has nothing of
+        // its own to persist for the Web API side.
+        save_stored_tokens(
+            dir.path(),
+            &StoredTokens {
+                refresh_token: "streaming-2".into(),
+                webapi_refresh_token: None,
+            },
+        )
+        .unwrap();
+
+        let stored = load_stored_tokens(dir.path()).unwrap();
+        assert_eq!(stored.refresh_token, "streaming-2");
+        assert_eq!(stored.webapi_refresh_token.as_deref(), Some("private-refresh"));
+    }
+
+    #[test]
+    fn writing_some_overwrites_the_stored_webapi_token() {
+        let dir = tempfile::tempdir().unwrap();
+        save_stored_tokens(
+            dir.path(),
+            &StoredTokens {
+                refresh_token: "streaming-1".into(),
+                webapi_refresh_token: Some("old-private-refresh".into()),
+            },
+        )
+        .unwrap();
+
+        save_stored_tokens(
+            dir.path(),
+            &StoredTokens {
+                refresh_token: "streaming-1".into(),
+                webapi_refresh_token: Some("rotated-private-refresh".into()),
+            },
+        )
+        .unwrap();
+
+        let stored = load_stored_tokens(dir.path()).unwrap();
+        assert_eq!(
+            stored.webapi_refresh_token.as_deref(),
+            Some("rotated-private-refresh")
+        );
+    }
+
+    #[test]
+    fn clear_stored_tokens_removes_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        save_stored_tokens(
+            dir.path(),
+            &StoredTokens {
+                refresh_token: "streaming-1".into(),
+                webapi_refresh_token: Some("private-refresh".into()),
+            },
+        )
+        .unwrap();
+        assert!(load_stored_tokens(dir.path()).is_some());
+
+        clear_stored_tokens(dir.path());
+        assert!(load_stored_tokens(dir.path()).is_none());
+
+        // Clearing an already-absent file must not panic or error.
+        clear_stored_tokens(dir.path());
+    }
+
+    #[test]
+    fn load_stored_tokens_on_a_fresh_dir_is_none_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load_stored_tokens(dir.path()).is_none());
+    }
+
+    #[test]
+    fn load_stored_tokens_on_corrupted_json_is_none_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tokens.json"), b"{not json").unwrap();
+        assert!(load_stored_tokens(dir.path()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod grant_rejection_tests {
+    use super::*;
+
+    /// Table test over real and near-miss Spotify OAuth error strings.
+    /// `is_grant_rejected` is the sole gate on deleting stored credentials
+    /// (see its doc comment) — a false positive here logs a user out on a
+    /// transient failure, and a false negative leaves a dead token stored
+    /// forever.
+    #[test]
+    fn only_invalid_grant_and_invalid_client_are_rejections() {
+        let cases: &[(&str, bool)] = &[
+            ("invalid_grant", true),
+            ("Invalid_Grant: refresh token revoked", true),
+            ("error=invalid_client, no such client", true),
+            ("INVALID_GRANT", true),
+            // Near-misses that must NOT clear stored credentials.
+            ("invalid_request: refresh_token must be supplied", false),
+            ("invalid_scope", false),
+            ("server_error", false),
+            ("temporarily_unavailable", false),
+            ("connection reset by peer", false),
+            ("", false),
+        ];
+
+        for (message, expect_rejected) in cases {
+            let err = AppError::Auth((*message).to_string());
+            assert_eq!(
+                is_grant_rejected(&err),
+                *expect_rejected,
+                "message {message:?} should map to rejected={expect_rejected}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_auth_variant_can_be_a_grant_rejection() {
+        assert!(!is_grant_rejected(&AppError::BadRequest(
+            "invalid_grant".into()
+        )));
+        assert!(!is_grant_rejected(&AppError::WebApi("invalid_grant".into())));
+        assert!(!is_grant_rejected(&AppError::SessionExpired));
+    }
+}

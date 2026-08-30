@@ -54,7 +54,7 @@ const defaultSettings: AppSettings = {
   friendsPanelOpen: true,
 };
 
-class AppStore {
+export class AppStore {
   playback = $state<PlaybackState>({ ...emptyPlayback });
   auth = $state<AuthState>({ ...emptyAuth });
   /** Non-fatal error banner text. */

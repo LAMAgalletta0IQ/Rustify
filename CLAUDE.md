@@ -17,24 +17,36 @@ cd src-tauri; cargo check --no-default-features   # fast Rust type-check
 different feature set than the app actually runs.
 
 ```powershell
-cd src-tauri; cargo test --no-default-features --lib   # 106 unit tests
+cd src-tauri; cargo test --no-default-features --lib   # 125 unit tests
+npm test                                                # vitest run, store.svelte.ts
+cd src-tauri; cargo fmt --check
+cd src-tauri; cargo clippy --no-default-features -- -D warnings
 ```
 
-**There is a Rust unit-test suite (104 tests) but no frontend one** — no
-vitest, no component tests.
+**There is a Rust unit-test suite (125 tests) and a small Vitest suite for
+`store.svelte.ts`** (10 tests, mocking `@tauri-apps/api/core`/`event`) — no
+component tests, no E2E.
 
-> Until 2026-08 this file said there was no test suite at all. That was wrong:
-> `cargo test --lib` has covered audio DSP, telemetry, Pathfinder hash
-> extraction, jam payload parsing and settings migration for some time.
+> Until 2026-08 this file said there was no test suite at all, then later that
+> there was a Rust suite but no frontend one. Both were wrong when written and
+> are wrong now: `cargo test --lib` has covered audio DSP, telemetry,
+> Pathfinder hash extraction, jam payload parsing, settings migration, token
+> persistence merge behaviour, grant-rejection classification, position
+> anchoring and session-generation monotonicity for some time; `npm test`
+> covers `store.svelte.ts`'s error-handling/auth-clearing, position ticker,
+> stale-lyrics-request cancellation, and optimistic-toggle rollback.
 
 What has not changed is the conclusion those lines were drawing. The Rust tests
-are all pure-function tests over fixed payloads: **none of them start Tauri,
-librespot, or a webview**, so a green run says nothing about runtime behaviour.
-The verification loop is `cargo check --no-default-features` +
-`cargo test --lib` + `npm run check`, and `README.md` has a 15-step manual
-checklist covering login, playback, Connect, and token expiry. Most real bugs
-in this codebase have only ever been found by running the app and reading the
-log — say which of these you actually ran, and do not imply the others.
+are all pure-function tests over fixed payloads, and the Vitest suite mocks
+every Tauri IPC boundary rather than driving a real webview: **none of them
+start Tauri, librespot, or a real webview**, so a green run says nothing about
+runtime behaviour. The verification loop is `cargo check --no-default-features`
++ `cargo test --lib` + `npm run check` + `npm test`, and `README.md` has a
+15-step manual checklist covering login, playback, Connect, and token expiry —
+that checklist is the E2E layer this project has, not a stopgap for automation
+that is coming. Most real bugs in this codebase have only ever been found by
+running the app and reading the log — say which of these you actually ran, and
+do not imply the others.
 
 Useful when diagnosing: `$env:RUST_LOG="debug,librespot=warn"` before
 `npm run tauri dev`. `RUST_LOG` can also live in `.env`.
