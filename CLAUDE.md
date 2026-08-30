@@ -459,3 +459,89 @@ frosted shell over a Windows 11 Acrylic backdrop. Consequences:
   the real file is gitignored and only the `.example` template is committed.
   Delete `capabilities/mcp-bridge.json` again before building without the
   feature.
+
+## Feature tiers
+
+The feature surface is large relative to one maintainer's capacity against a
+hostile, undocumented upstream (Spotify's private endpoints change without
+notice and Spotify owes this project nothing). This tiering exists so a
+breakage's severity is decided in advance, not improvised when it happens, and
+so new work has a place to be honest about how load-bearing it is. **This is
+documentation only — nothing below has been deleted or frozen by writing this
+section.** Tier assignment is not a judgement on code quality; several Tier 3
+features are carefully written. It is a judgement on how much of the app's
+value depends on an endpoint this project does not control and Spotify has no
+obligation to keep working.
+
+### Tier 1 — core (must always work; public Web API + librespot only)
+
+| Feature | Private endpoints? | If Spotify breaks it |
+| --- | --- | --- |
+| Auth (OAuth login, device authorization, session restore/logout) | No | The whole app is unusable — treat as P0 |
+| Playback transport (play/pause/seek/volume/shuffle/repeat, context/track loading) | No (librespot `Spirc`) | P0 |
+| Connect (device list, transfer, activation) | No | P0 |
+| Library (playlists, saved tracks/albums, followed artists/releases, top tracks/artists) | No | P0 |
+| Search | No | P0 |
+| Queue (view, append) | No | P0 |
+
+Any breakage here is a P0: this is the "lightweight native Spotify client" the
+README describes, stripped to its actual promise.
+
+### Tier 2 — supported extras (private-API-backed, with a defined degradation path)
+
+| Feature | Private endpoints? | If Spotify breaks it |
+| --- | --- | --- |
+| Lyrics | Yes (first-party), with LRCLIB fallback | Falls back to LRCLIB; total loss if both are unreachable is a P2 |
+| Friend presence | Yes (Dealer subscription) | Degrades to `FriendFeedStatus::Failed`, sidebar shows unavailable rather than blocking login — P2 |
+| Personalized Home | Yes (Pathfinder) | Home shows nothing new; not a login blocker — P2 |
+| Track credits | Yes (Pathfinder) | Credits panel empty — P3 |
+| Artist overview / top tracks | Yes (Pathfinder `queryArtistOverview`), REST reconstruction fallback | Falls back automatically; total loss is a P2 |
+| User profiles, user search | Yes (Pathfinder) | Profile/search-users view empty — P3 |
+| Episode/podcast resume | Yes (first-party) | Resume position lost, playback itself unaffected — P3 |
+| Listening DNA | No (built from public `/me/top/*`), optional Last.fm enrichment | DNA profile degrades to unenriched; Last.fm outage never blocks it (opt-in, see below) — P3 |
+| Last.fm enrichment | No (third-party, optional) | Opt-in only; with no key it is never called, so there is nothing to break for most installs — P3 |
+| Playlist cover upload | No (public Web API, non-JSON body) | Upload fails with a clear error — P3 |
+| Quick access / relevance ranking | No (local-only, `relevance.rs`) | Local feature; cannot be broken by Spotify — not applicable |
+| Sleep timer, equalizer, media keys | No (fully local) | Local features; cannot be broken by Spotify — not applicable |
+
+### Tier 3 — experimental/best-effort (explicitly not guaranteed; breakage closes as "expected")
+
+| Feature | Private endpoints? | If Spotify breaks it |
+| --- | --- | --- |
+| Jams | Yes (`social-connect/v2`, scraped Pathfinder `sha256Hash` persisted queries — see `README_jams.md`) | Expected to need re-capture periodically; not a regression to chase urgently |
+| DJ | Yes (Lexicon, already 403s for most accounts) | Falls back to the public DJ playlist (`reason: "lexicon-unavailable-fallback"`); narration was never playable regardless (needs a second audio pipeline, see the README's known limitations) |
+| Music videos | Yes (capability probe only; no playback — protected stream) | Capability badge disappears; nothing was ever playable here to lose |
+| Lossless / audio-capability probing | Yes (capability probe only; no playback — needs a PlayPlay key this project will not extract) | Capability badge disappears; same as above, nothing playable to lose |
+| Telemetry (`telemetry.rs`) | No — deliberately never transmitted, bounded local ledger only | Cannot "break" externally; it has no upstream endpoint to depend on |
+
+Telemetry is listed in Tier 3 for scope reasons (it exists to eventually
+support a feature that depends on private endpoints, per its own module doc)
+rather than for fragility — it is actually as stable as Tier 2's local-only
+rows, since it makes no outbound request at all.
+
+### Rules that follow from this
+
+- No new Tier 3 feature until CI, a license decision, and integration tests
+  exist for the ones already there — see the review that prompted this
+  section; that condition has not been met as of this writing.
+- Tier 3 breakage is closed as "expected," not chased with the same urgency
+  as Tier 1/2 — the point of the tier is to make that triage decision once,
+  in advance, rather than re-litigate it under a P0-shaped sense of urgency
+  every time Spotify changes something upstream.
+- Review Tier 3 quarterly against actual use. **Deletion candidates, proposed
+  here but not executed** — the maintainer should confirm actual usage before
+  any of these are removed:
+  - **Jams** is the single largest Tier 3 investment (`README_jams.md` alone
+    is 15KB) and has the highest ongoing capture-maintenance cost of anything
+    in the tree. Worth confirming whether it is still used before the next
+    Pathfinder hash rotation forces a choice between re-capturing and
+    deleting.
+  - **Music video and lossless capability probing** both currently do nothing
+    but display a badge — neither can play anything (see the table above).
+    If that remains true indefinitely (no realistic path to an obtainable
+    PlayPlay key or unprotected video stream), the maintenance cost of
+    tracking their probe endpoints may not be worth a badge.
+  - **DJ narration** was already flagged as "defer indefinitely" in prior
+    review notes (needs a second audio pipeline the app does not have); the
+    module's non-narration parts (dynamic music playback, Lexicon fallback)
+    are more defensible to keep than narration is to ever finish.
