@@ -17,7 +17,7 @@ cd src-tauri; cargo check --no-default-features   # fast Rust type-check
 different feature set than the app actually runs.
 
 ```powershell
-cd src-tauri; cargo test --no-default-features --lib   # 104 unit tests
+cd src-tauri; cargo test --no-default-features --lib   # 106 unit tests
 ```
 
 **There is a Rust unit-test suite (104 tests) but no frontend one** — no
@@ -229,6 +229,15 @@ danceability/energy/valence are unobtainable by any request this app can make,
 and scraping them is out. `dna.rs` builds its profile from `genres` +
 `popularity` on `/me/top/artists` and album `release_date` on
 `/me/top/tracks` instead, and labels every axis with what it measured.
+
+`lastfm.rs` optionally enriches the `genres` half (Spotify leaves it empty for
+many artists) when the user saves an API key in Settings. **It is opt-in and
+must stay that way** — with no key it is never called and DNA is unchanged, and
+`tag_source` reports what was *used* so a rejected key never reads as enriched.
+It also needs its `NON_GENRE_TAGS` blocklist: `seen live` and `female
+vocalists` are among Last.fm's most-applied tags and swamp real genres
+otherwise. Match whole tags, never substrings — `uk`/`love` would eat `uk
+garage`/`lovers rock`.
 
 **Lexicon (DJ) 403s for most accounts.** `start_dj` and `get_dj_status` catch
 `LexiconUnavailable` and fall back to the public DJ playlist, tagging the

@@ -54,7 +54,7 @@ from the official Spotify Web API.
 ### Backend — Rust (`src-tauri/src/`) `#backend`
 Entry and wiring: [[main.rs]] · [[lib.rs]] · [[state.rs]] · [[error.rs]]
 Core feature modules: [[auth.rs]] · [[player.rs]] · [[commands.rs]] · [[connect.rs]] · [[library.rs]] · [[mod.rs|lyrics/mod.rs]] · [[search.rs]] · [[queue.rs]] · [[media_keys.rs]] · [[webapi.rs]]
-Added since the 2026-08 parity pass: [[dna.rs]] · [[friends.rs]] · [[profiles.rs]] · [[podcasts.rs]] · [[music_videos.rs]] · [[audio_capabilities.rs]] · [[telemetry.rs]] · [[sleep_timer.rs]] · [[remote_state.rs]] · [[relevance.rs]] · [[jams_bridge.rs]]
+Added since the 2026-08 parity pass: [[dna.rs]] · [[lastfm.rs]] · [[friends.rs]] · [[profiles.rs]] · [[podcasts.rs]] · [[music_videos.rs]] · [[audio_capabilities.rs]] · [[telemetry.rs]] · [[sleep_timer.rs]] · [[remote_state.rs]] · [[relevance.rs]] · [[jams_bridge.rs]]
 `spotify/` (first-party services client): [[spotify/mod.rs|mod.rs]] · [[spotify/pathfinder.rs|pathfinder.rs]] · [[spotify/home.rs|home.rs]] · [[spotify/dj.rs|dj.rs]] · [[spotify/concerts.rs|concerts.rs]] · [[spotify/credits.rs|credits.rs]] · [[spotify/users.rs|users.rs]] · [[spotify/artist_extras.rs|artist_extras.rs]] · [[spotify/playlist_contents.rs|playlist_contents.rs]]
 `jams/` (self-contained Spotify Jam module): [[jams/mod.rs|mod.rs]] · [[jams/session.rs|session.rs]] · [[jams/spclient.rs|spclient.rs]] · [[jams/dealer.rs|dealer.rs]] · [[jams/pathfinder.rs|pathfinder.rs]] · [[jams/client_token.rs|client_token.rs]] · [[jams/config.rs|config.rs]] · [[jams/token.rs|token.rs]] · [[jams/error.rs|error.rs]]
 

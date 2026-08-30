@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import * as api from "../../api";
   import AudioOutputSelector from "../audio/AudioOutputSelector.svelte";
   import { audioDevices } from "../audio/audio-devices.svelte";
   import { store } from "../../store.svelte";
   import SelectMenu, { type SelectOption } from "../../ui/SelectMenu.svelte";
-  import type { AppSettings, EqualizerPreset, LoginInfo, TelemetryStatus } from "../../types";
+  import type { AppSettings, EqualizerPreset, LastfmConfig, LoginInfo, TelemetryStatus } from "../../types";
 
   let { onReconfigure }: { onReconfigure: () => Promise<void> } = $props();
   const bands = [
@@ -93,6 +94,59 @@
       clientError = store.handleError(error, false).message;
     } finally {
       clientBusy = false;
+    }
+  }
+
+  // Last.fm: entirely optional, and nothing else in the app touches it. It
+  // only improves the genre tags behind the Listening DNA profile, so a failure
+  // here is never worth more than an inline message.
+  let lastfm = $state<LastfmConfig | null>(null);
+  let lastfmDraft = $state("");
+  let lastfmSeeded = false;
+  let lastfmReveal = $state(false);
+  let lastfmBusy = $state(false);
+  let lastfmNotice = $state<string | null>(null);
+  let lastfmError = $state<string | null>(null);
+
+  $effect(() => {
+    if (lastfmSeeded || !lastfm) return;
+    lastfmSeeded = true;
+    lastfmDraft = lastfm.apiKey ?? "";
+  });
+
+  const lastfmDirty = $derived(
+    lastfmDraft.trim() !== (lastfm?.apiKey ?? "").trim(),
+  );
+
+  async function saveLastfm() {
+    const next = lastfmDraft.trim();
+    if (!next || lastfmBusy) return;
+    lastfmBusy = true;
+    lastfmNotice = lastfmError = null;
+    try {
+      await api.setLastfmApiKey(next);
+      lastfm = await api.getLastfmConfig();
+      lastfmNotice = "Saved. Reopen your profile to rebuild Listening DNA with Last.fm tags.";
+    } catch (error) {
+      lastfmError = store.handleError(error, false).message;
+    } finally {
+      lastfmBusy = false;
+    }
+  }
+
+  async function clearLastfm() {
+    if (lastfmBusy) return;
+    lastfmBusy = true;
+    lastfmNotice = lastfmError = null;
+    try {
+      await api.clearLastfmApiKey();
+      lastfm = await api.getLastfmConfig();
+      lastfmDraft = "";
+      lastfmNotice = "Removed. Listening DNA falls back to Spotify's own genre tags.";
+    } catch (error) {
+      lastfmError = store.handleError(error, false).message;
+    } finally {
+      lastfmBusy = false;
     }
   }
 
@@ -219,8 +273,8 @@
   }
 
   onMount(() => {
-    void Promise.all([api.getLoginInfo(), api.getEqualizerPresets(), api.getTelemetryStatus()])
-      .then(([info, presets, telemetryStatus]) => { loginInfo = info; builtins = presets; telemetry = telemetryStatus; })
+    void Promise.all([api.getLoginInfo(), api.getEqualizerPresets(), api.getTelemetryStatus(), api.getLastfmConfig()])
+      .then(([info, presets, telemetryStatus, lastfmConfig]) => { loginInfo = info; builtins = presets; telemetry = telemetryStatus; lastfm = lastfmConfig; })
       .catch((error) => { localError = store.handleError(error, false).message; });
   });
   onDestroy(() => {
@@ -374,6 +428,46 @@
     <div class="field"><span><strong>Playback history delivery {telemetry?.deliveryAvailable ? "available" : "unavailable"}</strong><small>{telemetry?.deliveryAvailable ? `Using ${telemetry.deliveryTransport}.` : (telemetry?.deliveryBlocker ?? "Checking Spotify telemetry capability…")}</small></span><span class="audit">{telemetry?.activePlaybacks ?? 0} active · {telemetry?.locallyRecorded ?? 0} audited</span></div>
   </section>
 
+  <section>
+    <h2>Last.fm <span class="optional">Optional</span></h2>
+    <div class="stack">
+      <span>
+        <strong>{lastfm?.configured ? "Enrichment enabled" : "Not connected"}</strong>
+        <small>
+          Spotify leaves its <code>genres</code> field empty for many artists, which flattens the
+          Listening DNA profile on your own profile page. A Last.fm API key fills the gaps with
+          community genre tags. Everything else in Rustify works the same either way — leave this
+          empty and Listening DNA simply uses Spotify’s tags alone.
+        </small>
+      </span>
+      <div class="client-row">
+        <input
+          bind:value={lastfmDraft}
+          type={lastfmReveal ? "text" : "password"}
+          spellcheck="false"
+          autocomplete="off"
+          maxlength="64"
+          placeholder="32-character Last.fm API key"
+          aria-label="Last.fm API key"
+          disabled={lastfmBusy}
+        />
+        <button class="secondary" onclick={() => (lastfmReveal = !lastfmReveal)} aria-pressed={lastfmReveal}>{lastfmReveal ? "Hide" : "Show"}</button>
+        <button class="secondary" disabled={lastfmBusy || !lastfmDirty || !lastfmDraft.trim()} onclick={saveLastfm}>{lastfmBusy ? "Working…" : "Save"}</button>
+        <button class="secondary" disabled={lastfmBusy || !lastfm?.configured} onclick={clearLastfm}>Clear</button>
+      </div>
+      <p class="notice">
+        Create a key at
+        <button class="link" onclick={() => void openUrl("https://www.last.fm/api/account/create")}>last.fm/api/account/create</button>.
+        Only the <em>API key</em> is needed — not the shared secret. Rustify makes unauthenticated
+        <code>artist.getTopTags</code> reads with it and never sends your Last.fm username, so it
+        cannot scrobble or act on your account. The key is stored in plaintext in
+        <code>settings.json</code>, alongside your Spotify tokens.
+      </p>
+      {#if lastfmNotice}<p class="ok" role="status">{lastfmNotice}</p>{/if}
+      {#if lastfmError}<p class="error" role="alert">{lastfmError}</p>{/if}
+    </div>
+  </section>
+
   <div class="actions"><button class="btn-primary" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save general settings"}</button>{#if saved}<span class="ok" role="status">Saved.</span>{/if}{#if localError}<span class="error" role="alert">{localError}</span>{/if}</div>
 
   <!-- Account actions live at the bottom of Settings, not on the profile page.
@@ -402,6 +496,9 @@
   .stack{display:flex;flex-direction:column;gap:12px}.stack>span:first-child{display:flex;flex-direction:column;gap:4px}
   .client-row{display:flex;align-items:center;gap:8px}.client-row input{flex:1;min-width:0;min-height:var(--control-height);padding:8px 11px;border:1px solid var(--control-border);border-radius:var(--control-radius);background:var(--control-bg);letter-spacing:.02em}.client-row input:disabled{opacity:var(--disabled-opacity)}.client-row button{flex:none}
   code{padding:1px 5px;border-radius:5px;background:rgba(20,14,8,.35);font-size:11px}
+  .optional{margin-left:8px;padding:2px 8px;border-radius:999px;color:var(--fg-faint);background:var(--glass-strong);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;vertical-align:middle}
+  .link{padding:0;color:var(--accent);text-decoration:underline;font-size:inherit}
+  .link:hover{color:var(--accent-hover)}
   .danger-zone{border-color:rgba(220,90,100,.28)}.danger-zone h2{margin-bottom:15px}
   .danger{flex:none;padding:8px 14px;border:1px solid rgba(220,90,100,.42);border-radius:var(--control-radius);color:#ffb3b3;background:rgba(180,50,60,.12)}
   .danger:hover:not(:disabled){background:rgba(180,50,60,.24);border-color:rgba(220,90,100,.6)}

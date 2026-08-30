@@ -259,6 +259,14 @@ pub struct AppState {
     /// Cached first-party clients (Pathfinder now, other internal services as
     /// they are enabled). Credentials are supplied per request and never kept.
     pub internal_spotify: crate::spotify::InternalSpotify,
+    /// Per-artist Last.fm tag cache for the Listening DNA profile. Empty and
+    /// untouched unless the user configured a key; cleared when that key
+    /// changes, so a rejected key's empty answers are not remembered.
+    pub lastfm_cache: crate::lastfm::LastfmCache,
+    /// Separate from `web_api`'s client: a different host, and it must carry
+    /// no Spotify credential. Kept on state so its connection pool survives
+    /// between Profile visits.
+    pub lastfm_http: reqwest::Client,
     /// Monotonic id for the live librespot session, bumped by every
     /// `establish` and by `logout`.
     ///

@@ -163,6 +163,32 @@ What remains available is enough for an honest profile: `genres` and
 `/me/top/tracks`. Six axes are derived from those, and each carries a `basis`
 string naming exactly what was measured. The UI states the limitation in place.
 
+### Optional Last.fm enrichment
+
+Spotify's `genres` is the weakest input in the feature — empty for a large
+share of artists — so [[lastfm.rs]] can fill the gaps with `artist.getTopTags`
+when the user adds a key in Settings. Design constraints:
+
+- **Opt-in and strictly additive.** No key means the module is never called.
+  `tag_source` reports what was *used*, not what was configured, so a rejected
+  key still reads `"spotify"` rather than claiming an enrichment.
+- **Unauthenticated reads only**, and no username is sent — the API key alone
+  drives `artist.getTopTags`, with no shared secret and no auth handshake, so
+  nothing here can scrobble or touch the account.
+- **A blocklist is mandatory.** Last.fm's most-applied tags include `seen
+  live`, `female vocalists` and `00s`, which describe the listener's
+  relationship to the artist rather than the music; unfiltered they outrank
+  every real genre. Matching is whole-tag, never substring — a substring rule
+  on `uk` or `love` would remove `uk garage` and `lovers rock`.
+- **Per-artist tag cap (8, both sources combined).** Without it a
+  heavily-tagged famous artist outweighs an obscure one on every share the DNA
+  computes, which is a popularity effect dressed up as a taste signal.
+- **Never fatal, and time-boxed.** `enrich_tags` returns no error: every
+  failure yields fewer entries. A 6 s budget covers the whole pass, and a 24 h
+  per-artist cache on `AppState` means reopening Profile issues no requests.
+
+It does not recover audio features. Last.fm publishes no tempo or mood either.
+
 The chart is one series across six axes, so it is deliberately single-hue —
 `--accent` for the shape, hairline neutrals for the web, and text tokens (never
 the series colour) for the labels. A radar cannot be measured accurately by
@@ -180,8 +206,8 @@ datetime survives on the third line and as the `<time>` element's `aria-label`.
 ## Verification
 
 - `cargo check --no-default-features`: clean, no warnings.
-- `cargo test --lib`: 104 passed, 0 failed (includes new coverage for
-  `is_shareable_web_url` and the DNA helpers).
+- `cargo test --lib`: 106 passed, 0 failed (includes new coverage for
+  `is_shareable_web_url`, the DNA helpers and the Last.fm tag blocklist).
 - `svelte-check` and the production Vite build: 153 files, 0 errors, 0 warnings.
 - **Not verified at runtime.** None of the above exercises the Tauri app. The
   watchdog in particular can only be confirmed by killing a live librespot

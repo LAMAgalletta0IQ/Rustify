@@ -11,6 +11,7 @@ mod friends;
 // wired to the UI via jams_bridge.rs and the jam commands in commands.rs.
 pub mod jams;
 mod jams_bridge;
+mod lastfm;
 mod library;
 mod lyrics;
 mod media_keys;
@@ -179,6 +180,9 @@ pub fn run() {
             commands::get_top_tracks,
             commands::get_top_artists,
             commands::get_listening_dna,
+            commands::get_lastfm_config,
+            commands::set_lastfm_api_key,
+            commands::clear_lastfm_api_key,
             commands::get_personalized_home,
             commands::get_dj_status,
             commands::start_dj,

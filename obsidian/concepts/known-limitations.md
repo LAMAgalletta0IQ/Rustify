@@ -44,9 +44,15 @@ What ships instead is [[dna.rs]] — a taste profile built only from data the
 ordinary Web API still returns (`genres` and `popularity` on
 `/me/top/artists`, album `release_date` on `/me/top/tracks`). Every axis names
 what it actually measured, and the Profile view states the limitation in place
-rather than passing the result off as Spotify's own feature. A third-party
-source (Last.fm tags, MusicBrainz) would sharpen it at the cost of a second API
-key for the user to register, so it is deliberately not a dependency.
+rather than passing the result off as Spotify's own feature.
+
+Spotify's `genres` is itself the weak link — it is empty for a large share of
+artists — so [[lastfm.rs]] can fill the gaps with community tags **if the user
+adds a Last.fm API key in Settings**. That is opt-in and strictly additive: no
+key means the module is never called and DNA behaves exactly as it does
+without it, and `tag_source` reports which actually happened. It does not
+recover audio features; Last.fm publishes no tempo or mood either. Nothing
+reconstructs Spotify's own analysis, and nothing tries to.
 
 ### DJ — plays, but the dynamic mix and voice intros do not
 Two separate blocks, and only one of them was ever about audio:

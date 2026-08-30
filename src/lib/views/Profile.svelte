@@ -236,6 +236,13 @@
             Six traits derived from your top artists’ genre tags and your top tracks’ release dates.
           </p>
         </div>
+        {#if dna && !dna.sparse}
+          <span class="source-tag" title={dna.tagSource === "spotify+lastfm"
+            ? `Genre tags from Spotify plus Last.fm, for ${dna.lastfmArtists} of ${dna.artistSample} artists`
+            : "Genre tags from Spotify only — a Last.fm key in Settings adds community tags"}>
+            {dna.tagSource === "spotify+lastfm" ? "Spotify + Last.fm" : "Spotify tags"}
+          </span>
+        {/if}
       </div>
 
       {#if dnaLoading}
@@ -298,6 +305,13 @@
           so these traits are inferred from genre tags, popularity and release dates rather than
           measured from the audio. They are Rustify’s own reading, not Spotify’s.
           Based on {dna.artistSample} top artists and {dna.trackSample} top tracks.
+          {#if dna.tagSource === "spotify+lastfm"}
+            Genre tags come from Spotify, plus Last.fm community tags for {dna.lastfmArtists}
+            {dna.lastfmArtists === 1 ? "artist" : "artists"}.
+          {:else}
+            Genre tags come from Spotify alone, and it leaves them empty for many artists —
+            adding an optional Last.fm API key in Settings fills those gaps.
+          {/if}
         </p>
       {/if}
     </section>
@@ -400,7 +414,10 @@
   h2 { margin: 0 0 10px; font-size: 15px; }
   section p { margin: 0; }
 
-  .dna-head { margin-bottom: 16px; }
+  .dna-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+  /* Provenance, stated on the card rather than only in the footnote: which
+     tag source was used changes how much the shape is worth trusting. */
+  .source-tag { flex: none; padding: 5px 11px; border-radius: 999px; color: var(--fg-dim); background: var(--glass-strong); border: 1px solid var(--hairline); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
   .dna-head p { font-size: 12px; max-width: 62ch; }
   .dna-body { display: flex; align-items: center; gap: 28px; }
 

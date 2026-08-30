@@ -37,6 +37,7 @@ import type {
   AudioCapability,
   EqualizerSettings,
   ListeningDna,
+  LastfmConfig,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -236,6 +237,17 @@ export const getTopTracks = (limit?: number) =>
   invoke<TrackSummary[]>("get_top_tracks", { limit });
 export const getTopArtists = (limit?: number) =>
   invoke<ArtistSummary[]>("get_top_artists", { limit });
+/**
+ * Optional Last.fm enrichment for Listening DNA. Nothing else in the app uses
+ * Last.fm, and with no key configured `getListeningDna` behaves exactly as it
+ * does now — these three exist so the user can opt in, not so a feature can
+ * depend on them.
+ */
+export const getLastfmConfig = () => invoke<LastfmConfig>("get_lastfm_config");
+export const setLastfmApiKey = (apiKey: string) =>
+  invoke<void>("set_lastfm_api_key", { apiKey });
+export const clearLastfmApiKey = () => invoke<void>("clear_lastfm_api_key");
+
 /** Taste profile for the Profile radar. `currentYear` is the webview's, so the
  * freshness axis follows the user's calendar rather than UTC's. */
 export const getListeningDna = () =>

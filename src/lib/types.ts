@@ -314,6 +314,17 @@ export interface ListeningDna {
   trackSample: number;
   /** Too little listening history for the shape to mean anything. */
   sparse: boolean;
+  /** Where the genre tags came from. Reports what was actually *used*: a
+   * configured Last.fm key that returned nothing still reads `"spotify"`. */
+  tagSource: "spotify" | "spotify+lastfm";
+  /** How many sampled artists received Last.fm tags. */
+  lastfmArtists: number;
+}
+
+/** Optional Last.fm enrichment for Listening DNA. Absent is the normal case. */
+export interface LastfmConfig {
+  configured: boolean;
+  apiKey: string | null;
 }
 
 export interface LyricsLine {

@@ -108,19 +108,107 @@ pub async fn get_auth_state(state: State<'_, AppState>) -> AppResult<AuthState> 
 /// Mixes, Discover Weekly, Release Radar, daylist and other personalized
 /// contexts where Spotify exposes them. This uses semantic card metadata and
 /// never infers a feature from its localized display name.
+/// Whether the optional Last.fm enrichment is configured.
+///
+/// The key is returned so Settings can show and edit what is in use. It is
+/// stored in plaintext in `settings.json` — this is a local desktop app with
+/// no key store, and the Spotify refresh tokens next to it are strictly more
+/// sensitive. The UI masks the field by default all the same, because Last.fm
+/// asks that application keys not be shared.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastfmConfig {
+    pub configured: bool,
+    pub api_key: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_lastfm_config(app: AppHandle) -> AppResult<LastfmConfig> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+    let api_key = auth::lastfm_api_key(&data_dir);
+    Ok(LastfmConfig {
+        configured: api_key.is_some(),
+        api_key,
+    })
+}
+
+/// Saves the optional Last.fm API key. Requires no re-login: it is unrelated
+/// to the Spotify OAuth grant and is only ever used for unauthenticated
+/// `artist.getTopTags` reads.
+#[tauri::command]
+pub async fn set_lastfm_api_key(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    api_key: String,
+) -> AppResult<()> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest(
+            "Last.fm API key cannot be empty. Use Clear to remove it instead.".into(),
+        ));
+    }
+    let mut settings = auth::settings_or_default(&data_dir);
+    settings.lastfm_api_key = Some(trimmed.to_string());
+    auth::save_settings(&data_dir, &settings)?;
+    // The cache holds answers obtained with the previous key; a new key may
+    // get different ones, and a previously-rejected key's empty results must
+    // not survive being corrected.
+    state.lastfm_cache.clear().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_lastfm_api_key(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    let mut settings = auth::settings_or_default(&data_dir);
+    settings.lastfm_api_key = None;
+    auth::save_settings(&data_dir, &settings)?;
+    state.lastfm_cache.clear().await;
+    Ok(())
+}
+
 /// Taste profile for the Profile view's radar chart.
 ///
 /// `currentYear` comes from the webview rather than the system clock so the
 /// "released in the last two years" axis matches the user's own calendar
 /// rather than UTC's.
+///
+/// Last.fm enrichment is attached only when the user configured a key; with
+/// none, the call is exactly what it was before the option existed.
 #[tauri::command]
 pub async fn get_listening_dna(
+    app: AppHandle,
     state: State<'_, AppState>,
     current_year: Option<i32>,
 ) -> AppResult<crate::dna::ListeningDna> {
     let t = token(&state).await?;
     let year = current_year.unwrap_or(2026);
-    crate::dna::listening_dna(&state.web_api, &t, year).await
+    let api_key = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .and_then(|dir| auth::lastfm_api_key(&dir));
+    let lastfm = api_key.as_deref().map(|api_key| crate::dna::LastfmEnrichment {
+        http: &state.lastfm_http,
+        cache: &state.lastfm_cache,
+        api_key,
+    });
+    crate::dna::listening_dna(&state.web_api, &t, year, lastfm).await
 }
 
 #[tauri::command]

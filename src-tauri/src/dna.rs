@@ -26,10 +26,20 @@
 //! `Mellow` are genre-tag keyword matches — a coarse proxy for what
 //! energy/acousticness measured directly, and labelled as such in the UI.
 //!
-//! Adding a third-party source (Last.fm tags, MusicBrainz, AcousticBrainz)
-//! would sharpen this, but it means another API key for the user to register
-//! on top of the Spotify one, so it is deliberately not a dependency of the
-//! feature existing at all.
+//! # Optional Last.fm enrichment
+//!
+//! Spotify's `genres` array is the weakest input here: it is **empty** for a
+//! large share of artists, reliably so for smaller ones, which flattens the
+//! profile of a listener with niche taste for reasons unrelated to their
+//! listening. If the user has configured a Last.fm API key in Settings,
+//! [`crate::lastfm`] fills that gap with community tags.
+//!
+//! It is strictly additive. With no key the module is never called and this
+//! function behaves exactly as it did before; `tag_source` reports which
+//! happened so the UI never implies an enrichment that didn't occur. Nothing
+//! here substitutes for the withdrawn audio-features endpoint either way —
+//! Last.fm does not publish tempo or mood, and no third party can reconstruct
+//! Spotify's own analysis.
 
 use std::collections::HashMap;
 
@@ -50,6 +60,13 @@ const VARIETY_CEILING: f32 = 30.0;
 
 /// A track counts as "fresh" if its album came out within this many years.
 const FRESH_YEARS: i32 = 2;
+
+/// Tags counted per artist, from both sources combined. Without a cap, a
+/// heavily-tagged famous artist would contribute many times the weight of an
+/// obscure one to every share below — a popularity effect masquerading as a
+/// taste signal. It also keeps enrichment from silently outweighing Spotify's
+/// own tags for the artists that have both.
+const MAX_TAGS_PER_ARTIST: usize = 8;
 
 /// Genre-tag substrings read as high-energy. Matched case-insensitively as
 /// substrings because Spotify's tags are compounds ("melodic death metal",
@@ -115,6 +132,21 @@ pub struct ListeningDna {
     pub track_sample: u32,
     /// Present when the profile is too thin to be meaningful.
     pub sparse: bool,
+    /// `"spotify"` or `"spotify+lastfm"`. The UI states this rather than
+    /// leaving the reader to guess where the tags came from.
+    pub tag_source: &'static str,
+    /// How many of the sampled artists actually received Last.fm tags. Zero
+    /// with a key configured is a real outcome worth showing — it means the
+    /// key was rejected, or the artists are unknown to Last.fm.
+    pub lastfm_artists: u32,
+}
+
+/// What `listening_dna` needs to reach Last.fm, when the user has opted in.
+/// `None` is the normal case.
+pub struct LastfmEnrichment<'a> {
+    pub http: &'a reqwest::Client,
+    pub cache: &'a crate::lastfm::LastfmCache,
+    pub api_key: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +156,9 @@ struct Page<T> {
 
 #[derive(Debug, Deserialize)]
 struct WireArtist {
+    /// Only used as the Last.fm lookup key; Spotify ids mean nothing there.
+    #[serde(default)]
+    name: String,
     #[serde(default)]
     genres: Vec<String>,
     #[serde(default)]
@@ -178,7 +213,12 @@ fn release_year(date: &str) -> Option<i32> {
 /// Builds the profile. Both requests are independent; either coming back empty
 /// degrades the affected axes to 0 rather than failing the whole call, because
 /// a brand-new account genuinely has no top tracks and that is not an error.
-pub async fn listening_dna(api: &WebApi, token: &str, current_year: i32) -> AppResult<ListeningDna> {
+pub async fn listening_dna(
+    api: &WebApi,
+    token: &str,
+    current_year: i32,
+    lastfm: Option<LastfmEnrichment<'_>>,
+) -> AppResult<ListeningDna> {
     let artists: Page<WireArtist> = api
         .get(
             token,
@@ -203,14 +243,50 @@ pub async fn listening_dna(api: &WebApi, token: &str, current_year: i32) -> AppR
     let artists = artists.items;
     let tracks = tracks.items;
 
-    // Every genre tag, once per artist carrying it — so an artist with eight
-    // tags counts eight times toward the intensity/mellow shares. That is
-    // intentional: the tag count is itself a signal of how strongly the artist
-    // sits in a scene.
-    let tags: Vec<String> = artists
+    // Optional, and never fatal: `enrich_tags` swallows every failure and
+    // returns fewer entries, so a missing artist just falls back to whatever
+    // Spotify said about them.
+    let enriched = match &lastfm {
+        Some(lastfm) => {
+            let names: Vec<String> = artists.iter().map(|a| a.name.clone()).collect();
+            crate::lastfm::enrich_tags(lastfm.http, lastfm.cache, lastfm.api_key, &names).await
+        }
+        None => HashMap::new(),
+    };
+
+    // Per-artist tag sets, Spotify's genres first (higher precision) then
+    // Last.fm's (higher recall), deduplicated and capped. Building per artist
+    // rather than flattening straight away is what makes the cap meaningful.
+    let mut lastfm_artists = 0u32;
+    let per_artist: Vec<Vec<String>> = artists
         .iter()
-        .flat_map(|artist| artist.genres.iter().map(|genre| genre.to_lowercase()))
+        .map(|artist| {
+            let mut tags: Vec<String> = artist
+                .genres
+                .iter()
+                .map(|genre| genre.trim().to_lowercase())
+                .filter(|genre| !genre.is_empty())
+                .collect();
+            if let Some(extra) = enriched.get(&artist.name.trim().to_lowercase()) {
+                if !extra.is_empty() {
+                    lastfm_artists += 1;
+                }
+                for tag in extra {
+                    if !tags.contains(tag) {
+                        tags.push(tag.clone());
+                    }
+                }
+            }
+            tags.truncate(MAX_TAGS_PER_ARTIST);
+            tags
+        })
         .collect();
+
+    // Every tag, once per artist carrying it — so an artist tagged with five
+    // scenes counts five times toward the intensity/mellow shares. That is
+    // intentional: the tag count is itself a signal of how strongly the artist
+    // sits in a scene. The per-artist cap above bounds it.
+    let tags: Vec<String> = per_artist.iter().flatten().cloned().collect();
 
     let mainstream = if artists.is_empty() {
         0.0
@@ -302,17 +378,18 @@ pub async fn listening_dna(api: &WebApi, token: &str, current_year: i32) -> AppR
     let mut genres: Vec<DnaGenre> = {
         // Weight by *artists* carrying the tag, not by raw tag count, so the
         // percentage means something a reader can check: "40% of your top
-        // artists are tagged indie rock".
-        let mut per_artist: HashMap<String, u32> = HashMap::new();
-        for artist in &artists {
-            for genre in &artist.genres {
-                *per_artist.entry(genre.to_lowercase()).or_default() += 1;
+        // artists are tagged indie rock". Counted over the merged per-artist
+        // sets, which are already deduplicated, so one artist cannot add two.
+        let mut counts: HashMap<&str, u32> = HashMap::new();
+        for tags in &per_artist {
+            for tag in tags {
+                *counts.entry(tag.as_str()).or_default() += 1;
             }
         }
-        per_artist
+        counts
             .into_iter()
             .map(|(name, count)| DnaGenre {
-                name,
+                name: name.to_owned(),
                 weight: clamp((count as f32 / artist_total) * 100.0),
             })
             .collect()
@@ -332,6 +409,15 @@ pub async fn listening_dna(api: &WebApi, token: &str, current_year: i32) -> AppR
         artist_sample,
         track_sample,
         sparse: artist_sample < 5 || track_sample < 5,
+        // Reports what was *used*, not what was configured: a key that got no
+        // usable answers back must not be advertised as having enriched
+        // anything.
+        tag_source: if lastfm_artists > 0 {
+            "spotify+lastfm"
+        } else {
+            "spotify"
+        },
+        lastfm_artists,
     })
 }
 
