@@ -352,13 +352,12 @@ impl JamManager {
     }
 
     /// Returns the dealer event stream. Ownership transfers to the caller, so
-    /// call this exactly once and pass the receiver onward.
-    pub fn events(&self) -> mpsc::Receiver<JamEvent> {
-        self.events
-            .lock()
-            .expect("jam events mutex poisoned")
-            .take()
-            .expect("events() may only be called once; pass the returned receiver around")
+    /// call this exactly once and pass the receiver onward. Returns `None` on
+    /// a second call and on a poisoned mutex, rather than panicking — this
+    /// runs inside a Tauri app, where a panic on a background thread takes
+    /// the whole process down with no visible error.
+    pub fn events(&self) -> Option<mpsc::Receiver<JamEvent>> {
+        self.events.lock().ok()?.take()
     }
 
     /// Enriches a raw jam payload with member metadata from Pathfinder when a

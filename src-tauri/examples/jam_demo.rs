@@ -94,7 +94,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let manager = JamManager::new(http, config, credentials)?;
-    let mut events = manager.events();
+    let mut events = manager
+        .events()
+        .ok_or("events() already taken or the mutex was poisoned")?;
 
     // Best-effort create. Expect a 400 here even with a valid OAuth token:
     // the device id is invented and there is no connection id. Run it from

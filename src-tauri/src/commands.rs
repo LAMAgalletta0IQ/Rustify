@@ -893,7 +893,10 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()>
         }
     }
     // Drop the jam controller too: its dealer listener and event forwarder
-    // must not outlive the session they authenticate against.
+    // must not outlive the session they authenticate against. `Drop` on
+    // `JamController` explicitly aborts the forward task; without that the
+    // task would only be detached, not cancelled, and would keep emitting
+    // `jams:changed` after this logout.
     state.jams.write().await.take();
     state.tokens.set(String::new()).await;
     *state.auth.write().await = AuthState::default();
@@ -1965,16 +1968,43 @@ pub async fn add_to_queue(
 
 // ---- jams (experimental) --------------------------------------------------
 
+/// Ensures exactly one `T` is ever built behind `lock`, even when two callers
+/// race: a cheap read-locked fast path for the already-built case, then a
+/// second check *under the write lock*, with `build` awaited while that write
+/// lock is still held. That is the part the naive "check, build, then
+/// store-if-still-empty" version got wrong — building outside any lock let
+/// two racing callers both pass the `None` check and each build (and, for
+/// [`JamController`], each leak dealer subscriptions and an orphan forward
+/// task). Holding the write guard across `build` serialises the rare, non-hot
+/// jam-controller construction instead, which is the desired behaviour here,
+/// not an accepted cost. Generic and unit-tested in isolation below;
+/// `ensure_jams` is the sole caller.
+async fn get_or_build<T, E>(
+    lock: &tokio::sync::RwLock<Option<Arc<T>>>,
+    build: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<Arc<T>, E> {
+    if let Some(existing) = lock.read().await.as_ref() {
+        return Ok(existing.clone());
+    }
+    let mut guard = lock.write().await;
+    if let Some(existing) = guard.as_ref() {
+        return Ok(existing.clone());
+    }
+    let built = Arc::new(build.await?);
+    guard.replace(built.clone());
+    Ok(built)
+}
+
 /// Returns the controller, building it lazily. Requires a live session (the
 /// jams module needs the user's bearer token), but the check also keeps a
 /// logged-out app from spawning a dealer listener that would just reconnect
 /// forever with no token.
 async fn ensure_jams(app: &AppHandle, state: &AppState) -> AppResult<Arc<JamController>> {
-    if let Some(ctrl) = state.jams.read().await.as_ref() {
-        return Ok(ctrl.clone());
-    }
-    // Jams hang off the librespot session (device id, client-token, dealer
-    // connection id), so the controller cannot be built before it exists.
+    // Fetched — and the read guard dropped — *before* touching `state.jams`,
+    // so this function's lock order (spotify, released, then jams) can never
+    // invert against `logout`'s (spotify held across teardown, then jams). If
+    // this instead held both at once in the opposite order, ensure_jams and
+    // logout could deadlock on each other's lock.
     let session = {
         let guard = state.spotify.read().await;
         let Some(session) = guard.as_ref() else {
@@ -1982,13 +2012,13 @@ async fn ensure_jams(app: &AppHandle, state: &AppState) -> AppResult<Arc<JamCont
         };
         session.session.clone()
     };
-    let ctrl = Arc::new(JamController::build(app, session, &state.tokens).await?);
-    let mut guard = state.jams.write().await;
-    if let Some(existing) = guard.as_ref() {
-        return Ok(existing.clone());
-    }
-    guard.replace(ctrl.clone());
-    Ok(ctrl)
+    // Jams hang off the librespot session (device id, client-token, dealer
+    // connection id), so the controller cannot be built before it exists.
+    get_or_build(
+        &state.jams,
+        JamController::build(app, session, &state.tokens),
+    )
+    .await
 }
 
 /// Configuration + current session, so the Jams view can explain what still
@@ -2124,5 +2154,79 @@ mod settings_validation_tests {
         assert!(!should_clear_crossfade(false, true, true));
         assert!(!should_clear_crossfade(true, false, true));
         assert!(!should_clear_crossfade(true, true, false));
+    }
+}
+
+#[cfg(test)]
+mod get_or_build_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    /// Regression test for the `ensure_jams` race (two concurrent jam
+    /// commands each building — and leaking — a `JamController`, per
+    /// CLAUDE.md's jams-reliability notes): fires many concurrent
+    /// `get_or_build` calls against one empty lock and asserts the build
+    /// future only ever ran once.
+    #[tokio::test]
+    async fn concurrent_callers_build_exactly_once() {
+        let lock: Arc<tokio::sync::RwLock<Option<Arc<u32>>>> =
+            Arc::new(tokio::sync::RwLock::new(None));
+        let build_count = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let lock = lock.clone();
+            let build_count = build_count.clone();
+            handles.push(tokio::spawn(async move {
+                get_or_build::<u32, ()>(&lock, async {
+                    build_count.fetch_add(1, Ordering::SeqCst);
+                    // Widen the race window so concurrent callers actually
+                    // overlap instead of trivially serialising through Tokio.
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    Ok(7)
+                })
+                .await
+            }));
+        }
+
+        for handle in handles {
+            assert_eq!(handle.await.unwrap().unwrap().as_ref(), &7);
+        }
+        assert_eq!(build_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn already_built_value_short_circuits_without_building() {
+        let lock: Arc<tokio::sync::RwLock<Option<Arc<u32>>>> =
+            Arc::new(tokio::sync::RwLock::new(Some(Arc::new(99))));
+        let build_count = Arc::new(AtomicUsize::new(0));
+        let build_count_clone = build_count.clone();
+
+        let result = get_or_build::<u32, ()>(&lock, async move {
+            build_count_clone.fetch_add(1, Ordering::SeqCst);
+            Ok(1)
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(*result, 99);
+        assert_eq!(build_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn build_failure_leaves_lock_empty_for_a_later_retry() {
+        let lock: Arc<tokio::sync::RwLock<Option<Arc<u32>>>> =
+            Arc::new(tokio::sync::RwLock::new(None));
+
+        let err: Result<Arc<u32>, &'static str> =
+            get_or_build(&lock, async { Err("build failed") }).await;
+        assert_eq!(err, Err("build failed"));
+        assert!(lock.read().await.is_none());
+
+        let ok = get_or_build::<u32, &'static str>(&lock, async { Ok(42) })
+            .await
+            .unwrap();
+        assert_eq!(*ok, 42);
     }
 }

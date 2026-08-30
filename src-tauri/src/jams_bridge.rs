@@ -6,7 +6,11 @@
 //! `jams:changed` (see [`crate::state::events::JAMS`]).
 //!
 //! The controller is built lazily on the first jam command and dropped on
-//! logout, which aborts the dealer task and ends the forward loop.
+//! logout. [`JamController`]'s `Drop` impl explicitly aborts the forward
+//! task at that point — a plain field drop would only detach it (the
+//! `tauri::async_runtime::JoinHandle` keeps running in the background), which
+//! is the same detached-task hazard documented for every other spawned task
+//! in this codebase (see `state.rs` and `commands.rs`'s `logout`).
 
 use std::sync::Arc;
 
@@ -235,9 +239,18 @@ pub struct JamController {
     connection_id: ConnectionId,
     config: JamConfig,
     session: Arc<tokio::sync::RwLock<Option<JamSession>>>,
-    /// Kept only so the task is dropped with the controller; the loop ends on
-    /// its own once the dealer's sender is gone.
-    _forward: tauri::async_runtime::JoinHandle<()>,
+    /// Explicitly `.abort()`ed by `Drop` below — dropping a
+    /// `tauri::async_runtime::JoinHandle` on its own detaches rather than
+    /// cancels, which would leave this running (and emitting `jams:changed`
+    /// to a webview whose session may already be gone) past both an ordinary
+    /// logout and a discarded loser from the `ensure_jams` build race.
+    forward: tauri::async_runtime::JoinHandle<()>,
+}
+
+impl Drop for JamController {
+    fn drop(&mut self) {
+        self.forward.abort();
+    }
 }
 
 impl JamController {
@@ -359,7 +372,7 @@ impl JamController {
             connection_id,
             config,
             session: session_state,
-            _forward: forward,
+            forward,
         })
     }
 
