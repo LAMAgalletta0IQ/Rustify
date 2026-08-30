@@ -75,7 +75,8 @@ src-tauri/src/
   telemetry.rs   Bounded ledger of genuine local playback (no Gabo impersonation)
   media_keys.rs  Global media-key shortcuts (Play/Pause, Next, Prev)
   state.rs       Central AppState, TokenStore, PlaybackState
-  commands.rs    Tauri command layer
+  commands/      Tauri command layer, split by domain (session, playback,
+                 library, discovery, jams)
   webapi.rs      Thin Web API HTTP client
   jams/          Spotify Jam (social-connect v2) — see README_jams.md
   spotify/       Pathfinder GraphQL client + Home, DJ (Lexicon), concerts,

@@ -153,8 +153,9 @@ Consequences that bite:
   session, but not assumed impossible), `write_protected` falls back to
   plaintext rather than losing the session, and logs a warning.
 
-`establish()` in `commands.rs` is where the two tokens diverge: the Web API
-token goes to `/me` and `TokenStore`; the *streaming* token goes to librespot.
+`establish()` in `commands/session.rs` is where the two tokens diverge: the Web
+API token goes to `/me` and `TokenStore`; the *streaming* token goes to
+librespot.
 
 The Client ID is manageable after setup: `get_login_info` returns the ID itself
 plus `client_id_from_env`, and Settings edits or clears it (`clear_client_id`).
@@ -216,11 +217,23 @@ stored refresh tokens on a 2/6/15/45 s backoff. Two things make this safe:
 
 ### Adding a command needs three edits
 
-`#[tauri::command]` in `commands.rs`, the identifier in `generate_handler![]` in
-`lib.rs`, and a wrapper in `src/lib/api.ts`. Missing the second or third fails
-at **runtime** ("command not found"), never at compile time. Event name
-constants are likewise duplicated between `state::events` and `api.ts` with
-nothing enforcing the match.
+`#[tauri::command]` in the right `commands/*.rs` domain file (`session.rs`,
+`playback.rs`, `library.rs`, `discovery.rs`, or `jams.rs` — see
+`commands/mod.rs`'s module doc for which is which; `commands/mod.rs` re-exports
+all of them, so `lib.rs` and callers still just say `commands::whatever`), the
+identifier in `generate_handler![]` in `lib.rs`, and a wrapper in
+`src/lib/api.ts`. Missing the second or third used to fail only at **runtime**
+("command not found"), never at compile time.
+
+That gap is now caught by a test: `commands::registration_parity_tests` in
+`commands/mod.rs` reads `lib.rs` and `src/lib/api.ts` as text and asserts every
+`generate_handler!` entry has a matching `invoke("...")` call site in `api.ts`
+and vice versa, plus a third test asserting `state::events`' string values
+match `api.ts`'s `EVENT_*` constants. Deliberately text-based rather than a
+build-time macro — cheap, and it runs with every `cargo test --lib`. Its
+limits: it cannot see through a command name built from a variable (neither
+side does that today) and it does not check argument shapes, only that both
+sides agree on which command/event names exist.
 
 ### serde direction hazard
 
