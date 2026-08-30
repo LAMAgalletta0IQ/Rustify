@@ -1,6 +1,6 @@
 [package]
 name = "rustify"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight native Spotify client"
 edition = "2021"
 rust-version = "1.82"
@@ -16,8 +16,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
-# Debug-only automation bridge; gated behind `cfg(debug_assertions)` in lib.rs.
-tauri-plugin-mcp-bridge = "0.12"
+# Debug-only automation bridge; gated behind `cfg(debug_assertions)` in lib.rs
+# AND the `mcp-bridge` Cargo feature (off by default), so it is absent from
+# the default/release dependency graph entirely, not just inactive at runtime.
+tauri-plugin-mcp-bridge = { version = "0.12", optional = true }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -65,6 +67,15 @@ librespot = { git = "https://github.com/librespot-org/librespot.git", rev = "b5f
 librespot-oauth = { git = "https://github.com/librespot-org/librespot.git", rev = "b5f4631f950068b9521c61fa2255171c97568a3c", default-features = false, features = [
     "native-tls",
 ] }
+
+[features]
+default = []
+# Enables the tauri-mcp automation bridge for driving/screenshotting the UI
+# from outside during development. Off by default so the dependency (and its
+# unauthenticated loopback control channel) is absent from ordinary and
+# release builds. Use `cargo check --no-default-features --features mcp-bridge`
+# or `npm run tauri dev -- --features mcp-bridge` to enable it locally.
+mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
 
 [dev-dependencies]
 # Only used by examples/jam_demo.rs to show the module's tracing output.

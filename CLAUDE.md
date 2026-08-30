@@ -349,3 +349,22 @@ frosted shell over a Windows 11 Acrylic backdrop. Consequences:
 - **Password login is impossible.** `Credentials::with_password` still exists in
   librespot 0.8 and compiles, but Spotify disabled it server-side in July 2024.
   OAuth is the only route.
+- **Version bumps touch three files.** `package.json`, `src-tauri/Cargo.toml`,
+  and `src-tauri/tauri.conf.json` all carry an independent `version` field and
+  none of them derive from another — update all three together or the build,
+  the User-Agent (`webapi.rs`'s `rustify/{CARGO_PKG_VERSION}`), and the
+  installer disagree on what shipped.
+- **`tauri-plugin-mcp-bridge` is opt-in via the `mcp-bridge` Cargo feature**,
+  off by default, so it is absent from the default/release dependency graph
+  (`cargo tree --no-default-features` shows no `tauri-plugin-mcp-bridge`), not
+  merely inactive. `lib.rs` only registers the plugin under
+  `cfg(all(debug_assertions, feature = "mcp-bridge"))`. To use it locally:
+  `cp src-tauri/capabilities/mcp-bridge.json.example src-tauri/capabilities/mcp-bridge.json`,
+  then `cargo check --no-default-features --features mcp-bridge` (or the
+  equivalent `tauri dev` invocation). Tauri capability files are static JSON
+  validated against the permission schema of whatever plugins are actually
+  compiled in — leaving `mcp-bridge.json` in place for a build *without* the
+  feature fails with `Permission mcp-bridge:default not found`, which is why
+  the real file is gitignored and only the `.example` template is committed.
+  Delete `capabilities/mcp-bridge.json` again before building without the
+  feature.

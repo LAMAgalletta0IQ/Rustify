@@ -13,7 +13,6 @@
     "core:window:allow-is-fullscreen",
     "core:window:allow-set-fullscreen",
     "core:window:allow-close",
-    "opener:default",
-    "mcp-bridge:default"
+    "opener:default"
   ]
 }

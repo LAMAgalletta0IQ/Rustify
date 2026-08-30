@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mcp-bridge",
+  "description": "Grants the tauri-mcp automation-bridge permission. NOT checked in by default — see CLAUDE.md's mcp-bridge section. Tauri validates capability files against the permission schemas of the plugins actually compiled in, so this file must only exist while building with `--features mcp-bridge`; leaving it in place for a default/no-features build fails cargo check with 'Permission mcp-bridge:default not found'.",
+  "windows": ["main"],
+  "permissions": ["mcp-bridge:default"]
+}

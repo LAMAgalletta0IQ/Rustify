@@ -90,10 +90,13 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build());
 
     // Automation bridge for tauri-mcp, so the UI can be driven and screenshotted
-    // from outside. Debug-only — it never reaches a release build. Bound to
-    // loopback rather than the default 0.0.0.0: it is an unauthenticated
-    // control channel and has no business being reachable from the network.
-    #[cfg(debug_assertions)]
+    // from outside. Debug-only and behind the `mcp-bridge` Cargo feature (off
+    // by default) — the dependency itself is `optional = true`, so without the
+    // feature it is compiled into neither the binary nor the dependency graph,
+    // not merely inactive at runtime. Bound to loopback rather than the default
+    // 0.0.0.0: it is an unauthenticated control channel and has no business
+    // being reachable from the network.
+    #[cfg(all(debug_assertions, feature = "mcp-bridge"))]
     {
         builder = builder.plugin(
             tauri_plugin_mcp_bridge::Builder::new()

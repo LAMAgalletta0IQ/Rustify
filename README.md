@@ -12,12 +12,16 @@ play the free, ad-supported tier.
 
 ## Prerequisites
 
-| Requirement | Status on this machine |
-| --- | --- |
-| MSVC build tools (VS 2022/2026, "Desktop development with C++") | ✅ present |
-| WebView2 runtime | ✅ present (151.x) |
-| Node.js 18+ | ✅ present (24.x) |
-| Rust (MSVC toolchain) | ✅ present (1.97.1) |
+| Requirement | Minimum version | Check with |
+| --- | --- | --- |
+| Windows | 10 1903+ / 11 | `winver` |
+| MSVC build tools (VS 2022+, "Desktop development with C++") | any recent | — |
+| WebView2 runtime | any evergreen build | usually preinstalled on Windows 11 |
+| Node.js | 18+ | `node --version` |
+| Rust (MSVC toolchain) | 1.82 (matches `Cargo.toml`'s `rust-version`) | `rustc --version` |
+
+This project targets Windows only — see `CLAUDE.md` for why (Acrylic window
+effects, DPAPI credential storage, NSIS-only bundling).
 
 ## Setup
 
@@ -191,27 +195,18 @@ These are upstream gaps, flagged rather than guessed at:
 - **`isActiveDevice`** is inferred from player events rather than read
   directly; librespot exposes no explicit "am I active" flag.
 
-## Measured footprint
+## Memory footprint
 
-Taken on this machine, 2026-08-17, release build — **predates the Jam/DJ/
-Home/lyrics/friends/profile/telemetry/audio-capability work below**, all of
-which add dependencies and background tasks. Re-measure before quoting this
-number for the current build.
-
-| Idle | Rustify | Official client |
-| --- | --- | --- |
-| Processes | 7 (1 Rust + 6 WebView2) | 7 |
-| Private (commit) | **157 MB** | 1442 MB |
-| Working set | 347 MB | 818 MB |
-
-**Not apples-to-apples**: Rustify was on the login screen, the official
-client was logged in with a home feed rendered. Redo this with both logged in
-and playing before quoting a ratio.
-
-The meaningful breakdown: the Rust process is **5.9 MB private / 27.5 MB
-working set**. WebView2 accounts for ~151 MB of the 157 MB. The native side is
-effectively free; the webview is the floor for any HTML-based UI, so further
-memory work means shrinking or replacing the webview, not optimising Rust.
+Not actively measured — the one comparison table this README had was taken on
+the login screen against a fully-logged-in official client, predates several
+features that add background tasks, and was removed as a stale, misleading
+number rather than kept and re-measured. The durable insight from that
+measurement still holds structurally: the native Rust process is a few MB of
+private memory, and WebView2 — one Rust process plus several WebView2
+processes, same shape as any Tauri app — is the actual memory floor. Further
+memory work means shrinking or replacing the webview, not optimising the Rust
+side — and replacing the webview is explicitly out of scope (months of native
+UI work to reclaim memory the OS already shares across WebView2 processes).
 
 ## Manual test checklist
 

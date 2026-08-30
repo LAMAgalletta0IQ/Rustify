@@ -26,6 +26,12 @@ Rustify-main.zip
 # Scratch state for long-running agent work sessions.
 .agent-work/
 
+# Local-only mcp-bridge capability grant. The committed template is
+# capabilities/mcp-bridge.json.example — see CLAUDE.md's mcp-bridge section.
+# This file must not exist for a default (no-features) build; cargo check
+# fails validation if it is present without `--features mcp-bridge`.
+src-tauri/capabilities/mcp-bridge.json
+
 # rust-analyzer's out-of-tree build cache, when it lands at the workspace
 # root instead of src-tauri/target/.
 /target/
