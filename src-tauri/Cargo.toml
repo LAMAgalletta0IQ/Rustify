@@ -75,6 +75,14 @@ windows = { version = "0.62", features = [
     "Win32_Security_Cryptography",
     "Win32_Foundation",
 ] }
+# Generates src/lib/generated/*.ts from the #[derive(TS)] boundary types
+# (PlaybackState, AuthState, TrackInfo, Device, ConnectionStatus,
+# StreamQuality) when built with `--features ts-rs-export`. The derive itself
+# lives on real struct definitions (not test-only code), so this has to be a
+# regular optional dependency rather than a dev-dependency; gating it behind
+# a feature (like `mcp-bridge`) still keeps it out of the default/release
+# dependency graph. See CLAUDE.md and `npm run gen:types`.
+ts-rs = { version = "12", optional = true }
 
 [features]
 default = []
@@ -84,6 +92,8 @@ default = []
 # release builds. Use `cargo check --no-default-features --features mcp-bridge`
 # or `npm run tauri dev -- --features mcp-bridge` to enable it locally.
 mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
+# See the ts-rs dependency comment above.
+ts-rs-export = ["dep:ts-rs"]
 
 [dev-dependencies]
 # Only used by examples/jam_demo.rs to show the module's tracing output.

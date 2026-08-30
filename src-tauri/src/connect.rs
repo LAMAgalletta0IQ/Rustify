@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+#[cfg(feature = "ts-rs-export")]
+use ts_rs::TS;
 
 use crate::error::AppResult;
 use crate::webapi::WebApi;
@@ -10,7 +12,12 @@ use crate::webapi::WebApi;
 /// "missing field `isActive`" — so the rename is restricted to serialisation
 /// and deserialisation keeps the wire names.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all(serialize = "camelCase"))]
+#[cfg_attr(
+    feature = "ts-rs-export",
+    ts(export, export_to = "../../src/lib/generated/", rename_all = "camelCase")
+)]
 pub struct Device {
     pub id: Option<String>,
     pub name: String,

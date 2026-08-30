@@ -10,6 +10,8 @@ use librespot::playback::convert::Converter;
 use librespot::playback::decoder::AudioPacket;
 use librespot::playback::{NUM_CHANNELS, SAMPLE_RATE};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ts-rs-export")]
+use ts_rs::TS;
 
 use crate::error::{AppError, AppResult};
 
@@ -21,7 +23,9 @@ const MIN_PREAMP_DB: f32 = -12.0;
 const MAX_PREAMP_DB: f32 = 0.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
 pub enum StreamQuality {
     /// Uses librespot's stable default. The installed version does not expose
     /// a bandwidth-adaptive selector, so this currently resolves to 160 kbps.

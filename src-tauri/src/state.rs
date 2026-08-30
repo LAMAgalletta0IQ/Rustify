@@ -5,6 +5,8 @@ use librespot::connect::Spirc;
 use librespot::core::session::Session;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex, RwLock};
+#[cfg(feature = "ts-rs-export")]
+use ts_rs::TS;
 
 use crate::audio::{AudioRuntime, StreamQuality};
 use crate::webapi::WebApi;
@@ -20,7 +22,9 @@ pub mod events {
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
 pub enum ConnectionStatus {
     #[default]
     Disconnected,
@@ -30,7 +34,9 @@ pub enum ConnectionStatus {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
 pub struct TrackInfo {
     pub uri: String,
     pub name: String,
@@ -47,7 +53,9 @@ pub struct TrackInfo {
 /// Deliberately flat and cheap to clone: it is serialised on every position
 /// correction, and the target hardware is a Pentium.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
 pub struct PlaybackState {
     pub is_playing: bool,
     pub is_loading: bool,
@@ -83,8 +91,10 @@ pub struct PlaybackState {
     /// reported position — normally 0, from the start of the track — and reset
     /// the UI's clock while audio kept playing.
     #[serde(skip)]
+    #[cfg_attr(feature = "ts-rs-export", ts(skip))]
     pub position_base_ms: u32,
     #[serde(skip)]
+    #[cfg_attr(feature = "ts-rs-export", ts(skip))]
     pub position_at: Option<std::time::Instant>,
 }
 
@@ -114,7 +124,9 @@ impl PlaybackState {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs-export", derive(TS))]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-rs-export", ts(export, export_to = "../../src/lib/generated/"))]
 pub struct AuthState {
     pub logged_in: bool,
     pub display_name: Option<String>,

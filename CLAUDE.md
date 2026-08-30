@@ -295,6 +295,48 @@ request. Read that line before theorising; it is how the search cap was found.
 Note that Spotify answers a malformed `Authorization` header with **400**, not
 401.
 
+## Generated TypeScript types (ts-rs)
+
+`src/lib/generated/*.ts` — `PlaybackState`, `AuthState`, `TrackInfo`, `Device`,
+`ConnectionStatus`, `StreamQuality` — are generated from their Rust
+`#[derive(TS)]` definitions (`state.rs`, `connect.rs`, `audio/mod.rs`) instead
+of hand-mirrored in `src/lib/types.ts`. `types.ts` re-exports them
+(`export type { PlaybackState } from "./generated/PlaybackState";`) so every
+existing `import type { PlaybackState } from "./types"` elsewhere in the
+frontend kept working with zero call-site changes.
+
+- `npm run gen:types` regenerates them (`cargo test --features ts-rs-export
+  --lib export` under the hood).
+- `npm run check:types` regenerates into a scratch state and fails
+  (`git diff --exit-code`) if the committed files would change — the drift
+  check for "someone edited the Rust struct and forgot to regenerate."
+- `ts-rs` is an **optional** regular dependency behind the `ts-rs-export`
+  Cargo feature (same pattern as `mcp-bridge`) — `derive(TS)` sits on real
+  struct definitions, not test-only code, so it cannot be a dev-dependency,
+  but it is still absent from the default/release build
+  (`#[cfg_attr(feature = "ts-rs-export", derive(TS))]` / `#[cfg(feature =
+  "ts-rs-export")] use ts_rs::TS;`).
+- `export_to` paths are **not** relative to `CARGO_MANIFEST_DIR` — ts-rs joins
+  them onto its own default export root (`./bindings`, relative to the
+  process's CWD at test time), so `"../../src/lib/generated/"` was needed to
+  land in the frontend tree at all; a single `"../src/lib/generated/"`
+  silently lands inside `src-tauri/src/lib/generated/` instead. If bindings
+  ever start appearing in the wrong place after a ts-rs upgrade, this is
+  the first thing to check.
+- **Only started with the core IPC-boundary types** (per the review that
+  prompted this). `src/lib/types.ts` still hand-mirrors everything else
+  (`AppErrorPayload`, `LoginInfo`, library/search/queue shapes, ...) —
+  `AppErrorPayload` in particular is not a good ts-rs candidate as-is: its
+  wire shape (`{ kind, message, retryAfter }`) comes from `AppError`'s
+  hand-written `impl Serialize`, not from the enum's natural derive shape, so
+  deriving `TS` directly on the `AppError` enum would generate the wrong
+  type. Extend coverage type-by-type, not all at once.
+- On Windows, generating requires an MSVC dev environment on `PATH` (`rc.exe`
+  for `tauri-build`'s icon embedding) — a plain Git Bash shell without VS
+  Build Tools loaded will fail with `Are you sure you have RC.EXE in your
+  $PATH`; run it from a Developer PowerShell/cmd instead, same as
+  `npm run tauri build`.
+
 ## Documentation vault
 
 `obsidian/` is a maintained Obsidian vault: `concepts/` for cross-cutting

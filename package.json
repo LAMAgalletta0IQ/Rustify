@@ -10,6 +10,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "gen:types": "cd src-tauri && cargo test --no-default-features --features ts-rs-export --lib export",
+    "check:types": "npm run gen:types && git add -N -- src/lib/generated && git diff --exit-code -- src/lib/generated",
     "tauri": "tauri"
   },
   "dependencies": {

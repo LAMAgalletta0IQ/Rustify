@@ -1,6 +1,8 @@
 // Mirrors the serde `camelCase` shapes in src-tauri/src/{state,library,search,
 // connect,queue}.rs. Keep in sync when the Rust types change.
 
+import type { StreamQuality } from "./generated/StreamQuality";
+
 export interface AppErrorPayload {
   kind:
     | "NotLoggedIn"
@@ -25,44 +27,16 @@ export interface AppErrorPayload {
   retryAfter?: number | null;
 }
 
-export interface TrackInfo {
-  uri: string;
-  name: string;
-  artists: string[];
-  album: string;
-  albumId: string | null;
-  albumUri: string | null;
-  coverUrl: string | null;
-  durationMs: number;
-}
-
-export interface PlaybackState {
-  isPlaying: boolean;
-  isLoading: boolean;
-  isActiveDevice: boolean;
-  track: TrackInfo | null;
-  positionMs: number;
-  durationMs: number;
-  /** librespot scale: 0..=65535 */
-  volume: number;
-  shuffle: boolean;
-  repeatContext: boolean;
-  repeatTrack: boolean;
-  contextUri: string | null;
-  activeDevice: Device | null;
-  availableDevices: Device[];
-  connectionStatus: "disconnected" | "connecting" | "connected" | "recovering";
-  audioQuality: StreamQuality;
-  audioQualityLabel: string;
-}
-
-export interface AuthState {
-  loggedIn: boolean;
-  displayName: string | null;
-  userId: string | null;
-  product: string | null;
-  avatarUrl: string | null;
-}
+// TrackInfo, PlaybackState, ConnectionStatus, AuthState, Device and
+// StreamQuality are generated from their #[derive(TS)] Rust definitions (see
+// src-tauri/src/state.rs, connect.rs, audio/mod.rs and CLAUDE.md's ts-rs
+// section) rather than hand-mirrored here. Run `npm run gen:types` after
+// changing one of those Rust structs; `npm run check:types` fails if the
+// committed output has drifted from what the Rust side would generate.
+export type { TrackInfo } from "./generated/TrackInfo";
+export type { PlaybackState } from "./generated/PlaybackState";
+export type { ConnectionStatus } from "./generated/ConnectionStatus";
+export type { AuthState } from "./generated/AuthState";
 
 /** Shape of the login flow, from `get_login_info`. */
 export interface LoginInfo {
@@ -108,7 +82,7 @@ export interface AppSettings {
   friendsPanelOpen: boolean;
 }
 
-export type StreamQuality = "automatic" | "low" | "normal" | "veryHigh";
+export type { StreamQuality } from "./generated/StreamQuality";
 
 export interface EqualizerPreset {
   id: string;
@@ -140,14 +114,7 @@ export interface AudioStatus {
   lastError: string | null;
 }
 
-export interface Device {
-  id: string | null;
-  name: string;
-  type: string;
-  isActive: boolean;
-  isRestricted: boolean;
-  volumePercent: number | null;
-}
+export type { Device } from "./generated/Device";
 
 export interface TrackSummary {
   uri: string;
