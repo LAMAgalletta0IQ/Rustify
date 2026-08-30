@@ -137,6 +137,21 @@ Consequences that bite:
   was granted**, not the current list, so tokens from before that lack it and
   only an interactive re-login adds it. `library::update_playlist_image`
   rewrites the resulting 403 to say so.
+- **`tokens.json` is DPAPI-encrypted, bound to the current Windows user.**
+  `save_stored_tokens`/`load_stored_tokens` wrap a private `auth::dpapi`
+  submodule (`CryptProtectData`/`CryptUnprotectData`, no
+  `CRYPTPROTECT_LOCAL_MACHINE` flag) around the same JSON shape as before —
+  the merge-preserve behaviour above is unchanged, it just now reads and
+  writes through DPAPI instead of `std::fs` directly. A pre-encryption
+  plaintext file is migrated in place the first time `load_stored_tokens`
+  reads it (parses as JSON, then immediately re-saves encrypted), so an
+  existing install upgrades silently with **no forced re-login**. Anything
+  `CryptUnprotectData` rejects — a corrupted file, one copied from another
+  machine, one from another Windows account — and that also fails to parse as
+  plaintext JSON degrades to "no stored tokens" (`None`), never a panic. If
+  `CryptProtectData` itself fails on save (undocumented for an interactive
+  session, but not assumed impossible), `write_protected` falls back to
+  plaintext rather than losing the session, and logs a warning.
 
 `establish()` in `commands.rs` is where the two tokens diverge: the Web API
 token goes to `/me` and `TokenStore`; the *streaming* token goes to librespot.

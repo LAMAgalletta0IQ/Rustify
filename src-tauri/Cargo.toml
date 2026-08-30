@@ -67,6 +67,14 @@ librespot = { git = "https://github.com/librespot-org/librespot.git", rev = "b5f
 librespot-oauth = { git = "https://github.com/librespot-org/librespot.git", rev = "b5f4631f950068b9521c61fa2255171c97568a3c", default-features = false, features = [
     "native-tls",
 ] }
+# DPAPI (CryptProtectData/CryptUnprotectData) for encrypting tokens.json at
+# rest, bound to the current Windows user. Used only from auth.rs. The app is
+# Windows-only already (Acrylic window effects, NSIS bundling), so this adds
+# no new platform constraint.
+windows = { version = "0.62", features = [
+    "Win32_Security_Cryptography",
+    "Win32_Foundation",
+] }
 
 [features]
 default = []

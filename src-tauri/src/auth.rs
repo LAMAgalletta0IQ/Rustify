@@ -429,9 +429,130 @@ fn tokens_path(data_dir: &Path) -> PathBuf {
     data_dir.join("tokens.json")
 }
 
+/// Windows DPAPI wrapping for `tokens.json`, bound to the current Windows
+/// user profile — no `CRYPTPROTECT_LOCAL_MACHINE` flag, so a copy of the file
+/// on another machine, or read under another account on this one, cannot be
+/// decrypted. Deliberately kept as a private submodule of `auth.rs`: nothing
+/// outside this file needs to know tokens are encrypted at rest, and the
+/// blob format (raw DPAPI bytes, no envelope) is an implementation detail of
+/// [`load_stored_tokens`]/[`save_stored_tokens`].
+mod dpapi {
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{
+        CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    };
+
+    /// Encrypts `data`. `None` on any Windows API failure — callers treat
+    /// "could not protect" as a reason to fall back to plaintext, never as a
+    /// panic; DPAPI has no documented failure mode for an ordinary
+    /// interactive user session, but this is credential storage, not a place
+    /// to assume that.
+    pub fn protect(data: &[u8]) -> Option<Vec<u8>> {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: u32::try_from(data.len()).ok()?,
+            pbData: data.as_ptr() as *mut u8,
+        };
+        let mut output = CRYPT_INTEGER_BLOB::default();
+        unsafe {
+            CryptProtectData(
+                &input,
+                windows::core::PCWSTR::null(),
+                None,
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+            .ok()?;
+        }
+        Some(take_blob(output))
+    }
+
+    /// Decrypts a blob previously produced by [`protect`]. `None` on any
+    /// failure — a corrupted file, one from another user account, and one
+    /// from another machine all degrade the same way: no stored tokens,
+    /// never a panic.
+    pub fn unprotect(data: &[u8]) -> Option<Vec<u8>> {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: u32::try_from(data.len()).ok()?,
+            pbData: data.as_ptr() as *mut u8,
+        };
+        let mut output = CRYPT_INTEGER_BLOB::default();
+        unsafe {
+            CryptUnprotectData(
+                &input,
+                None,
+                None,
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+            .ok()?;
+        }
+        Some(take_blob(output))
+    }
+
+    /// Copies a DPAPI output blob into an owned `Vec` and frees the buffer
+    /// Windows allocated for it. Both `CryptProtectData` and
+    /// `CryptUnprotectData` require the caller to `LocalFree` `pbData`.
+    fn take_blob(blob: CRYPT_INTEGER_BLOB) -> Vec<u8> {
+        let bytes = if blob.pbData.is_null() || blob.cbData == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(blob.pbData, blob.cbData as usize) }.to_vec()
+        };
+        if !blob.pbData.is_null() {
+            unsafe {
+                let _ = LocalFree(Some(HLOCAL(blob.pbData as *mut _)));
+            }
+        }
+        bytes
+    }
+}
+
+/// Serialises and DPAPI-encrypts `tokens`, writing the ciphertext to
+/// `tokens.json`. Falls back to plaintext (logging a warning) if DPAPI
+/// itself fails, so a Windows API hiccup degrades to the pre-encryption
+/// behaviour rather than losing the session.
+fn write_protected(data_dir: &Path, tokens: &StoredTokens) -> AppResult<()> {
+    std::fs::create_dir_all(data_dir)?;
+    let plaintext = serde_json::to_vec(tokens)
+        .map_err(|e| AppError::Other(format!("failed to serialise tokens: {e}")))?;
+    match dpapi::protect(&plaintext) {
+        Some(ciphertext) => std::fs::write(tokens_path(data_dir), ciphertext)?,
+        None => {
+            log::warn!("DPAPI protect failed; writing tokens.json as plaintext");
+            std::fs::write(tokens_path(data_dir), plaintext)?;
+        }
+    }
+    Ok(())
+}
+
+/// Loads and decrypts `tokens.json`, migrating a pre-encryption plaintext
+/// file in place.
+///
+/// Tries DPAPI first, since that is the format every write after this change
+/// produces. On failure — which includes "this file is still the old
+/// plaintext format" — falls back to parsing the raw bytes as JSON directly.
+/// A successful fallback parse re-saves the file encrypted immediately, so an
+/// existing install migrates silently on the next read with no forced
+/// re-login; a failed fallback parse means the file is genuinely corrupted or
+/// foreign, and this returns `None` exactly as it would for a missing file,
+/// never a panic.
 pub fn load_stored_tokens(data_dir: &Path) -> Option<StoredTokens> {
-    let raw = std::fs::read_to_string(tokens_path(data_dir)).ok()?;
-    serde_json::from_str(&raw).ok()
+    let raw = std::fs::read(tokens_path(data_dir)).ok()?;
+
+    if let Some(plaintext) = dpapi::unprotect(&raw) {
+        return serde_json::from_slice(&plaintext).ok();
+    }
+
+    let tokens: StoredTokens = serde_json::from_slice(&raw).ok()?;
+    log::info!("migrating tokens.json from plaintext to DPAPI-encrypted storage");
+    if let Err(e) = write_protected(data_dir, &tokens) {
+        log::warn!("could not re-save tokens.json encrypted; still usable as plaintext: {e}");
+    }
+    Some(tokens)
 }
 
 /// Writes the token file, **never erasing a Web API refresh token it does not
@@ -459,10 +580,7 @@ pub fn save_stored_tokens(data_dir: &Path, tokens: &StoredTokens) -> AppResult<(
         }
     }
 
-    let raw = serde_json::to_string(&tokens)
-        .map_err(|e| AppError::Other(format!("failed to serialise tokens: {e}")))?;
-    std::fs::write(tokens_path(data_dir), raw)?;
-    Ok(())
+    write_protected(data_dir, &tokens)
 }
 
 pub fn clear_stored_tokens(data_dir: &Path) {
@@ -1239,6 +1357,115 @@ mod token_persistence_tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("tokens.json"), b"{not json").unwrap();
         assert!(load_stored_tokens(dir.path()).is_none());
+    }
+
+    /// tokens.json is not readable JSON at all once `save_stored_tokens` has
+    /// touched it — confirms it is genuinely being DPAPI-encrypted and not
+    /// just written through unchanged.
+    #[test]
+    fn saved_tokens_file_is_not_plaintext_json() {
+        let dir = tempfile::tempdir().unwrap();
+        save_stored_tokens(
+            dir.path(),
+            &StoredTokens {
+                refresh_token: "streaming-1".into(),
+                webapi_refresh_token: Some("private-refresh".into()),
+            },
+        )
+        .unwrap();
+        let raw = std::fs::read(dir.path().join("tokens.json")).unwrap();
+        assert!(serde_json::from_slice::<StoredTokens>(&raw).is_err());
+        assert!(!String::from_utf8_lossy(&raw).contains("private-refresh"));
+    }
+
+    #[test]
+    fn dpapi_protect_unprotect_roundtrips() {
+        let plaintext = b"a secret refresh token";
+        let ciphertext =
+            dpapi::protect(plaintext).expect("DPAPI protect should succeed for the current user");
+        assert_ne!(ciphertext, plaintext);
+        let roundtripped = dpapi::unprotect(&ciphertext)
+            .expect("DPAPI unprotect should succeed for the same user/machine");
+        assert_eq!(roundtripped, plaintext);
+    }
+
+    #[test]
+    fn dpapi_unprotect_rejects_garbage_input() {
+        assert!(dpapi::unprotect(b"not a dpapi blob").is_none());
+    }
+
+    /// The migration path described on [`load_stored_tokens`]: an existing
+    /// plaintext install must keep working (no forced re-login) and end up
+    /// encrypted on disk after being read once.
+    #[test]
+    fn a_plaintext_tokens_file_is_migrated_to_encrypted_storage_on_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let plaintext_tokens = StoredTokens {
+            refresh_token: "streaming-1".into(),
+            webapi_refresh_token: Some("private-refresh".into()),
+        };
+        // Bypass save_stored_tokens to write the pre-encryption plaintext
+        // format directly, simulating an install from before this change.
+        std::fs::write(
+            dir.path().join("tokens.json"),
+            serde_json::to_vec(&plaintext_tokens).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_stored_tokens(dir.path()).expect("plaintext file should still load");
+        assert_eq!(loaded.refresh_token, "streaming-1");
+        assert_eq!(
+            loaded.webapi_refresh_token.as_deref(),
+            Some("private-refresh")
+        );
+
+        let raw_after = std::fs::read(dir.path().join("tokens.json")).unwrap();
+        assert!(serde_json::from_slice::<StoredTokens>(&raw_after).is_err());
+        assert!(dpapi::unprotect(&raw_after).is_some());
+
+        // Re-reading the now-encrypted file must return identical tokens —
+        // the migration did not lose or alter anything.
+        let reloaded = load_stored_tokens(dir.path()).unwrap();
+        assert_eq!(reloaded.refresh_token, loaded.refresh_token);
+        assert_eq!(reloaded.webapi_refresh_token, loaded.webapi_refresh_token);
+    }
+
+    /// Merge-preserve behaviour (see `save_stored_tokens`'s doc comment)
+    /// still holds once every write round-trips through DPAPI: a plaintext
+    /// install with a private refresh token, migrated on read, must still
+    /// keep that token through a subsequent degraded (`None`) save.
+    #[test]
+    fn merge_preservation_holds_across_a_plaintext_to_encrypted_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("tokens.json"),
+            serde_json::to_vec(&StoredTokens {
+                refresh_token: "streaming-1".into(),
+                webapi_refresh_token: Some("private-refresh".into()),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        // First touch migrates the file to encrypted storage.
+        load_stored_tokens(dir.path()).unwrap();
+
+        // A degraded session then saves with no Web API refresh token.
+        save_stored_tokens(
+            dir.path(),
+            &StoredTokens {
+                refresh_token: "streaming-2".into(),
+                webapi_refresh_token: None,
+            },
+        )
+        .unwrap();
+
+        let stored = load_stored_tokens(dir.path()).unwrap();
+        assert_eq!(stored.refresh_token, "streaming-2");
+        assert_eq!(
+            stored.webapi_refresh_token.as_deref(),
+            Some("private-refresh")
+        );
     }
 }
 
