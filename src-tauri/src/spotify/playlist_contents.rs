@@ -31,7 +31,9 @@ pub struct PlaylistContentsPage {
 
 pub fn variables(playlist_id: &str, limit: u32, offset: u32) -> AppResult<Value> {
     if playlist_id.is_empty() || !playlist_id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
-        return Err(AppError::BadRequest("invalid Spotify playlist ID".to_string()));
+        return Err(AppError::BadRequest(
+            "invalid Spotify playlist ID".to_string(),
+        ));
     }
     Ok(json!({
         "uri": format!("spotify:playlist:{playlist_id}"),
@@ -69,21 +71,24 @@ fn artists(track: &Value) -> (Vec<String>, Vec<String>) {
                         .and_then(|uri| uri.strip_prefix("spotify:artist:").map(ToOwned::to_owned));
                     Some((name, id))
                 })
-                .fold((Vec::new(), Vec::new()), |(mut names, mut ids), (name, id)| {
-                    names.push(name);
-                    if let Some(id) = id {
-                        ids.push(id);
-                    }
-                    (names, ids)
-                })
+                .fold(
+                    (Vec::new(), Vec::new()),
+                    |(mut names, mut ids), (name, id)| {
+                        names.push(name);
+                        if let Some(id) = id {
+                            ids.push(id);
+                        }
+                        (names, ids)
+                    },
+                )
         })
         .unwrap_or_default()
 }
 
 pub fn parse(data: &Value) -> AppResult<PlaylistContentsPage> {
-    let content = data
-        .pointer("/playlistV2/content")
-        .ok_or_else(|| AppError::Unavailable("playlist contents were absent from Pathfinder".to_string()))?;
+    let content = data.pointer("/playlistV2/content").ok_or_else(|| {
+        AppError::Unavailable("playlist contents were absent from Pathfinder".to_string())
+    })?;
     let items = content
         .get("items")
         .and_then(Value::as_array)

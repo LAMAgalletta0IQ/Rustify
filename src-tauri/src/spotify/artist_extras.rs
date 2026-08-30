@@ -32,7 +32,9 @@ pub fn parse_stats(data: &Value) -> ArtistStats {
         monthly_listeners: stats
             .and_then(|s| s.get("monthlyListeners"))
             .and_then(Value::as_u64),
-        followers: stats.and_then(|s| s.get("followers")).and_then(Value::as_u64),
+        followers: stats
+            .and_then(|s| s.get("followers"))
+            .and_then(Value::as_u64),
     }
 }
 
@@ -45,11 +47,14 @@ fn text(value: Option<&Value>) -> Option<String> {
 }
 
 fn image(value: &Value) -> Option<String> {
-    ["/coverArt/sources/0/url", "/albumOfTrack/coverArt/sources/0/url"]
-        .iter()
-        .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
-        .filter(|url| url.starts_with("https://"))
-        .map(ToOwned::to_owned)
+    [
+        "/coverArt/sources/0/url",
+        "/albumOfTrack/coverArt/sources/0/url",
+    ]
+    .iter()
+    .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+    .filter(|url| url.starts_with("https://"))
+    .map(ToOwned::to_owned)
 }
 
 fn artist_names_and_ids(track: &Value) -> (Vec<String>, Vec<String>) {
@@ -60,18 +65,22 @@ fn artist_names_and_ids(track: &Value) -> (Vec<String>, Vec<String>) {
             items
                 .iter()
                 .filter_map(|artist| {
-                    let name = text(artist.pointer("/profile/name")).or_else(|| text(artist.get("name")))?;
+                    let name = text(artist.pointer("/profile/name"))
+                        .or_else(|| text(artist.get("name")))?;
                     let id = text(artist.get("uri"))
                         .and_then(|uri| uri.strip_prefix("spotify:artist:").map(ToOwned::to_owned));
                     Some((name, id))
                 })
-                .fold((Vec::new(), Vec::new()), |(mut names, mut ids), (name, id)| {
-                    names.push(name);
-                    if let Some(id) = id {
-                        ids.push(id);
-                    }
-                    (names, ids)
-                })
+                .fold(
+                    (Vec::new(), Vec::new()),
+                    |(mut names, mut ids), (name, id)| {
+                        names.push(name);
+                        if let Some(id) = id {
+                            ids.push(id);
+                        }
+                        (names, ids)
+                    },
+                )
         })
         .unwrap_or_default()
 }

@@ -117,9 +117,8 @@ pub fn normalize_username(value: &str) -> AppResult<String> {
     let username: String = if let Some(value) = value.strip_prefix("spotify:user:") {
         value.to_string()
     } else if value.starts_with("https://") || value.starts_with("http://") {
-        let url = reqwest::Url::parse(value).map_err(|_| {
-            AppError::BadRequest("enter a valid Spotify profile URL".to_string())
-        })?;
+        let url = reqwest::Url::parse(value)
+            .map_err(|_| AppError::BadRequest("enter a valid Spotify profile URL".to_string()))?;
         if url.scheme() != "https"
             || !url
                 .host_str()
@@ -178,10 +177,8 @@ fn valid_artist(value: RawArtist) -> Option<ProfileArtist> {
 fn valid_relation(value: RawArtist) -> Option<ProfileArtist> {
     let uri = value.uri?.trim().to_string();
     let name = bounded(value.name?.as_str());
-    let valid_uri = matches!(
-        SpotifyUri::from_uri(&uri),
-        Ok(SpotifyUri::Artist { .. })
-    ) || (uri.starts_with("spotify:user:") && normalize_username(&uri).is_ok());
+    let valid_uri = matches!(SpotifyUri::from_uri(&uri), Ok(SpotifyUri::Artist { .. }))
+        || (uri.starts_with("spotify:user:") && normalize_username(&uri).is_ok());
     if !valid_uri || name.is_empty() {
         return None;
     }
@@ -205,7 +202,9 @@ fn valid_playlist(value: RawPlaylist) -> Option<ProfilePlaylist> {
         name,
         image_url: safe_image_url(value.image_url),
         owner_name: value.owner_name.as_deref().map(bounded),
-        owner_uri: value.owner_uri.filter(|uri| uri.starts_with("spotify:user:")),
+        owner_uri: value
+            .owner_uri
+            .filter(|uri| uri.starts_with("spotify:user:")),
         is_following: value.is_following,
     })
 }

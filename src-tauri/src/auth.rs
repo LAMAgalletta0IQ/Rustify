@@ -1295,7 +1295,10 @@ mod token_persistence_tests {
 
         let stored = load_stored_tokens(dir.path()).unwrap();
         assert_eq!(stored.refresh_token, "streaming-2");
-        assert_eq!(stored.webapi_refresh_token.as_deref(), Some("private-refresh"));
+        assert_eq!(
+            stored.webapi_refresh_token.as_deref(),
+            Some("private-refresh")
+        );
     }
 
     #[test]
@@ -1509,7 +1512,9 @@ mod grant_rejection_tests {
         assert!(!is_grant_rejected(&AppError::BadRequest(
             "invalid_grant".into()
         )));
-        assert!(!is_grant_rejected(&AppError::WebApi("invalid_grant".into())));
+        assert!(!is_grant_rejected(&AppError::WebApi(
+            "invalid_grant".into()
+        )));
         assert!(!is_grant_rejected(&AppError::SessionExpired));
     }
 }

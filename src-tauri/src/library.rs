@@ -376,8 +376,12 @@ pub async fn update_playlist_details(
     if body.is_empty() {
         return Ok(());
     }
-    api.put(token, &format!("/playlists/{playlist_id}"), Value::Object(body))
-        .await
+    api.put(
+        token,
+        &format!("/playlists/{playlist_id}"),
+        Value::Object(body),
+    )
+    .await
 }
 
 /// Spotify's documented ceiling for a playlist cover, in bytes of *base64*

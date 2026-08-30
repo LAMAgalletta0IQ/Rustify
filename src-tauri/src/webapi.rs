@@ -289,7 +289,10 @@ mod tests {
         assert_eq!(parse_retry_after(Some(" 12 ")), Some(12));
         // Spotify is documented to send a plain integer, never the HTTP-date
         // form, but a malformed value must degrade to None, not panic.
-        assert_eq!(parse_retry_after(Some("Wed, 21 Oct 2026 07:28:00 GMT")), None);
+        assert_eq!(
+            parse_retry_after(Some("Wed, 21 Oct 2026 07:28:00 GMT")),
+            None
+        );
         assert_eq!(parse_retry_after(Some("")), None);
         assert_eq!(parse_retry_after(None), None);
     }

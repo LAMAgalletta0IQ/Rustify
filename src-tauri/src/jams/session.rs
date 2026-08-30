@@ -545,7 +545,13 @@ pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
     if join_token.is_some()
         && string(
             &raw,
-            &["join_session_url", "joinSessionUrl", "joinUrl", "share_url", "shareUrl"],
+            &[
+                "join_session_url",
+                "joinSessionUrl",
+                "joinUrl",
+                "share_url",
+                "shareUrl",
+            ],
         )
         .filter(|url| is_shareable_web_url(url))
         .is_none()

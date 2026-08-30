@@ -72,9 +72,25 @@ const MAX_TAGS_PER_ARTIST: usize = 8;
 /// substrings because Spotify's tags are compounds ("melodic death metal",
 /// "uk drill", "hardcore punk") rather than a closed vocabulary.
 const INTENSE_TAGS: &[&str] = &[
-    "metal", "punk", "hardcore", "rock", "rap", "drill", "trap", "techno", "house", "edm",
-    "dubstep", "drum and bass", "breakcore", "hyperpop", "industrial", "grime", "electro",
-    "hardstyle", "phonk",
+    "metal",
+    "punk",
+    "hardcore",
+    "rock",
+    "rap",
+    "drill",
+    "trap",
+    "techno",
+    "house",
+    "edm",
+    "dubstep",
+    "drum and bass",
+    "breakcore",
+    "hyperpop",
+    "industrial",
+    "grime",
+    "electro",
+    "hardstyle",
+    "phonk",
 ];
 
 /// Genre-tag substrings read as low-energy / acoustic.
@@ -358,13 +374,15 @@ pub async fn listening_dna(
             id: "intensity",
             label: "Intensity",
             value: clamp(tag_share(&tags, INTENSE_TAGS)),
-            basis: "Share of your genre tags naming a high-energy scene (rock, metal, rap, techno…).",
+            basis:
+                "Share of your genre tags naming a high-energy scene (rock, metal, rap, techno…).",
         },
         DnaAxis {
             id: "mellow",
             label: "Mellow",
             value: clamp(tag_share(&tags, MELLOW_TAGS)),
-            basis: "Share of your genre tags naming an acoustic or ambient scene (folk, jazz, lo-fi…).",
+            basis:
+                "Share of your genre tags naming an acoustic or ambient scene (folk, jazz, lo-fi…).",
         },
         DnaAxis {
             id: "loyalty",
@@ -394,11 +412,7 @@ pub async fn listening_dna(
             })
             .collect()
     };
-    genres.sort_by(|a, b| {
-        b.weight
-            .cmp(&a.weight)
-            .then_with(|| a.name.cmp(&b.name))
-    });
+    genres.sort_by(|a, b| b.weight.cmp(&a.weight).then_with(|| a.name.cmp(&b.name)));
     genres.truncate(8);
 
     let artist_sample = artists.len() as u32;
