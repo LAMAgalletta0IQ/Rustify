@@ -468,6 +468,17 @@ pub(crate) fn member_from_value(raw: &Value, owner_id: Option<&str>) -> JamMembe
     }
 }
 
+/// True only for links a user can actually open or paste somewhere.
+///
+/// Deliberately scheme-based rather than a full URL parse: the failure being
+/// guarded against is Spotify handing back `hs://`/`hm://` internal endpoints,
+/// not a malformed https URL.
+fn is_shareable_web_url(url: &str) -> bool {
+    let url = url.trim();
+    let lower = url.to_ascii_lowercase();
+    (lower.starts_with("https://") || lower.starts_with("http://")) && url.len() > 8
+}
+
 /// Maps a v2/v3 social-connect session response onto the stable application
 /// model while retaining the untouched payload for newly introduced fields.
 pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
@@ -519,6 +530,14 @@ pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
             "link",
         ],
     )
+    // Several of those keys are speculative, and social-connect responses have
+    // been observed carrying Spotify's own internal transport URIs (`hm://`,
+    // `hs://`) under generically-named fields like `link`. Those are not
+    // shareable: pasted into a browser or a chat client they resolve to
+    // nothing. Only an http(s) URL is worth handing to the user, so anything
+    // else falls through to the constructed open.spotify.com form below —
+    // which is the shape that is actually confirmed to work.
+    .filter(|url| is_shareable_web_url(url))
     .or_else(|| {
         join_token
             .as_ref()
@@ -529,6 +548,7 @@ pub(crate) fn session_from_value(raw: Value) -> Result<JamSession, JamError> {
             &raw,
             &["join_session_url", "joinSessionUrl", "joinUrl", "share_url", "shareUrl"],
         )
+        .filter(|url| is_shareable_web_url(url))
         .is_none()
     {
         // Diagnostic only, not a functional problem: the constructed link
@@ -639,6 +659,39 @@ mod tests {
             session_from_value(json!({"active": true})),
             Err(JamError::DecodeMessage(_))
         ));
+    }
+
+    #[test]
+    fn discards_non_web_join_urls_and_constructs_a_shareable_one() {
+        // Spotify has been seen returning its own internal transport URIs
+        // under the generic `link`/`share_url` keys. Handing one of those to
+        // the user produces a "Copy link" that opens nothing anywhere.
+        for internal in ["hs://jam/token-1", "hm://social-connect/v2/token-1"] {
+            let session = session_from_value(json!({
+                "session_id": "session-1",
+                "join_session_token": "token-1",
+                "link": internal,
+            }))
+            .unwrap();
+            assert_eq!(
+                session.join_url.as_deref(),
+                Some("https://open.spotify.com/socialsession/token-1")
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_a_real_shortened_share_url() {
+        let session = session_from_value(json!({
+            "session_id": "session-1",
+            "join_session_token": "token-1",
+            "share_url": "https://spotify.link/abc123",
+        }))
+        .unwrap();
+        assert_eq!(
+            session.join_url.as_deref(),
+            Some("https://spotify.link/abc123")
+        );
     }
 
     #[test]

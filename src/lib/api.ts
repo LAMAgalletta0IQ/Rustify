@@ -36,6 +36,7 @@ import type {
   MusicVideoCapability,
   AudioCapability,
   EqualizerSettings,
+  ListeningDna,
 } from "./types";
 
 /** Tauri event names — must match `state::events` in Rust. */
@@ -67,6 +68,8 @@ export const getAuthState = () => invoke<AuthState>("get_auth_state");
 export const getLoginInfo = () => invoke<LoginInfo>("get_login_info");
 export const setClientId = (clientId: string) =>
   invoke<void>("set_client_id", { clientId });
+/** Forgets the saved Client ID. Does not sign out on its own. */
+export const clearClientId = () => invoke<void>("clear_client_id");
 export const login = () => invoke<AuthState>("login");
 export const startDeviceAuthorization = () =>
   invoke<DeviceAuthorization>("start_device_authorization");
@@ -151,6 +154,27 @@ export const getPlaylistTracks = (
   offset?: number,
 ) =>
   invoke<TrackSummary[]>("get_playlist_tracks", { playlistId, limit, offset });
+/** Rename / re-describe / re-scope a playlist. Omitted fields are left alone
+ * by Spotify, so pass only what changed. */
+export const updatePlaylistDetails = (
+  playlistId: string,
+  details: { name?: string; description?: string; public?: boolean },
+) =>
+  invoke<void>("update_playlist_details", {
+    playlistId,
+    name: details.name,
+    description: details.description,
+    public: details.public,
+  });
+
+/**
+ * Replace a playlist cover. `jpegBase64` is base64-encoded JPEG; a `data:` URL
+ * is accepted too. Spotify's ceiling is 256 KB *encoded*, and it only accepts
+ * JPEG — re-encode with `encodeCoverJpeg` rather than passing a raw file.
+ */
+export const updatePlaylistImage = (playlistId: string, jpegBase64: string) =>
+  invoke<void>("update_playlist_image", { playlistId, jpegBase64 });
+
 export const getSavedTracks = (limit?: number, offset?: number) =>
   invoke<TrackSummary[]>("get_saved_tracks", { limit, offset });
 export const getSavedAlbums = (limit?: number, offset?: number) =>
@@ -212,6 +236,12 @@ export const getTopTracks = (limit?: number) =>
   invoke<TrackSummary[]>("get_top_tracks", { limit });
 export const getTopArtists = (limit?: number) =>
   invoke<ArtistSummary[]>("get_top_artists", { limit });
+/** Taste profile for the Profile radar. `currentYear` is the webview's, so the
+ * freshness axis follows the user's calendar rather than UTC's. */
+export const getListeningDna = () =>
+  invoke<ListeningDna>("get_listening_dna", {
+    currentYear: new Date().getFullYear(),
+  });
 export const getPersonalizedHome = (limit = 10) =>
   invoke<HomeFeed>("get_personalized_home", {
     limit,

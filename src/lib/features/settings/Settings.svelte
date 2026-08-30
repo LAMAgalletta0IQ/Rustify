@@ -31,6 +31,81 @@
   let audioTimer: number | null = null;
   let audioRevision = 0;
 
+  // Spotify integration: the Client ID is editable in place rather than only
+  // replaceable by wiping the session. `clientDraft` is seeded once loginInfo
+  // arrives and then owned by the user until saved.
+  let clientDraft = $state("");
+  let clientSeeded = false;
+  let clientBusy = $state(false);
+  let clientNotice = $state<string | null>(null);
+  let clientError = $state<string | null>(null);
+  let signingOut = $state(false);
+
+  $effect(() => {
+    if (clientSeeded || !loginInfo) return;
+    clientSeeded = true;
+    clientDraft = loginInfo.clientId ?? "";
+  });
+
+  const clientDirty = $derived(
+    clientDraft.trim() !== (loginInfo?.clientId ?? "").trim(),
+  );
+  const clientLocked = $derived(loginInfo?.clientIdFromEnv === true);
+
+  async function refreshLoginInfo() {
+    loginInfo = await api.getLoginInfo();
+  }
+
+  /** Saving a different Client ID invalidates the current OAuth grant — the
+   * stored refresh token belongs to the *old* app — so the session has to end
+   * with it. Sign-out is therefore part of the action, not a follow-up the
+   * user has to remember. */
+  async function saveClientId() {
+    const next = clientDraft.trim();
+    if (!next || clientBusy) return;
+    clientBusy = true;
+    clientNotice = clientError = null;
+    try {
+      await api.setClientId(next);
+      await refreshLoginInfo();
+      await store.logout();
+      clientNotice = "Client ID saved. Sign in again to authorise the new app.";
+    } catch (error) {
+      clientError = store.handleError(error, false).message;
+    } finally {
+      clientBusy = false;
+    }
+  }
+
+  /** Clearing sends the app back to the first-run Setup screen, which is only
+   * reachable from a signed-out state. */
+  async function clearClientId() {
+    if (clientBusy) return;
+    clientBusy = true;
+    clientNotice = clientError = null;
+    try {
+      await api.clearClientId();
+      await refreshLoginInfo();
+      clientDraft = "";
+      await store.logout();
+      store.setupNeeded = true;
+    } catch (error) {
+      clientError = store.handleError(error, false).message;
+    } finally {
+      clientBusy = false;
+    }
+  }
+
+  async function signOut() {
+    if (signingOut) return;
+    signingOut = true;
+    try {
+      await store.run(() => store.logout());
+    } finally {
+      signingOut = false;
+    }
+  }
+
   const allPresets = $derived([...builtins, ...draft.equalizer.customPresets]);
   const presetOptions = $derived<SelectOption[]>(allPresets.map((preset) => ({
     value: preset.id, label: preset.name,
@@ -270,10 +345,45 @@
 
   <section><h2>Appearance</h2><label class="field click"><span><strong>Reduce ambient motion</strong><small>Also respects the operating system’s reduced-motion preference.</small></span><input type="checkbox" bind:checked={draft.reduceMotion} /></label></section>
   <section><h2>Storage</h2><label class="field"><span><strong>Audio cache limit</strong><small>Applied to the next playback session. Allowed range: 128–8192 MB.</small></span><span class="number-row"><input type="number" min="128" max="8192" step="128" bind:value={draft.cacheLimitMb} aria-label="Audio cache limit in megabytes" /><span>MB</span></span></label></section>
-  <section><h2>Spotify integration</h2><div class="field"><span><strong>{loginInfo?.privateClientId ? "Client ID configured" : "Client ID missing"}</strong><small>Web API requests use the Spotify app configured during setup. The client ID is not a secret.</small></span><button class="secondary" onclick={onReconfigure}>Replace integration</button></div><p class="notice">Replacing the integration signs out the current session so the new Spotify app can request its own OAuth grant.</p>
+  <section>
+    <h2>Spotify integration</h2>
+    <div class="stack">
+      <span><strong>{loginInfo?.privateClientId ? "Client ID configured" : "Client ID missing"}</strong><small>Web API requests use the Spotify app you registered. A Client ID is not a secret — it travels in the clear in every OAuth redirect and this flow uses PKCE with no client secret.</small></span>
+      <div class="client-row">
+        <input
+          bind:value={clientDraft}
+          spellcheck="false"
+          autocomplete="off"
+          maxlength="64"
+          placeholder="32-character Spotify Client ID"
+          aria-label="Spotify Web API Client ID"
+          disabled={clientLocked || clientBusy}
+        />
+        <button class="secondary" disabled={clientLocked || clientBusy || !clientDirty || !clientDraft.trim()} onclick={saveClientId}>{clientBusy ? "Working…" : "Save and re-authorise"}</button>
+        <button class="secondary" disabled={clientLocked || clientBusy || !loginInfo?.privateClientId} onclick={clearClientId}>Clear</button>
+      </div>
+      {#if clientLocked}
+        <p class="notice">{loginInfo?.clientIdEnv} is set in the environment, and it takes priority over the saved value — unset it to manage the Client ID here.</p>
+      {:else}
+        <p class="notice">Register the redirect URI <code>{loginInfo?.webapiRedirectUri ?? "…"}</code> against the app in Spotify’s dashboard. Saving a different ID signs the current session out, because the stored grant belongs to the previous app.</p>
+      {/if}
+      {#if clientNotice}<p class="ok" role="status">{clientNotice}</p>{/if}
+      {#if clientError}<p class="error" role="alert">{clientError}</p>{/if}
+      <div class="field"><span><strong>Full setup walkthrough</strong><small>Signs out and reopens the first-run screen that explains registering a Spotify app step by step.</small></span><button class="secondary" onclick={onReconfigure}>Replace integration</button></div>
+    </div>
     <div class="field"><span><strong>Playback history delivery {telemetry?.deliveryAvailable ? "available" : "unavailable"}</strong><small>{telemetry?.deliveryAvailable ? `Using ${telemetry.deliveryTransport}.` : (telemetry?.deliveryBlocker ?? "Checking Spotify telemetry capability…")}</small></span><span class="audit">{telemetry?.activePlaybacks ?? 0} active · {telemetry?.locallyRecorded ?? 0} audited</span></div>
   </section>
+
   <div class="actions"><button class="btn-primary" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save general settings"}</button>{#if saved}<span class="ok" role="status">Saved.</span>{/if}{#if localError}<span class="error" role="alert">{localError}</span>{/if}</div>
+
+  <!-- Account actions live at the bottom of Settings, not on the profile page.
+       A profile is a thing you browse — including other people’s — so a
+       destructive session action sitting under one you were only reading was
+       both easy to miss and easy to hit by accident. -->
+  <section class="danger-zone">
+    <h2>Account</h2>
+    <div class="field"><span><strong>Sign out</strong><small>Removes the stored OAuth tokens. App settings, the equalizer presets and the Spotify Client ID are kept.</small></span><button class="danger" disabled={signingOut} onclick={signOut}>{signingOut ? "Signing out…" : "Sign out"}</button></div>
+  </section>
 </div>
 
 <style>
@@ -289,5 +399,11 @@
   .node-value{position:absolute;top:-22px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--fg-dim);pointer-events:none}
   .freq-labels{display:grid;grid-template-columns:repeat(6,1fr);margin:8px 0 0 44px;color:var(--fg-dim);font-size:11px;text-align:center}
   .preamp{margin-top:20px;padding-top:18px;border-top:1px solid var(--hairline)}.range-row,.number-row{display:flex;align-items:center;gap:10px;flex:none}.range-row input{width:180px;accent-color:var(--accent)}output{min-width:54px;text-align:right;font-variant-numeric:tabular-nums}.check{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;cursor:pointer}input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}.preset-tools{display:flex;gap:8px;margin-top:16px}.preset-tools input,.number-row input{min-height:var(--control-height);padding:8px 11px;border:1px solid var(--control-border);border-radius:var(--control-radius);background:var(--control-bg)}.preset-tools input{flex:1}.number-row input{width:96px}.custom-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}.custom-list span{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;background:rgba(20,14,8,.2)}.custom-list button{margin-left:auto;color:var(--fg-dim)}.custom-list button:hover{color:var(--warning)}.audio-status{min-height:18px;margin-top:12px;color:var(--fg-dim);font-size:11px}.audio-status.error,.error{color:#ffaaa2}.actions{display:flex;align-items:center;gap:14px;margin-top:18px}.ok{color:var(--accent)}.audit{flex:none;color:var(--fg-dim);font-size:11px;font-variant-numeric:tabular-nums}
-  @media(max-width:680px){.field,.preset-control{align-items:flex-start;flex-direction:column;gap:14px}.graph-wrap{padding-left:38px}.curve,.nodes{left:38px;width:calc(100% - 38px)}.freq-labels{margin-left:38px;font-size:10px}.preset-tools{flex-wrap:wrap}}
+  .stack{display:flex;flex-direction:column;gap:12px}.stack>span:first-child{display:flex;flex-direction:column;gap:4px}
+  .client-row{display:flex;align-items:center;gap:8px}.client-row input{flex:1;min-width:0;min-height:var(--control-height);padding:8px 11px;border:1px solid var(--control-border);border-radius:var(--control-radius);background:var(--control-bg);letter-spacing:.02em}.client-row input:disabled{opacity:var(--disabled-opacity)}.client-row button{flex:none}
+  code{padding:1px 5px;border-radius:5px;background:rgba(20,14,8,.35);font-size:11px}
+  .danger-zone{border-color:rgba(220,90,100,.28)}.danger-zone h2{margin-bottom:15px}
+  .danger{flex:none;padding:8px 14px;border:1px solid rgba(220,90,100,.42);border-radius:var(--control-radius);color:#ffb3b3;background:rgba(180,50,60,.12)}
+  .danger:hover:not(:disabled){background:rgba(180,50,60,.24);border-color:rgba(220,90,100,.6)}
+  @media(max-width:680px){.field,.preset-control{align-items:flex-start;flex-direction:column;gap:14px}.client-row{flex-wrap:wrap}.client-row input{flex-basis:100%}.graph-wrap{padding-left:38px}.curve,.nodes{left:38px;width:calc(100% - 38px)}.freq-labels{margin-left:38px;font-size:10px}.preset-tools{flex-wrap:wrap}}
 </style>

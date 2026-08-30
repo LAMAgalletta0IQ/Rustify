@@ -5,7 +5,7 @@
 mod artist_extras;
 mod concerts;
 mod credits;
-mod dj;
+pub mod dj;
 mod home;
 mod pathfinder;
 mod playlist_contents;

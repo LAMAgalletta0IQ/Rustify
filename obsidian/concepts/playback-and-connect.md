@@ -196,6 +196,49 @@ Quality is fixed when the local Player starts: Automatic/Normal = 160 kbps,
 Data saver = 96 kbps, and Very high = 320 kbps. EQ and output changes reach the
 live sink after Save; quality changes begin with the next local session.
 
+## The playback watchdog
+
+`Spirc`, the `Player` and the `PlayerEvent` channel form one unit: if the
+player thread dies or the connection drops in a way Spirc cannot recover from,
+the channel's sender is dropped and `rx.recv()` in `spawn_event_pump` returns
+`None`. librespot then surfaces **every** subsequent transport call as
+`Internal error { channel closed }`.
+
+> Until 2026-08 the pump logged `player event pump ended` at that point and
+> exited, leaving the dead `Spirc` installed in `AppState::spotify`. Play,
+> pause, next and seek all failed identically from then on and the only cure
+> was restarting the process.
+
+The pump now calls `recover_closed_session`, which:
+
+1. Compares its own **session generation** against
+   `AppState::session_generation`. Every `establish` claims a new generation
+   before it builds anything, and `logout` retires the current one *first*
+   (shutting the Spirc down closes the channel, so the watchdog must already
+   know that closure was deliberate). A mismatch means this pump belongs to a
+   superseded session — it exits silently.
+2. Bails if the user is no longer logged in, and takes
+   `session_recovering` so concurrent closures queue behind one rebuild rather
+   than racing several `establish` calls.
+3. Publishes `ConnectionStatus::Recovering`, clears `is_active_device` — a dead
+   Spirc cannot be the active Connect device, and leaving the flag set would
+   let the transport buttons keep dispatching into it — and emits a snapshot.
+   [[PlayerBar.svelte]] shows "Reconnecting to Spotify…" for that status.
+4. Retries `commands::rebuild_session` on a 2/6/15/45 s backoff.
+
+**It never signs the user out.** The OAuth grant is still valid; what died is
+the audio session on top of it. `rebuild_session` reuses the stored refresh
+tokens exactly as `restore_session` does, but never clears them and never
+returns a logged-out `AuthState` — deleting tokens on a reconnect failure would
+turn a dropped socket into a forced re-login, which is precisely what the path
+exists to avoid. Exhausting the retries leaves the status `Disconnected` and
+the user signed in.
+
+This is the second recovery loop in the app; the first is the Connect cluster
+resubscribe in [[remote_state.rs]], which reuses the same `Recovering` status.
+They are independent: one rebuilds the local audio session, the other only
+re-establishes a Dealer subscription.
+
 ## See also
 
 [[architecture]] · [[data-flow]] · [[state-and-events]] · [[player.rs]] ·

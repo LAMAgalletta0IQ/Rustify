@@ -31,6 +31,42 @@ there is no fallback to hide behind. See [[auth-and-tokens]].
 > genuinely blocked for reasons documented below, not because "no public API"
 > was treated as the end of the investigation.
 
+### Audio features / "Spotify DNA" — not obtainable
+`GET /v1/audio-features` (danceability, energy, valence, acousticness, tempo)
+is **closed to apps in Development Mode**, which is what every self-registered
+Client ID is until it passes an extension review. Rustify's entire auth design
+is that each user registers their own app (see [[auth-and-tokens]]), so there
+is no request this app can make that returns those numbers. Reading them out of
+the web player instead is against the Developer Terms and a reliable way to get
+IP-banned; it is not attempted.
+
+What ships instead is [[dna.rs]] — a taste profile built only from data the
+ordinary Web API still returns (`genres` and `popularity` on
+`/me/top/artists`, album `release_date` on `/me/top/tracks`). Every axis names
+what it actually measured, and the Profile view states the limitation in place
+rather than passing the result off as Spotify's own feature. A third-party
+source (Last.fm tags, MusicBrainz) would sharpen it at the cost of a second API
+key for the user to register, so it is deliberately not a dependency.
+
+### DJ — plays, but the dynamic mix and voice intros do not
+Two separate blocks, and only one of them was ever about audio:
+
+- **Narration playback.** The pinned librespot cannot wrap its decoder with
+  arbitrary narration audio, so `narration_playback_supported` is false even
+  when the TTS endpoint accepts a script.
+- **Lexicon resolution.** `/lexicon-session-provider/context-resolve/v2/session`
+  is gated hard against non-official clients and answers 403/404 for most
+  accounts.
+
+> Until 2026-08 a Lexicon refusal left the DJ button permanently disabled
+> behind an error the user could do nothing about. It now falls back to playing
+> Spotify's public DJ playlist as an ordinary context. That is honest about
+> what it is: the returned session carries
+> `reason: "lexicon-unavailable-fallback"`, every dynamic capability flag stays
+> false so `spawn_dj_refill` will not try to replenish from an endpoint that
+> already refused, and the Home card says the personalized mix and AI voice
+> intros are restricted to Spotify's own clients.
+
 ### Blends — read/play only
 An existing Blend is an ordinary playlist: it appears in [[library.rs]]'s
 playlist list and plays like any other. **Creating** a Blend or inviting a

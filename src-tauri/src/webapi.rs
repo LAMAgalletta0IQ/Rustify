@@ -151,6 +151,27 @@ impl WebApi {
         self.send::<Value>(req, token).await.map(|_| ())
     }
 
+    /// PUT with a caller-supplied content type and an already-encoded body.
+    ///
+    /// Exists for `/playlists/{id}/images`, the one Spotify endpoint in this
+    /// app that does not take JSON: it wants a raw base64 JPEG payload with
+    /// `Content-Type: image/jpeg`. Sending it as JSON is rejected with a 400
+    /// that names neither the field nor the reason.
+    pub async fn put_raw(
+        &self,
+        token: &str,
+        path: &str,
+        content_type: &str,
+        body: Vec<u8>,
+    ) -> AppResult<()> {
+        let req = self
+            .http
+            .put(format!("{BASE}{path}"))
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .body(body);
+        self.send::<Value>(req, token).await.map(|_| ())
+    }
+
     pub async fn put_query(
         &self,
         token: &str,

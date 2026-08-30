@@ -488,10 +488,11 @@
     backdrop-filter: blur(var(--blur));
   }
 
-  /* Row so the friends rail sits beside <main> as a real layout column
-     (pushing content, per the collapsible-panel design) rather than
-     overlapping it — the panel switches to a fixed overlay drawer under its
-     own breakpoint instead, at which point it no longer participates here. */
+  /* The friends panel is `position: fixed` at every width, so it takes no
+     space here — <main> keeps the full row whether the drawer is open or not,
+     which is the point (opening it used to reflow every grid behind it). The
+     row survives as the mounting point and so the panel stays a sibling of
+     <main> in DOM order for screen readers. */
   .content-row {
     display: flex;
     flex: 1;

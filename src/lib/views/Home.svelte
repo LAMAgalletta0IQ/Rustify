@@ -27,6 +27,11 @@
   let topTracks = $state<TrackSummary[]>([]);
   let discovery = $state<AlbumSummary[]>([]);
   let personalized = $state<HomeFeed | null>(null);
+  /** Mirrors `spotify::dj::FALLBACK_REASON`. A session carrying this reason
+   * came from the fallback path — Spotify's Lexicon endpoint refused to
+   * resolve a dynamic DJ session for this account, so the app plays the public
+   * DJ playlist instead. */
+  const DJ_FALLBACK_REASON = "lexicon-unavailable-fallback";
   let dj = $state<DjSession | null>(null);
   let loadingRecent = $state(true);
   let loadingMix = $state(true);
@@ -212,6 +217,12 @@
         id: item.id,
         name: item.name,
         owner: item.ownerName ?? item.subtitle ?? "Spotify",
+        // The home feed carries no owner id, so editing stays unoffered for
+        // playlists opened from here. That is the right default: everything on
+        // this shelf is a Spotify-generated mix nobody can rename anyway.
+        ownerId: null,
+        description: item.description,
+        collaborative: false,
         imageUrl: item.imageUrl,
         trackCount: item.totalCount ?? 0,
       };
@@ -310,9 +321,14 @@
           <h2 id="dj-heading">DJ</h2>
           {#if dj?.active && store.playback.track}
             <p class="truncate">Now playing · {store.playback.track.name}</p>
+            {#if dj.reason === DJ_FALLBACK_REASON}
+              <p class="dj-note">Playing Spotify’s DJ playlist. The personalized mix and its voice intros are restricted to Spotify’s own clients.</p>
+            {/if}
           {:else if dj}
             <p>Your personalized mix, picked and introduced for you.</p>
-            {#if dj.narrationResolved && !dj.narrationPlaybackSupported}
+            {#if dj.reason === DJ_FALLBACK_REASON}
+              <p class="dj-note">Spotify restricts the personalized DJ mix and its AI voice intros to its own clients, so this plays the public DJ playlist instead.</p>
+            {:else if dj.narrationResolved && !dj.narrationPlaybackSupported}
               <p class="dj-note">Voice intros aren’t available in this app yet — the music still plays.</p>
             {/if}
           {:else if djError}

@@ -16,11 +16,25 @@ cd src-tauri; cargo check --no-default-features   # fast Rust type-check
 `--no-default-features` matches what `tauri dev` passes; omitting it compiles a
 different feature set than the app actually runs.
 
-**There is no test suite** — no `#[test]`, no vitest. Do not claim tests pass.
-The verification loop is `cargo check --no-default-features` + `npm run check`,
-and neither proves runtime behaviour. `README.md` has a 15-step manual checklist
-covering login, playback, Connect, and token expiry; most real bugs in this
-codebase have only ever been found by running the app and reading the log.
+```powershell
+cd src-tauri; cargo test --no-default-features --lib   # 104 unit tests
+```
+
+**There is a Rust unit-test suite (104 tests) but no frontend one** — no
+vitest, no component tests.
+
+> Until 2026-08 this file said there was no test suite at all. That was wrong:
+> `cargo test --lib` has covered audio DSP, telemetry, Pathfinder hash
+> extraction, jam payload parsing and settings migration for some time.
+
+What has not changed is the conclusion those lines were drawing. The Rust tests
+are all pure-function tests over fixed payloads: **none of them start Tauri,
+librespot, or a webview**, so a green run says nothing about runtime behaviour.
+The verification loop is `cargo check --no-default-features` +
+`cargo test --lib` + `npm run check`, and `README.md` has a 15-step manual
+checklist covering login, playback, Connect, and token expiry. Most real bugs
+in this codebase have only ever been found by running the app and reading the
+log — say which of these you actually ran, and do not imply the others.
 
 Useful when diagnosing: `$env:RUST_LOG="debug,librespot=warn"` before
 `npm run tauri dev`. `RUST_LOG` can also live in `.env`.
@@ -106,8 +120,19 @@ Consequences that bite:
   Check it before theorising about quota — a token that never reaches disk is
   otherwise invisible until the next launch.
 
+- `ugc-image-upload` was added to both scope lists in 2026-08, for playlist
+  cover upload. A stored refresh token is re-exchanged for **the scope set it
+  was granted**, not the current list, so tokens from before that lack it and
+  only an interactive re-login adds it. `library::update_playlist_image`
+  rewrites the resulting 403 to say so.
+
 `establish()` in `commands.rs` is where the two tokens diverge: the Web API
 token goes to `/me` and `TokenStore`; the *streaming* token goes to librespot.
+
+The Client ID is manageable after setup: `get_login_info` returns the ID itself
+plus `client_id_from_env`, and Settings edits or clears it (`clear_client_id`).
+The env var wins in `auth::webapi_client_id`, so the field is disabled while it
+is set rather than silently no-opping.
 
 ### Spirc, and registering ≠ activating
 
@@ -142,6 +167,25 @@ reset the UI clock mid-track. Use `set_position()` to write and
 Both background tasks live on `SpotifySession` and must be `.abort()`ed on
 logout and session replacement — dropping a `JoinHandle` **detaches** rather
 than cancels, which once left two refreshers hammering the token endpoint.
+
+### A closed player channel is recoverable, and must not log the user out
+
+If librespot's `Player` dies, the `PlayerEvent` sender drops, `rx.recv()`
+returns `None`, and every later transport call fails with
+`Internal error { channel closed }`. `spawn_event_pump` used to just exit,
+leaving the dead `Spirc` installed — the app then needed a restart.
+
+It now calls `recover_closed_session`, which rebuilds the session from the
+stored refresh tokens on a 2/6/15/45 s backoff. Two things make this safe:
+
+- **`AppState::session_generation`.** Each pump is tagged with the generation
+  it was spawned for. `establish` claims a new one before building anything and
+  `logout` retires one *before* shutting the Spirc down — because that shutdown
+  closes the channel too. Without the tag, every ordinary logout would trip the
+  watchdog into logging the user straight back in.
+- **It never clears tokens.** `rebuild_session` reuses `restore_login` but does
+  not delete on failure and does not return a logged-out `AuthState`. A dropped
+  socket must not become a forced re-login.
 
 ### Adding a command needs three edits
 
@@ -178,6 +222,24 @@ items they already hold.
 and `filter_map` drops it, so the playlist opens to "Nothing here." with a 200
 in the log and no warning anywhere. Confirm a wire shape with `fields=` before
 assuming the field name.
+
+**`/v1/audio-features` is gone for this app.** Spotify closed it to apps in
+Development Mode, which is what a self-registered Client ID is — so
+danceability/energy/valence are unobtainable by any request this app can make,
+and scraping them is out. `dna.rs` builds its profile from `genres` +
+`popularity` on `/me/top/artists` and album `release_date` on
+`/me/top/tracks` instead, and labels every axis with what it measured.
+
+**Lexicon (DJ) 403s for most accounts.** `start_dj` and `get_dj_status` catch
+`LexiconUnavailable` and fall back to the public DJ playlist, tagging the
+session `reason: "lexicon-unavailable-fallback"` (mirrored as a constant in
+`Home.svelte`) with every dynamic flag false. Do not "fix" that by making the
+fallback look like a resolved session — `spawn_dj_refill` keys off those flags.
+
+**`PUT /playlists/{id}/images` is not JSON.** It wants raw base64 JPEG with
+`Content-Type: image/jpeg` (hence `WebApi::put_raw`), capped at 256 KB of
+*base64*. `src/lib/images.ts` re-encodes in the webview so the backend needs no
+image codec.
 
 `webapi.rs` logs method, URL, status and Spotify's own message on every failed
 request. Read that line before theorising; it is how the search cap was found.
@@ -247,6 +309,12 @@ frosted shell over a Windows 11 Acrylic backdrop. Consequences:
   > Windows 10 1903+ honours it — so Acrylic's own tint cannot be adjusted
   > from config on this target and `.ambient`/`.veil` are the only knobs.
 
+- **A drag region still works while fullscreen.** The fullscreen lyrics view
+  binds `data-tauri-drag-region={fullscreen ? undefined : true}` — otherwise
+  the window could be dragged out of fullscreen by its header. Use `undefined`,
+  never `false`: Svelte omits the attribute for `undefined`, while `false` on a
+  non-boolean attribute still renders `data-tauri-drag-region="false"`, which
+  Tauri matches on presence and keeps honouring.
 - **The title bar in `App.svelte` is the only way to move the window.** Any
   region that should drag needs `data-tauri-drag-region`, and the login screen
   carries its own strip — without it the window is immovable before sign-in.

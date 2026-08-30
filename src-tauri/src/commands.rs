@@ -108,6 +108,21 @@ pub async fn get_auth_state(state: State<'_, AppState>) -> AppResult<AuthState> 
 /// Mixes, Discover Weekly, Release Radar, daylist and other personalized
 /// contexts where Spotify exposes them. This uses semantic card metadata and
 /// never infers a feature from its localized display name.
+/// Taste profile for the Profile view's radar chart.
+///
+/// `currentYear` comes from the webview rather than the system clock so the
+/// "released in the last two years" axis matches the user's own calendar
+/// rather than UTC's.
+#[tauri::command]
+pub async fn get_listening_dna(
+    state: State<'_, AppState>,
+    current_year: Option<i32>,
+) -> AppResult<crate::dna::ListeningDna> {
+    let t = token(&state).await?;
+    let year = current_year.unwrap_or(2026);
+    crate::dna::listening_dna(&state.web_api, &t, year).await
+}
+
 #[tauri::command]
 pub async fn get_personalized_home(
     state: State<'_, AppState>,
@@ -148,11 +163,22 @@ pub async fn get_dj_status(
         .as_ref()
         .map(|spotify| spotify.session.clone())
         .ok_or(AppError::NotLoggedIn)?;
-    state
+    match state
         .internal_spotify
         .resolve_dj(&session, refresh.unwrap_or(false))
         .await
-        .map(Some)
+    {
+        Ok(session) => Ok(Some(session)),
+        // Not an error state as far as the Home card is concerned: the DJ
+        // button still works, it just plays the public playlist. Returning
+        // Err here left the button permanently disabled with a message the
+        // user could do nothing about.
+        Err(AppError::LexiconUnavailable(reason)) => {
+            log::debug!(target: "spotify.dj", "Lexicon unavailable ({reason}); reporting fallback session");
+            Ok(Some(crate::spotify::dj::fallback_session()))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Resolves the dynamic DJ session through Lexicon before loading its current
@@ -170,7 +196,26 @@ pub async fn start_dj(app: AppHandle, state: State<'_, AppState>) -> AppResult<D
     // A fresh session needs the full state_restore metadata (volatile context,
     // Lexicon clock and session-control fields). The small interactive window
     // is appropriate only for later queue replenishment.
-    let mut dj = state.internal_spotify.resolve_dj(&session, true).await?;
+    //
+    // Lexicon is the one endpoint here Spotify gates hardest at non-official
+    // clients: it answers 403/404 for most accounts, which used to make the DJ
+    // button a permanent error message. When that happens, fall back to
+    // playing the canonical public DJ playlist as an ordinary context. That
+    // loses the dynamic re-resolution and the spoken intros — neither of which
+    // this app can play anyway (`narration_playback_supported` is false on the
+    // pinned librespot) — but it does play the DJ mix, which is what the
+    // button says it will do.
+    let mut dj = match state.internal_spotify.resolve_dj(&session, true).await {
+        Ok(dj) => dj,
+        Err(AppError::LexiconUnavailable(reason)) => {
+            log::info!(
+                target: "spotify.dj",
+                "Lexicon unavailable ({reason}); falling back to the public DJ playlist"
+            );
+            return start_dj_fallback(&app, &state).await;
+        }
+        Err(error) => return Err(error),
+    };
     match state
         .internal_spotify
         .prepare_dj_narration(&session, &dj)
@@ -212,6 +257,50 @@ pub async fn start_dj(app: AppHandle, state: State<'_, AppState>) -> AppResult<D
     Ok(dj)
 }
 
+/// Plays Spotify's public DJ playlist as a plain context, for accounts where
+/// Lexicon refuses to resolve a dynamic session.
+///
+/// Returns a `DjSession` describing exactly what the user got — `available` is
+/// true (something is playing) but `dynamic_refill_supported` and
+/// `narration_resolved` are false, and `reason` carries the fallback marker
+/// the UI keys its explanatory copy off. Reporting it as a full DJ session
+/// would be a lie the UI has no way to detect.
+async fn start_dj_fallback(app: &AppHandle, state: &AppState) -> AppResult<DjSession> {
+    let session = crate::spotify::dj::fallback_session();
+    let context_uri = session.context_uri.clone();
+    let activate = !state.playback.read().await.is_active_device;
+    let resume_on_error = clear_crossfade_before_transition(app, state).await?;
+    let uri = context_uri.clone();
+    let load_result = with_spirc(state, move |spirc| {
+        if activate {
+            spirc.activate()?;
+        }
+        spirc.load(LoadRequest::from_context_uri(
+            uri,
+            LoadRequestOptions {
+                start_playing: true,
+                ..Default::default()
+            },
+        ))
+    })
+    .await;
+    if load_result.is_err() && resume_on_error {
+        let _ = with_spirc(state, |spirc| spirc.play()).await;
+    }
+    load_result?;
+
+    let session = DjSession {
+        active: true,
+        ..session
+    };
+    state
+        .internal_spotify
+        .dj
+        .set_cached(session.clone())
+        .await;
+    Ok(session)
+}
+
 /// Shape of the login flow, so the UI can describe it accurately instead of
 /// guessing, and so it knows whether the first-run Setup screen is needed.
 /// Read at render time, not cached, since it reflects whatever was last saved
@@ -226,6 +315,16 @@ pub struct LoginInfo {
     pub client_id_env: &'static str,
     /// Redirect URI the user must register against their own app.
     pub webapi_redirect_uri: String,
+    /// The configured ID itself, so Settings can show and edit what is in use
+    /// rather than only whether *something* is. Safe to hand to the webview: a
+    /// Spotify Client ID is not a secret — it travels in the clear in every
+    /// OAuth redirect and this flow is PKCE with no client secret.
+    pub client_id: Option<String>,
+    /// True when the ID came from `RUSTIFY_CLIENT_ID` rather than
+    /// `settings.json`. The env var wins in `auth::webapi_client_id`, so
+    /// editing the saved value would have no visible effect while it is set —
+    /// Settings disables the field and says so instead of silently no-opping.
+    pub client_id_from_env: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -271,11 +370,38 @@ pub fn get_login_info(app: AppHandle) -> AppResult<LoginInfo> {
         .app_data_dir()
         .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
 
+    let client_id = auth::webapi_client_id(&data_dir).ok();
+    let client_id_from_env = std::env::var(auth::CLIENT_ID_ENV)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+
     Ok(LoginInfo {
-        private_client_id: auth::webapi_client_id(&data_dir).is_ok(),
+        private_client_id: client_id.is_some(),
         client_id_env: auth::CLIENT_ID_ENV,
         webapi_redirect_uri: auth::webapi_redirect_uri(),
+        client_id,
+        client_id_from_env,
     })
+}
+
+/// Forgets the saved Web API client ID, sending the app back to the first-run
+/// Setup screen on the next launch.
+///
+/// Deliberately does *not* sign out on its own — the caller decides. Settings
+/// pairs it with `logout` because the stored OAuth grant belongs to the app
+/// being cleared, but "clear the ID" and "end the session" are separate
+/// actions and conflating them here would make the command untestable in one
+/// direction.
+#[tauri::command]
+pub fn clear_client_id(app: AppHandle) -> AppResult<()> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    let mut settings = auth::settings_or_default(&data_dir);
+    settings.webapi_client_id = None;
+    auth::save_settings(&data_dir, &settings)
 }
 
 /// Saves the Web API client ID from the first-run Setup screen (or a later
@@ -423,6 +549,12 @@ async fn establish(
     // already succeeded by this point, so if the gate then fails on a
     // transient error (notably a 429 on /me), a retry can go through
     // `restore_session` silently instead of reopening the browser.
+    // Claimed before anything is built, so the pump this session is about to
+    // spawn carries an id no earlier pump can match. See
+    // `AppState::session_generation` — this is what lets the playback watchdog
+    // tell a crash apart from a deliberate replacement.
+    let generation = state.next_session_generation();
+
     let stored = toks.stored();
     // Which halves actually made it to disk. Without this, a Web API refresh
     // token that never persists is invisible until the *next* launch falls
@@ -464,6 +596,7 @@ async fn establish(
             quality: settings.audio_quality,
             crossfade_seconds: settings.crossfade_seconds,
         },
+        generation,
     )
     .await?;
 
@@ -620,8 +753,33 @@ pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> AppR
     }
 }
 
+/// Rebuilds the librespot session in place, for the playback watchdog in
+/// `player::recover_closed_session`.
+///
+/// Not a command: nothing in the webview asks for this. It reuses the stored
+/// refresh tokens exactly as `restore_session` does, but never clears them and
+/// never returns a logged-out `AuthState` — a failure here means "could not
+/// reconnect right now", and the caller retries. Deleting tokens on a
+/// reconnect failure would turn a dropped socket into a forced re-login, which
+/// is the outcome this whole path exists to avoid.
+pub(crate) async fn rebuild_session(app: &AppHandle) -> AppResult<()> {
+    let state = app.state::<AppState>();
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("no app data dir: {e}")))?;
+
+    let stored = auth::load_stored_tokens(&data_dir).ok_or(AppError::NotLoggedIn)?;
+    let toks = auth::restore_login(&stored, &data_dir).await?;
+    establish(app, &state, &state.web_api, toks).await.map(|_| ())
+}
+
 #[tauri::command]
 pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    // Retire the generation first. Shutting the Spirc down below closes the
+    // player event channel, and the watchdog on the other end of it must read
+    // that as "deliberate" rather than as a crash to recover from.
+    state.next_session_generation();
     state.device_auth.cancel().await;
     state.sleep_timer.cancel(None).await;
     state.telemetry.finish_all("logout").await;
@@ -1023,6 +1181,45 @@ pub async fn get_playlists(
 ) -> AppResult<Vec<PlaylistSummary>> {
     let t = token(&state).await?;
     library::playlists(&state.web_api, &t, limit.unwrap_or(50), offset.unwrap_or(0)).await
+}
+
+/// Renames / re-describes a playlist the signed-in user owns.
+///
+/// Ownership is not re-checked here: Spotify answers 403 for a playlist the
+/// token cannot modify, and that is the authoritative answer. The UI hides the
+/// button for playlists it can already tell aren't the user's, which is a
+/// convenience, not the security boundary.
+#[tauri::command]
+pub async fn update_playlist_details(
+    state: State<'_, AppState>,
+    playlist_id: String,
+    name: Option<String>,
+    description: Option<String>,
+    public: Option<bool>,
+) -> AppResult<()> {
+    let t = token(&state).await?;
+    library::update_playlist_details(
+        &state.web_api,
+        &t,
+        &playlist_id,
+        name.as_deref(),
+        description.as_deref(),
+        public,
+    )
+    .await
+}
+
+/// Replaces a playlist cover. `jpegBase64` is base64 JPEG (a `data:` URL is
+/// accepted too); the webview re-encodes whatever file the user picked so the
+/// backend never has to depend on an image codec for this.
+#[tauri::command]
+pub async fn update_playlist_image(
+    state: State<'_, AppState>,
+    playlist_id: String,
+    jpeg_base64: String,
+) -> AppResult<()> {
+    let t = token(&state).await?;
+    library::update_playlist_image(&state.web_api, &t, &playlist_id, &jpeg_base64).await
 }
 
 #[tauri::command]

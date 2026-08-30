@@ -152,7 +152,16 @@
 </script>
 
 {#if openPlaylist}
-  <PlaylistView playlist={openPlaylist} onBack={() => (openPlaylist = null)} />
+  <PlaylistView
+    playlist={openPlaylist}
+    onBack={() => (openPlaylist = null)}
+    onEdited={(updated) => {
+      // Keep the card behind the view in sync, so backing out doesn't show the
+      // old name until the next full library refetch.
+      playlists = playlists.map((p) => (p.id === updated.id ? updated : p));
+      openPlaylist = updated;
+    }}
+  />
 {:else if openAlbum}
   <AlbumView album={openAlbum} onBack={() => (openAlbum = null)} />
 {:else if openArtist}

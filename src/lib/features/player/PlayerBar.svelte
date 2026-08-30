@@ -97,9 +97,18 @@
       <button class="meta-button" onclick={onOpenNowPlaying} disabled={!pb.track} title="Open now playing">
         <span class="meta">
           <span class="name truncate">{pb.track?.name ?? "Nothing playing"}</span>
-          <span class="artist muted truncate">
-            {pb.track?.artists.join(", ") ?? ""}
-          </span>
+          <!-- `recovering` covers both watchdog paths: the Connect cluster
+               subscription resubscribing, and the playback watchdog rebuilding
+               a librespot session whose player channel closed. Neither used to
+               be visible, so a dead session looked identical to an idle one
+               and the only clue was that nothing responded. -->
+          {#if pb.connectionStatus === "recovering"}
+            <span class="artist recovering truncate">Reconnecting to Spotify…</span>
+          {:else}
+            <span class="artist muted truncate">
+              {pb.track?.artists.join(", ") ?? ""}
+            </span>
+          {/if}
         </span>
       </button>
     </div>
@@ -496,5 +505,8 @@
     .vol {
       display: none;
     }
+  }
+  .recovering {
+    color: var(--accent);
   }
 </style>

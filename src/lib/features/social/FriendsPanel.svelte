@@ -73,10 +73,9 @@
     }
   }
 
-  // Moving focus in/out only matters in drawer mode (narrow widths), where
-  // the panel is a modal-ish overlay rather than a permanent layout column —
-  // but it's harmless to always do, and simpler than detecting which mode is
-  // active from script.
+  // The panel is an overlay drawer at every width, so focus has to follow it
+  // in and back out — otherwise keyboard focus stays parked on content the
+  // drawer is now covering.
   $effect(() => {
     if (open) {
       returnFocusTo = document.activeElement as HTMLElement | null;
@@ -137,68 +136,71 @@
 </aside>
 
 <style>
-  /* Rail (wide): a real layout column next to <main>, pushing content rather
-     than covering it — App.svelte gives it flex:none and lets width do the
-     open/close animation. Below the breakpoint there isn't enough room left
-     for main content once a rail is subtracted (the window's own minWidth is
-     780px), so it becomes a fixed overlay drawer with a backdrop instead;
-     that switch is pure CSS, no JS viewport branching. */
+  /* Overlay drawer at every width, not a layout column.
+     >
+     > Until 2026-08 this was a flex rail beside <main> above 1050px and a
+     > drawer only below it. As a rail it claimed 280px the instant it opened,
+     > which reflowed every grid in the app — cards re-wrapped, rows changed
+     > count, and whatever the user was looking at jumped sideways. Toggling a
+     > side panel is not supposed to relayout the page behind it. Overlaying
+     > keeps <main>'s geometry constant, so opening and closing the panel is
+     > free: nothing behind it moves at all.
+     >
+     > The old rail was chosen so the panel wouldn't cover content. That still
+     > holds as a concern, which is why the drawer is translucent over the same
+     > glass elevation as other floating surfaces and dismisses on Escape, on
+     > the toggle, and on a click anywhere outside it. */
   .panel {
-    flex: none;
-    width: 280px;
+    position: fixed;
+    inset: 46px 0 0 auto;
+    z-index: var(--z-overlay);
+    width: min(300px, 92vw);
     overflow: hidden;
-    transition: width var(--motion-normal) var(--ease-standard);
+    transform: translateX(100%);
+    transition: transform var(--motion-normal) var(--ease-standard);
+    background: var(--glass-raised);
+    border-left: 1px solid var(--hairline);
+    /* Blurs what the *webview* painted behind it, i.e. the app's own content —
+       unlike over bare Acrylic, there is something real to blur here, so this
+       one does visible work. */
+    backdrop-filter: blur(var(--blur)) saturate(1.4);
+    box-shadow: var(--shadow-raised), var(--edge);
   }
-  .panel:not(.open) {
-    width: 0;
+  .panel.open {
+    transform: translateX(0);
   }
   .panel-inner {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    width: 280px;
+    width: 100%;
     height: 100%;
-    padding: 14px 14px 14px 4px;
+    padding: 14px;
   }
+  /* Fullscreen player hides the 46px titlebar; the drawer is not rendered in
+     that mode (App.svelte skips it), so the fixed top inset can stay constant. */
   .backdrop {
-    display: none;
+    display: block;
+    position: fixed;
+    inset: 46px 0 0 0;
+    z-index: var(--z-overlay-backdrop);
+    padding: 0;
+    border-radius: 0;
+    background: rgba(9, 6, 3, 0.34);
+    backdrop-filter: blur(2px);
+    animation: backdrop-in var(--motion-normal) var(--ease-standard);
   }
-
-  @media (max-width: 1050px) {
-    .panel {
-      position: fixed;
-      inset: 46px 0 0 auto;
-      z-index: var(--z-overlay);
-      width: 300px;
-      transform: translateX(100%);
-      transition: transform var(--motion-normal) var(--ease-standard);
-      background: var(--glass-raised);
-      border-left: 1px solid var(--hairline);
-      backdrop-filter: blur(var(--blur)) saturate(1.4);
-      box-shadow: var(--shadow-raised);
-    }
-    .panel.open {
-      width: 300px;
-      transform: translateX(0);
-    }
-    .panel-inner {
-      width: 300px;
-      padding: 14px;
-    }
-    .backdrop {
-      display: block;
-      position: fixed;
-      inset: 46px 0 0 0;
-      z-index: var(--z-overlay-backdrop);
-      padding: 0;
-      border-radius: 0;
-      background: rgba(9, 6, 3, 0.4);
-    }
+  @keyframes backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .panel {
       transition: none;
+    }
+    .backdrop {
+      animation: none;
     }
   }
 

@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use librespot::connect::Spirc;
@@ -258,10 +259,36 @@ pub struct AppState {
     /// Cached first-party clients (Pathfinder now, other internal services as
     /// they are enabled). Credentials are supplied per request and never kept.
     pub internal_spotify: crate::spotify::InternalSpotify,
+    /// Monotonic id for the live librespot session, bumped by every
+    /// `establish` and by `logout`.
+    ///
+    /// The only consumer is the playback watchdog. Each `PlayerEvent` pump is
+    /// tagged with the generation it was spawned for; when its channel closes
+    /// it compares that tag against this counter to tell "librespot died under
+    /// me, rebuild" apart from "my session was deliberately replaced or signed
+    /// out, go away quietly". Without it, every ordinary logout and every
+    /// session replacement would close a channel and trip the watchdog into
+    /// logging the user straight back in.
+    pub session_generation: AtomicU64,
+    /// Set while a watchdog rebuild is in flight, so concurrent closures
+    /// (the pump and, later, anything else that notices) queue behind one
+    /// recovery rather than racing several `establish` calls at once.
+    pub session_recovering: AtomicBool,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Claims the next session generation. Called by `establish` before it
+    /// builds anything, and by `logout` so a shutdown-triggered channel
+    /// closure cannot look like a crash.
+    pub fn next_session_generation(&self) -> u64 {
+        self.session_generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn session_generation(&self) -> u64 {
+        self.session_generation.load(Ordering::SeqCst)
     }
 }

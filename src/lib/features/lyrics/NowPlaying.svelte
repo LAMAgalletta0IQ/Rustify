@@ -52,6 +52,89 @@
       : undefined,
   );
 
+  /* Dominant colour of the current artwork, sampled client-side.
+     Spotify's lyrics response carries a designed `colors.background`, but only
+     for tracks that *have* lyrics — instrumentals, podcasts and anything the
+     provider doesn't cover come back with none, which left fullscreen stuck on
+     the same flat brown regardless of what was on screen. Sampling the cover
+     covers those. Kept as a fallback rather than the primary source: where
+     Spotify does ship a colour it is the better one, having been picked for
+     contrast against the lyric text rather than by averaging. */
+  let coverTone = $state<string | null>(null);
+
+  /** Downscale to 12x12 and average, weighting by saturation so a mostly-grey
+   * sleeve with one coloured element still reads as that colour instead of
+   * mud. Near-black and near-white pixels are dropped entirely — they are
+   * usually background, and including them only ever pulls the result toward
+   * grey. */
+  function dominantColor(image: HTMLImageElement): string | null {
+    const size = 12;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0, size, size);
+    let data: Uint8ClampedArray;
+    try {
+      data = context.getImageData(0, 0, size, size).data;
+    } catch {
+      // Tainted canvas: the CDN did not answer the crossOrigin request with
+      // permissive CORS headers. Not an error worth surfacing — the view just
+      // keeps its static background.
+      return null;
+    }
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let weight = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      const [pr, pg, pb_] = [data[index], data[index + 1], data[index + 2]];
+      const max = Math.max(pr, pg, pb_);
+      const min = Math.min(pr, pg, pb_);
+      if (max < 26 || min > 236) continue;
+      // +0.12 so a genuinely monochrome sleeve still contributes something
+      // rather than leaving weight at 0 and returning null.
+      const saturation = (max === 0 ? 0 : (max - min) / max) + 0.12;
+      r += pr * saturation;
+      g += pg * saturation;
+      b += pb_ * saturation;
+      weight += saturation;
+    }
+    if (weight === 0) return null;
+    const channel = (value: number) =>
+      Math.max(0, Math.min(255, Math.round(value / weight)));
+    return `rgb(${channel(r)}, ${channel(g)}, ${channel(b)})`;
+  }
+
+  $effect(() => {
+    const url = pb.track?.coverUrl ?? null;
+    coverTone = null;
+    if (!url) return;
+    let cancelled = false;
+    const image = new Image();
+    // Required for getImageData below; without it the canvas is tainted even
+    // though the CDN allows the read.
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      if (!cancelled) coverTone = dominantColor(image);
+    };
+    image.src = url;
+    return () => {
+      cancelled = true;
+      image.onload = null;
+    };
+  });
+
+  /* Fullscreen only. In the windowed view this panel sits inside the ordinary
+     app chrome, and tinting it per-track would fight the ambient wash rather
+     than extend it. */
+  const toneStyle = $derived.by(() => {
+    const tone = lyrics?.colors
+      ? rgbFromArgb(lyrics.colors.background)
+      : coverTone;
+    return tone ? `--np-tone:${tone}` : undefined;
+  });
+
   let queue = $state<QueueView | null>(null);
   let queueLoading = $state(false);
   let sleepTimer = $state<SleepTimerStatus | null>(null);
@@ -365,8 +448,23 @@
   });
 </script>
 
-<div class="now-playing" class:fullscreen>
-  <header class="topbar" data-tauri-drag-region>
+<div
+  class="now-playing"
+  class:fullscreen
+  class:toned={fullscreen && toneStyle !== undefined}
+  style={toneStyle}
+>
+  <!--
+    No drag region while fullscreen. A borderless Tauri window still honours
+    `data-tauri-drag-region` when maximised to the whole screen, so the
+    fullscreen lyrics view could be dragged out of fullscreen by grabbing its
+    header — the window moved, the content stayed sized for the display, and
+    the only way back was Esc. `undefined` rather than `false`: Svelte omits
+    the attribute for `undefined`, whereas `false` on a non-boolean attribute
+    still renders `data-tauri-drag-region="false"`, which Tauri matches on
+    presence and would keep honouring.
+  -->
+  <header class="topbar" data-tauri-drag-region={fullscreen ? undefined : true}>
     {#if fullscreen}
       <button
         class="exit"
@@ -387,7 +485,7 @@
         Close
       </button>
     {/if}
-    <div class="drag" data-tauri-drag-region></div>
+    <div class="drag" data-tauri-drag-region={fullscreen ? undefined : true}></div>
     <span>{pb.activeDevice?.name ?? "No active device"} · {pb.connectionStatus}{pb.isActiveDevice ? ` · ${pb.audioQualityLabel}` : " · remote quality unavailable"}</span>
     {#if !fullscreen}
       <button
@@ -681,6 +779,27 @@
     flex-direction: column;
     overflow: hidden;
     background: rgba(17, 11, 6, 0.34);
+    transition: background var(--motion-slow) var(--ease-standard);
+  }
+  /* Artwork-derived wash, fullscreen only. Layered over the same base tint
+     rather than replacing it, and kept well under half strength: --np-tone is
+     an unmodified colour straight off a sleeve, so at full weight it is
+     routinely brighter than the white lyric text sitting on top of it. The
+     radial puts the strongest point behind the artwork at the top, which is
+     where the eye reads the match. */
+  .now-playing.toned {
+    background:
+      radial-gradient(
+        120% 82% at 50% 0%,
+        color-mix(in srgb, var(--np-tone) 40%, transparent),
+        transparent 72%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--np-tone) 14%, transparent),
+        rgba(14, 9, 4, 0.52)
+      ),
+      rgba(17, 11, 6, 0.34);
   }
   .topbar {
     flex: none;

@@ -67,6 +67,18 @@ of the track, and the UI's clock jumped back to 0:00 while audio kept playing.
   called before *any* snapshot leaves the backend — in the event pump and in
   `snapshot()`, which previously handed out a stale read too.
 
+## Session generation
+
+`AppState` carries `session_generation: AtomicU64` and
+`session_recovering: AtomicBool`. Their only consumer is the playback watchdog
+(see [[playback-and-connect]]): each event pump is tagged with the generation
+it was spawned for, and compares that tag against the counter when its channel
+closes, to tell "librespot died under me" apart from "my session was replaced
+or signed out". `establish` claims a generation before building anything;
+`logout` retires one before shutting the Spirc down. Without it every ordinary
+logout would close a channel and trip the watchdog into logging the user
+straight back in.
+
 ## The event pump
 
 `spawn_event_pump` in [[player.rs]] is the primary writer of `playback` — the

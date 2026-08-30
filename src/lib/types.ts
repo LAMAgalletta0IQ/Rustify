@@ -72,6 +72,13 @@ export interface LoginInfo {
   clientIdEnv: string;
   /** Redirect URI to register against a self-registered Spotify app. */
   webapiRedirectUri: string;
+  /** The configured ID itself. Not a secret — it is public in every OAuth
+   * redirect and this flow is PKCE with no client secret. */
+  clientId: string | null;
+  /** True when `clientIdEnv` supplied it. The env var takes priority over
+   * `settings.json`, so the saved value cannot be edited into effect while
+   * this is set. */
+  clientIdFromEnv: boolean;
 }
 
 export interface DeviceAuthorization {
@@ -158,7 +165,13 @@ export interface PlaylistSummary {
   uri: string;
   id: string;
   name: string;
+  /** Display name of the owner — what the UI shows. */
   owner: string;
+  /** Spotify user id of the owner. Compare against `auth.userId` to decide
+   * editability; display names are not unique. */
+  ownerId: string | null;
+  description: string | null;
+  collaborative: boolean;
   imageUrl: string | null;
   trackCount: number;
 }
@@ -278,6 +291,29 @@ export interface DjSession {
   narrationResolved: boolean;
   narrationPlaybackSupported: boolean;
   dynamicRefillSupported: boolean;
+}
+
+/** One axis of the Listening DNA radar, 0-100. See `src-tauri/src/dna.rs` for
+ * why this is not Spotify's own DNA and what each axis actually measures. */
+export interface DnaAxis {
+  id: string;
+  label: string;
+  value: number;
+  basis: string;
+}
+
+export interface DnaGenre {
+  name: string;
+  weight: number;
+}
+
+export interface ListeningDna {
+  axes: DnaAxis[];
+  genres: DnaGenre[];
+  artistSample: number;
+  trackSample: number;
+  /** Too little listening history for the shape to mean anything. */
+  sparse: boolean;
 }
 
 export interface LyricsLine {

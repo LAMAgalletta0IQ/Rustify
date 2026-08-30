@@ -57,6 +57,7 @@ pub async fn start_session(
     device_name: String,
     cache_dir: PathBuf,
     options: PlaybackOptions,
+    generation: u64,
 ) -> AppResult<StartedSession> {
     let PlaybackOptions {
         initial_volume_percent,
@@ -123,10 +124,10 @@ pub async fn start_session(
     // lifetime of the login.
     tauri::async_runtime::spawn(async move {
         spirc_task.await;
-        log::info!("spirc task ended");
+        log::info!("spirc task ended (session generation {generation})");
     });
 
-    spawn_event_pump(app.clone(), event_rx, tokens, session.clone());
+    spawn_event_pump(app.clone(), event_rx, tokens, session.clone(), generation);
 
     // Deliberately NOT activated here. `Spirc::activate` makes this the active
     // Connect device, which pauses whatever is playing on the user's phone or
@@ -169,6 +170,7 @@ fn spawn_event_pump(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>,
     tokens: TokenStore,
     session: Session,
+    generation: u64,
 ) {
     tauri::async_runtime::spawn(async move {
         let api = app.state::<AppState>().web_api.clone();
@@ -378,8 +380,101 @@ fn spawn_event_pump(
             }
         }
 
-        log::info!("player event pump ended");
+        // Reaching here means `rx.recv()` returned `None`: the sender inside
+        // `Player` was dropped. librespot surfaces this to every subsequent
+        // transport call as `Internal error { channel closed }`, and nothing
+        // in the app rebuilt anything — the dead Spirc stayed installed in
+        // `AppState::spotify`, so every play/pause/next failed identically
+        // until the process was restarted. Hand off to the watchdog instead.
+        log::warn!("player event pump ended (session generation {generation})");
+        recover_closed_session(app, generation).await;
     });
+}
+
+/// How long to wait before each rebuild attempt after librespot's player
+/// channel closes. Deliberately short at the front (a dropped socket usually
+/// comes back at once) and capped, because every attempt spends a refresh
+/// token round trip and Spotify rotates refresh tokens on use.
+const RECOVERY_BACKOFF_SECS: [u64; 4] = [2, 6, 15, 45];
+
+/// Rebuilds the librespot session after its player channel closed unexpectedly.
+///
+/// Deliberately does *not* sign the user out. The OAuth grant is still valid —
+/// what died is the audio/Connect session on top of it — so the recovery path
+/// is the same one `restore_session` uses at startup, and a failure leaves the
+/// user logged in with a `Disconnected` status they can retry from rather than
+/// bouncing them to the login screen.
+async fn recover_closed_session(app: AppHandle, generation: u64) {
+    let state = app.state::<AppState>();
+
+    // A newer session already exists (a second login, or `establish` replacing
+    // this one). This pump belongs to the old one; its channel closing is the
+    // expected consequence of that replacement, not a fault.
+    if state.session_generation() != generation {
+        log::debug!("ignoring closed pump from superseded session {generation}");
+        return;
+    }
+    if !state.auth.read().await.logged_in {
+        return;
+    }
+    // One recovery at a time.
+    if state
+        .session_recovering
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+
+    {
+        let mut playback = state.playback.write().await;
+        playback.connection_status = ConnectionStatus::Recovering;
+        // The dead session cannot be the active Connect device any more, and
+        // leaving the flag set would let transport buttons keep dispatching
+        // into a Spirc that can no longer answer.
+        playback.is_active_device = false;
+        let snapshot = playback.clone();
+        drop(playback);
+        state.active_device.set(false);
+        let _ = app.emit(events::PLAYBACK, snapshot);
+    }
+
+    let mut recovered = false;
+    for (attempt, delay) in RECOVERY_BACKOFF_SECS.iter().enumerate() {
+        tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
+        // Re-check between attempts: the user may have signed out, or a
+        // manual login may have built a healthy session while we waited.
+        if state.session_generation() != generation || !state.auth.read().await.logged_in {
+            recovered = true;
+            break;
+        }
+        log::info!(
+            "rebuilding playback session after channel closure (attempt {}/{})",
+            attempt + 1,
+            RECOVERY_BACKOFF_SECS.len()
+        );
+        match crate::commands::rebuild_session(&app).await {
+            Ok(()) => {
+                log::info!("playback session rebuilt");
+                recovered = true;
+                break;
+            }
+            Err(error) => log::warn!("playback session rebuild failed: {error}"),
+        }
+    }
+
+    if !recovered {
+        log::error!("giving up rebuilding the playback session; playback needs a manual retry");
+        let snapshot = {
+            let mut playback = state.playback.write().await;
+            playback.connection_status = ConnectionStatus::Disconnected;
+            playback.clone()
+        };
+        let _ = app.emit(events::PLAYBACK, snapshot);
+    }
+
+    state
+        .session_recovering
+        .store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Best-effort compatibility bridge until librespot itself understands

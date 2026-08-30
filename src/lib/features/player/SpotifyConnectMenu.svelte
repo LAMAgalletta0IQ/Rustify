@@ -11,6 +11,15 @@
   let panel = $state<HTMLElement | null>(null);
   let panelStyle = $state("");
 
+  /* The trigger highlights when playback is happening *somewhere else*, not
+     here. Accenting it while this app is the active device made the icon lit
+     during ordinary local listening, which reads as "you are casting" — the
+     opposite of the truth. There is nothing to point at when nothing is
+     playing at all, hence the track check. */
+  const remotePlayback = $derived(
+    !store.playback.isActiveDevice && store.playback.track !== null,
+  );
+
   $effect(() => {
     const live = store.playback.availableDevices;
     if (live.length) devices = live;
@@ -85,12 +94,16 @@
   <button
     bind:this={trigger}
     class="trigger"
-    class:active={store.playback.isActiveDevice}
+    class:active={remotePlayback}
     onclick={() => (open ? close(false) : void show())}
     aria-haspopup="menu"
     aria-expanded={open}
-    title={`Connect: ${store.playback.connectionStatus}`}
-    aria-label={`Spotify Connect playback device — ${store.playback.connectionStatus}`}
+    title={remotePlayback
+      ? `Playing on ${store.playback.activeDevice?.name ?? "another device"}`
+      : `Connect: ${store.playback.connectionStatus}`}
+    aria-label={remotePlayback
+      ? `Spotify Connect — playing on ${store.playback.activeDevice?.name ?? "another device"}`
+      : `Spotify Connect playback device — ${store.playback.connectionStatus}`}
   >
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <rect x="2" y="4" width="14" height="10" rx="2" />

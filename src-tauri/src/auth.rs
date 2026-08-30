@@ -50,6 +50,13 @@ pub const STREAMING_SCOPES: &[&str] = &[
     "user-follow-modify",
     "user-top-read",
     "user-read-recently-played",
+    // Required only by `PUT /playlists/{id}/images`. Spotify treats it as a
+    // separate grant from playlist-modify-*, so editing a playlist's name
+    // succeeds while replacing its cover 403s without it. Tokens minted
+    // before this was added lack it until the next interactive login —
+    // `library::update_playlist_image` says so in its error rather than
+    // reporting a bare "Forbidden".
+    "ugc-image-upload",
 ];
 
 /// Scopes for the Web API login. Requested against the app's own client ID
@@ -71,6 +78,7 @@ pub const WEBAPI_SCOPES: &[&str] = &[
     "user-follow-modify",
     "user-top-read",
     "user-read-recently-played",
+    "ugc-image-upload",
 ];
 
 /// Environment variable holding the app's own OAuth client ID, used for Web
@@ -113,6 +121,18 @@ pub fn webapi_client_id(data_dir: &Path) -> AppResult<String> {
         .ok_or_else(|| AppError::Other("no Spotify Client ID configured".to_string()))
 }
 
+/// The Last.fm API key, if the user configured one.
+///
+/// Unlike `webapi_client_id` there is no environment override and no error
+/// case: Last.fm is entirely optional, so "not configured" is an ordinary
+/// answer, not a failure the caller has to handle.
+pub fn lastfm_api_key(data_dir: &Path) -> Option<String> {
+    load_settings(data_dir)
+        .and_then(|s| s.lastfm_api_key)
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+}
+
 /// Persisted app settings, distinct from `tokens.json`: this survives logout,
 /// since the Client ID belongs to the Spotify app the user registered, not to
 /// any one login session.
@@ -120,6 +140,14 @@ pub fn webapi_client_id(data_dir: &Path) -> AppResult<String> {
 pub struct Settings {
     #[serde(default)]
     pub webapi_client_id: Option<String>,
+    /// Optional Last.fm API key, used only to enrich the Listening DNA profile
+    /// with community genre tags. Absent is the normal case and everything
+    /// works without it — see `lastfm.rs`. Kept here rather than in
+    /// `AppSettings` for the same reason as the Client ID: it identifies a
+    /// third-party app registration, not a preference, and must survive
+    /// logout.
+    #[serde(default)]
+    pub lastfm_api_key: Option<String>,
     /// Last volume chosen in the player. This is deliberately not exposed as
     /// a Settings control: the player volume is the one authoritative volume
     /// control, while this value only restores it on the next local session.
@@ -164,6 +192,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             webapi_client_id: None,
+            lastfm_api_key: None,
             last_volume_percent: default_volume_percent(),
             reduce_motion: false,
             cache_limit_mb: default_cache_limit_mb(),

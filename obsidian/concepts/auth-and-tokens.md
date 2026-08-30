@@ -102,12 +102,43 @@ worked (it needs no scope) while every library and player call returned a bare
 | Profile | `user-read-private`, `user-read-email` |
 | Connect | `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing` |
 | Library | `user-library-read`, `user-library-modify`, `playlist-read-private`, `playlist-read-collaborative`, `playlist-modify-private`, `playlist-modify-public`, `user-follow-read`, `user-top-read`, `user-read-recently-played` |
+| Uploads | `ugc-image-upload` |
 
 `WEBAPI_SCOPES` is the same list minus `streaming`.
 
-Some scopes are requested ahead of the features that need them
-(`playlist-modify-*`, `user-follow-read`, `user-read-recently-played` are
-currently unused), so adding those features later needs no re-consent.
+`ugc-image-upload` is required by **`PUT /playlists/{id}/images` alone**, and
+Spotify treats it as a grant separate from `playlist-modify-*`: without it,
+renaming a playlist succeeds while replacing its cover returns a bare 403. It
+was added in 2026-08, after the app already had users, so **tokens minted
+before then do not carry it** — a stored refresh token is re-exchanged for the
+same scope set it was granted, not the current list, so only an interactive
+re-login adds it. `library::update_playlist_image` rewrites that 403 to say so
+rather than surfacing "Forbidden".
+
+> Until 2026-08 this note said `playlist-modify-*` was requested ahead of the
+> feature that needed it. Playlist rename/description/cover editing now uses
+> it (see [[2026-08-fixes-pass]]). `user-follow-read` and
+> `user-read-recently-played` are likewise in use. The general principle
+> stands: requesting a scope ahead of the feature means adding the feature
+> later needs no re-consent — which is exactly the cost `ugc-image-upload`
+> now demonstrates, having been omitted.
+
+## Managing the Client ID after setup
+
+`get_login_info` returns the configured `client_id` itself alongside
+`private_client_id`, plus `client_id_from_env`. Returning the ID to the webview
+is safe: it is public in every OAuth redirect and this flow is PKCE with no
+client secret.
+
+[[Settings.svelte]] uses that to edit the ID in place, or clear it via the
+`clear_client_id` command (which sends the app back to first-run Setup on the
+next launch). When `RUSTIFY_CLIENT_ID` is set the field is disabled and says
+why — `auth::webapi_client_id` resolves the env var first, so editing the saved
+value would silently have no effect.
+
+Saving a *different* ID signs the session out in the same action. It has to:
+the stored refresh token was issued to the previous app and cannot be exchanged
+against the new one.
 
 ## The shared fallback
 

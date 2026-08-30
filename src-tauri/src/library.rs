@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::error::AppResult;
+use serde_json::Value;
+
+use crate::error::{AppError, AppResult};
 use crate::search::ArtistSummary;
 use crate::webapi::WebApi;
 
@@ -28,6 +30,13 @@ pub struct PlaylistSummary {
     pub id: String,
     pub name: String,
     pub owner: String,
+    /// Spotify user id of the owner, not the display name. `owner` is what the
+    /// UI shows; this is what it compares against the signed-in account to
+    /// decide whether the playlist is editable. Two people can share a display
+    /// name, so the name is not usable for that test.
+    pub owner_id: Option<String>,
+    pub description: Option<String>,
+    pub collaborative: bool,
     pub image_url: Option<String>,
     pub track_count: u32,
 }
@@ -132,6 +141,10 @@ struct WirePlaylist {
     /// "0 tracks". The alias accepts both so either shape keeps working.
     #[serde(alias = "items")]
     tracks: Option<WireTrackRef>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    collaborative: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,6 +156,10 @@ struct WireTrackRef {
 struct WireNamed {
     #[serde(alias = "name")]
     display_name: Option<String>,
+    /// Present on a playlist owner object; absent on the bare artist/user
+    /// stubs this struct is also reused for.
+    #[serde(default)]
+    id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -314,12 +331,108 @@ pub async fn playlists(
         .map(|p| PlaylistSummary {
             image_url: p.images.as_deref().and_then(pick_image),
             track_count: p.tracks.map(|t| t.total).unwrap_or(0),
-            owner: p.owner.display_name.unwrap_or_default(),
+            owner_id: p.owner.id.clone(),
+            owner: p
+                .owner
+                .display_name
+                .or_else(|| p.owner.id.clone())
+                .unwrap_or_default(),
+            description: p.description.filter(|d| !d.trim().is_empty()),
+            collaborative: p.collaborative,
             id: p.id,
             uri: p.uri,
             name: p.name,
         })
         .collect())
+}
+
+/// `PUT /playlists/{id}` — name, description and public/private, in one call.
+///
+/// Every field is optional on the wire and Spotify leaves an omitted one
+/// untouched, so this sends only what the caller actually changed. Passing an
+/// empty object is rejected with a 400, hence the early return.
+pub async fn update_playlist_details(
+    api: &WebApi,
+    token: &str,
+    playlist_id: &str,
+    name: Option<&str>,
+    description: Option<&str>,
+    public: Option<bool>,
+) -> AppResult<()> {
+    let mut body = serde_json::Map::new();
+    if let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) {
+        body.insert("name".into(), Value::String(name.to_owned()));
+    }
+    if let Some(description) = description {
+        // Unlike name, an empty description is meaningful: it clears one.
+        body.insert(
+            "description".into(),
+            Value::String(description.trim().to_owned()),
+        );
+    }
+    if let Some(public) = public {
+        body.insert("public".into(), Value::Bool(public));
+    }
+    if body.is_empty() {
+        return Ok(());
+    }
+    api.put(token, &format!("/playlists/{playlist_id}"), Value::Object(body))
+        .await
+}
+
+/// Spotify's documented ceiling for a playlist cover, in bytes of *base64*
+/// (not of the decoded JPEG). Callers downscale before reaching this, but the
+/// check stays here so an oversized payload fails locally with a useful
+/// message instead of as an opaque 413 from the edge.
+pub const MAX_PLAYLIST_IMAGE_BASE64: usize = 256 * 1024;
+
+/// `PUT /playlists/{id}/images` — replaces the cover.
+///
+/// The body is base64-encoded JPEG sent as `image/jpeg`, which is why this
+/// takes an already-encoded string rather than bytes: the webview encodes it
+/// while re-compressing the user's file to JPEG, and re-decoding here only to
+/// re-encode would be pure waste.
+pub async fn update_playlist_image(
+    api: &WebApi,
+    token: &str,
+    playlist_id: &str,
+    jpeg_base64: &str,
+) -> AppResult<()> {
+    // Data URLs are what a canvas hands back; accept either form rather than
+    // making every caller remember to strip the prefix.
+    let payload = jpeg_base64
+        .split_once("base64,")
+        .map(|(_, data)| data)
+        .unwrap_or(jpeg_base64)
+        .trim();
+    if payload.is_empty() {
+        return Err(AppError::BadRequest("No image data was provided.".into()));
+    }
+    if payload.len() > MAX_PLAYLIST_IMAGE_BASE64 {
+        return Err(AppError::BadRequest(format!(
+            "Cover image is too large ({} KB encoded). Spotify's limit is {} KB.",
+            payload.len() / 1024,
+            MAX_PLAYLIST_IMAGE_BASE64 / 1024
+        )));
+    }
+    match api
+        .put_raw(
+            token,
+            &format!("/playlists/{playlist_id}/images"),
+            "image/jpeg",
+            payload.as_bytes().to_vec(),
+        )
+        .await
+    {
+        // `ugc-image-upload` is a separate grant from playlist-modify-*, and it
+        // was added to the scope lists after this app already had users. A
+        // token minted before that gets a bare 403 here while every other
+        // playlist edit keeps working, which is impossible to interpret.
+        Err(AppError::Forbidden(message)) => Err(AppError::Forbidden(format!(
+            "{message} (Rustify needs the ugc-image-upload permission to set a cover —              sign out and back in to grant it.)"
+        ))),
+        other => other,
+    }
 }
 
 pub async fn playlist_tracks(

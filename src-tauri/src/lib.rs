@@ -3,6 +3,7 @@ mod audio_capabilities;
 mod auth;
 mod commands;
 mod connect;
+mod dna;
 mod error;
 mod friends;
 // Experimental Spotify Jams module. Self-contained; see README_jams.md.
@@ -111,6 +112,7 @@ pub fn run() {
             commands::get_auth_state,
             commands::get_login_info,
             commands::set_client_id,
+            commands::clear_client_id,
             commands::get_settings,
             commands::update_settings,
             commands::list_audio_devices,
@@ -148,6 +150,8 @@ pub fn run() {
             // library
             commands::get_playlists,
             commands::get_playlist_tracks,
+            commands::update_playlist_details,
+            commands::update_playlist_image,
             commands::get_saved_tracks,
             commands::get_saved_albums,
             commands::get_album_tracks,
@@ -174,6 +178,7 @@ pub fn run() {
             commands::get_audio_capability,
             commands::get_top_tracks,
             commands::get_top_artists,
+            commands::get_listening_dna,
             commands::get_personalized_home,
             commands::get_dj_status,
             commands::start_dj,

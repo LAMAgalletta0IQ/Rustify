@@ -9,7 +9,15 @@ use tokio::sync::RwLock;
 
 use crate::error::{AppError, AppResult};
 
-const DEFAULT_DJ_CONTEXT: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
+/// Spotify's own public DJ playlist. Lexicon resolves against it, and it is
+/// also the fallback context when Lexicon refuses to resolve at all.
+pub const DEFAULT_DJ_CONTEXT: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
+
+/// Marks a `DjSession` that was built by the fallback path rather than by
+/// Lexicon. The UI keys its "this is the playlist, not the dynamic mix"
+/// explanation off this exact value, so it is a constant on both sides rather
+/// than a prose string that could drift.
+pub const FALLBACK_REASON: &str = "lexicon-unavailable-fallback";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +54,26 @@ pub struct DjTrack {
     pub narration_image_url: Option<String>,
     #[serde(skip_serializing)]
     pub metadata: BTreeMap<String, String>,
+}
+
+/// The session the app reports when Lexicon is unavailable.
+///
+/// `available` is true because something *will* play; everything describing
+/// the dynamic features is false, because none of them are present. Callers
+/// must not treat this as a resolved Lexicon session — `dynamic_refill_supported`
+/// being false is what stops `spawn_dj_refill` trying to replenish from an
+/// endpoint that already refused.
+pub fn fallback_session() -> DjSession {
+    DjSession {
+        available: true,
+        context_uri: DEFAULT_DJ_CONTEXT.to_owned(),
+        context_url: Some(format!(
+            "https://open.spotify.com/playlist/{}",
+            DEFAULT_DJ_CONTEXT.trim_start_matches("spotify:playlist:")
+        )),
+        reason: FALLBACK_REASON.to_owned(),
+        ..Default::default()
+    }
 }
 
 pub struct DjClient {
@@ -127,6 +155,13 @@ impl DjClient {
         let session = parse_session(&value, &context_uri, reason)?;
         *self.cached.write().await = Some(session.clone());
         Ok(session)
+    }
+
+    /// Installs a session built outside `resolve` — currently only the
+    /// Lexicon-unavailable fallback — so `cached()` and the DJ refill check
+    /// see a consistent view of what is actually playing.
+    pub async fn set_cached(&self, session: DjSession) {
+        *self.cached.write().await = Some(session);
     }
 
     pub async fn update_status(&self, active: bool, narration_resolved: bool) {
