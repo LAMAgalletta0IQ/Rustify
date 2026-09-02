@@ -312,18 +312,44 @@ impl JamController {
         // Reuse librespot's authenticated Dealer connection. Opening a second
         // websocket here would create a different server-assigned connection
         // id than the Connect device and social-connect HTTP requests use.
-        let mut session_updates = session
-            .dealer()
-            .add_listen_for("social-connect/v2/session_update")
-            .map_err(|error| {
-                AppError::Other(format!("subscribe to Jam session updates: {error}"))
-            })?;
-        let mut broadcast_updates = session
-            .dealer()
-            .add_listen_for("social-connect/v2/broadcast_status_update")
-            .map_err(|error| {
-                AppError::Other(format!("subscribe to Jam broadcast updates: {error}"))
-            })?;
+        // DealerManager::start() takes the Builder asynchronously; a jam
+        // created immediately after login races the same "Builder wasn't
+        // available" window as remote_state/friends. Retry briefly rather
+        // than failing the controller.
+        async fn subscribe_with_retry(
+            session: &Session,
+            topic: &str,
+        ) -> AppResult<librespot::core::dealer::Subscription> {
+            let mut delay = std::time::Duration::from_millis(200);
+            for attempt in 0..12 {
+                match session.dealer().add_listen_for(topic) {
+                    Ok(sub) => return Ok(sub),
+                    Err(error) if error.to_string().contains("Builder wasn't available") => {
+                        if attempt == 11 {
+                            return Err(AppError::Other(format!(
+                                "subscribe to Jam {topic}: dealer not ready after retries: {error}"
+                            )));
+                        }
+                        log::debug!("jams: dealer not yet ready for {topic}, retrying in {delay:?}: {error}");
+                        tokio::time::sleep(delay).await;
+                        delay = (delay * 2).min(std::time::Duration::from_secs(2));
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(AppError::Other(format!(
+                            "subscribe to Jam {topic}: {error}"
+                        )));
+                    }
+                }
+            }
+            Err(AppError::Other(format!(
+                "subscribe to Jam {topic}: dealer not ready after retries"
+            )))
+        }
+        let mut session_updates =
+            subscribe_with_retry(&session, "social-connect/v2/session_update").await?;
+        let mut broadcast_updates =
+            subscribe_with_retry(&session, "social-connect/v2/broadcast_status_update").await?;
         let session_state = Arc::new(tokio::sync::RwLock::new(None));
         let state_for_updates = session_state.clone();
         let app = app.clone();

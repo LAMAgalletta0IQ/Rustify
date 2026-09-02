@@ -16,7 +16,7 @@ use librespot::protocol::player::PlayerState;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::connect::Device;
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::queue::{self, QueueView};
 use crate::state::{events, AppState, ConnectionStatus, TrackInfo};
 
@@ -35,14 +35,46 @@ struct ApplyOutcome {
     queue_changed: bool,
 }
 
+fn is_builder_not_available(error: &librespot::core::Error) -> bool {
+    error.to_string().contains("Builder wasn't available")
+}
+
 pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime::JoinHandle<()>> {
     let local_device_id = session.device_id().to_string();
-    let mut updates = session
-        .dealer()
-        .add_listen_for(CLUSTER_TOPIC)
-        .map_err(|error| AppError::Other(format!("subscribe to Connect state: {error}")))?;
-
     Ok(tauri::async_runtime::spawn(async move {
+        // DealerManager::start() takes the Builder and launches the websocket
+        // asynchronously. While that future is in flight `inner.builder` is
+        // None and `inner.dealer` is not yet Some, so any concurrent
+        // add_listen_for sees "Builder wasn't available". This is a transient
+        // race that coincides exactly with `establish()` calling this right
+        // after `Spirc::new` — the Spirc task has been spawned but has not
+        // yet finished `dealer.start()`. Retry with backoff instead of
+        // bubbling the error up as a fatal login failure.
+        let mut updates = {
+            let mut delay = std::time::Duration::from_millis(200);
+            loop {
+                match session.dealer().add_listen_for(CLUSTER_TOPIC) {
+                    Ok(subscription) => break subscription,
+                    Err(error) if is_builder_not_available(&error) => {
+                        log::debug!(
+                            "spotify.connect: dealer not yet ready, retrying subscription in {delay:?}: {error}"
+                        );
+                        tokio::time::sleep(delay).await;
+                        delay = (delay * 2).min(std::time::Duration::from_secs(2));
+                        continue;
+                    }
+                    Err(error) => {
+                        // Any other subscription error is not the transient race
+                        // — surface it and keep retrying via the normal resubscribe
+                        // path rather than failing the entire login.
+                        log::warn!("spotify.connect: subscribe to Connect state failed: {error}");
+                        mark_recovering(&app).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+                }
+            }
+        };
         let mut retry = std::time::Duration::from_secs(1);
         loop {
             while let Some(message) = updates.next().await {

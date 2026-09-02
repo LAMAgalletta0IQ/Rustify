@@ -451,13 +451,37 @@ fn enqueue_refresh(
     }));
 }
 
-pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime::JoinHandle<()>> {
-    let mut updates = session
-        .dealer()
-        .add_listen_for(PRESENCE_TOPIC)
-        .map_err(|error| AppError::Other(format!("subscribe to friend presence: {error}")))?;
+fn is_builder_not_available(error: &librespot::core::Error) -> bool {
+    error.to_string().contains("Builder wasn't available")
+}
 
+pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime::JoinHandle<()>> {
     Ok(tauri::async_runtime::spawn(async move {
+        let mut updates = {
+            let mut delay = Duration::from_millis(200);
+            loop {
+                match session.dealer().add_listen_for(PRESENCE_TOPIC) {
+                    Ok(subscription) => break subscription,
+                    Err(error) if is_builder_not_available(&error) => {
+                        log::debug!(
+                            target: "spotify.social",
+                            "dealer not yet ready, retrying friend presence subscription in {delay:?}: {error}"
+                        );
+                        tokio::time::sleep(delay).await;
+                        delay = (delay * 2).min(Duration::from_secs(2));
+                        continue;
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            target: "spotify.social",
+                            "subscribe to friend presence failed: {error}"
+                        );
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
+                }
+            }
+        };
         let mut check = tokio::time::interval(CONNECTION_CHECK_INTERVAL);
         check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut last_connection_id = String::new();
