@@ -509,7 +509,7 @@ README describes, stripped to its actual promise.
 | Feature | Private endpoints? | If Spotify breaks it |
 | --- | --- | --- |
 | Jams | Yes (`social-connect/v2`, scraped Pathfinder `sha256Hash` persisted queries — see `README_jams.md`) | Expected to need re-capture periodically; not a regression to chase urgently |
-| DJ | Yes (Lexicon, already 403s for most accounts) | Falls back to the public DJ playlist (`reason: "lexicon-unavailable-fallback"`); narration was never playable regardless (needs a second audio pipeline, see the README's known limitations) |
+| DJ | Yes (Lexicon, already 403s for most accounts, plus `client-tts/v1/fulfill` for narration) | Falls back to the public DJ playlist (`reason: "lexicon-unavailable-fallback"`); narration plays through an independent `cpal` stream sequenced around each track (see `narration.rs`) rather than through Lexicon at all, so its own breakage is separate from Lexicon's |
 | Music videos | Yes (capability probe only; no playback — protected stream) | Capability badge disappears; nothing was ever playable here to lose |
 | Lossless / audio-capability probing | Yes (capability probe only; no playback — needs a PlayPlay key this project will not extract) | Capability badge disappears; same as above, nothing playable to lose |
 | Telemetry (`telemetry.rs`) | No — deliberately never transmitted, bounded local ledger only | Cannot "break" externally; it has no upstream endpoint to depend on |
@@ -541,7 +541,23 @@ rows, since it makes no outbound request at all.
     If that remains true indefinitely (no realistic path to an obtainable
     PlayPlay key or unprotected video stream), the maintenance cost of
     tracking their probe endpoints may not be worth a badge.
-  - **DJ narration** was already flagged as "defer indefinitely" in prior
-    review notes (needs a second audio pipeline the app does not have); the
-    module's non-narration parts (dynamic music playback, Lexicon fallback)
-    are more defensible to keep than narration is to ever finish.
+  - **DJ narration** was flagged as "defer indefinitely" in prior review
+    notes, on the grounds that it needed a second audio pipeline the app did
+    not have.
+
+    > Until 2026-09 this bullet listed narration as a standing deletion
+    > candidate for exactly that reason. It no longer is: `narration.rs` plays
+    > a resolved clip (fetched from `client-tts/v1/fulfill`'s signed CDN URL,
+    > decoded with `symphonia`) through an independent, short-lived `cpal`
+    > stream on the same output device, sequenced by pausing/loading around
+    > each DJ track (`player::spawn_dj_advance`) rather than mixed into
+    > librespot's own Sink chain — the real client doesn't mix narration with
+    > the track either (`ms_narration_overlapping = 0`), so no PCM mixing was
+    > ever needed, only sequencing. That did require switching DJ from
+    > queueing every resolved track into Spirc upfront to loading one at a
+    > time; DJ tracks no longer crossfade into each other as a result, and
+    > Rustify's queue view has nothing to show as "up next" during a DJ
+    > session until the moment it loads (see `spawn_dj_advance`'s doc comment
+    > for the full tradeoff). Re-evaluate this feature on the same
+    > maintenance-cost basis as the rest of DJ, not on narration-infeasibility
+    > grounds — that reason is gone.
