@@ -5,7 +5,8 @@ use librespot::core::authentication::Credentials;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::audio::{
-    self, AudioDevice, AudioStatus, EqualizerPreset, EqualizerSettings, StreamQuality,
+    self, AudioDevice, AudioStatus, EqualizerPreset, EqualizerSettings, LoudnessSettings,
+    StreamQuality,
 };
 use crate::auth;
 use crate::error::{AppError, AppResult};
@@ -56,6 +57,7 @@ pub struct AppSettings {
     pub crossfade_seconds: u8,
     pub output_device: Option<String>,
     pub equalizer: EqualizerSettings,
+    pub loudness: LoudnessSettings,
     pub friends_panel_open: bool,
 }
 
@@ -78,6 +80,7 @@ impl From<auth::Settings> for AppSettings {
             crossfade_seconds: value.crossfade_seconds,
             output_device: value.output_device,
             equalizer: value.equalizer,
+            loudness: value.loudness,
             friends_panel_open: value.friends_panel_open,
         }
     }
@@ -170,6 +173,7 @@ pub fn update_settings(
     }
     validate_crossfade(settings.crossfade_seconds)?;
     audio::validate_equalizer(&settings.equalizer)?;
+    audio::validate_loudness(&settings.loudness)?;
 
     let mut persisted = auth::settings_or_default(&data_dir);
     persisted.reduce_motion = settings.reduce_motion;
@@ -178,6 +182,7 @@ pub fn update_settings(
     persisted.crossfade_seconds = settings.crossfade_seconds;
     persisted.output_device = settings.output_device;
     persisted.equalizer = settings.equalizer;
+    persisted.loudness = settings.loudness;
     persisted.friends_panel_open = settings.friends_panel_open;
     auth::save_settings(&data_dir, &persisted)?;
     state
@@ -289,6 +294,7 @@ async fn establish(
 
     let settings = auth::settings_or_default(&data_dir);
     audio::validate_equalizer(&settings.equalizer)?;
+    audio::validate_loudness(&settings.loudness)?;
     state
         .audio
         .configure(settings.output_device.clone(), settings.equalizer.clone());
@@ -315,6 +321,7 @@ async fn establish(
             cache_limit_mb: settings.cache_limit_mb,
             quality: settings.audio_quality,
             crossfade_seconds: settings.crossfade_seconds,
+            loudness: settings.loudness,
         },
         generation,
     )

@@ -100,6 +100,43 @@ impl Default for EqualizerSettings {
     }
 }
 
+/// Track/album loudness normalization toward Spotify's own -14 LUFS target
+/// (ITU-R BS.1770), applied by the pinned librespot fork itself
+/// (`PlayerConfig.normalisation*`) rather than anything Rustify computes —
+/// see `player::playback_config`. `pregain_db` is the one knob exposed here;
+/// librespot's own normalisation type/method/compressor tuning
+/// (`NormalisationType::Auto`, `NormalisationMethod::Dynamic`, and its
+/// threshold/attack/release/knee defaults) are left as-is rather than turned
+/// into more settings than this app needs.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoudnessSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub pregain_db: f32,
+}
+
+impl Default for LoudnessSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            pregain_db: 0.0,
+        }
+    }
+}
+
+pub fn validate_loudness(settings: &LoudnessSettings) -> AppResult<()> {
+    if !settings.pregain_db.is_finite()
+        || !(MIN_GAIN_DB..=MAX_GAIN_DB).contains(&settings.pregain_db)
+    {
+        return Err(AppError::BadRequest(
+            "Loudness pregain must be between -12 dB and +12 dB.".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn builtin_presets() -> Vec<EqualizerPreset> {
     [
         ("flat", "Flat", [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.0),

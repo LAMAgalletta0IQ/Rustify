@@ -9,7 +9,7 @@ use librespot_oauth::{OAuthClientBuilder, OAuthToken};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
-use crate::audio::{EqualizerSettings, StreamQuality};
+use crate::audio::{EqualizerSettings, LoudnessSettings, StreamQuality};
 use crate::error::{AppError, AppResult};
 use crate::state::{events, AppState, AuthState, PlaybackState, TokenStore};
 use crate::webapi::WebApi;
@@ -170,6 +170,10 @@ pub struct Settings {
     pub output_device: Option<String>,
     #[serde(default)]
     pub equalizer: EqualizerSettings,
+    /// Track/album loudness normalization toward Spotify's -14 LUFS target,
+    /// applied by the pinned librespot fork itself. See `audio::LoudnessSettings`.
+    #[serde(default)]
+    pub loudness: LoudnessSettings,
     /// Whether the collapsible Friend Activity rail is open. Defaults to
     /// `true` to match the rail's previous always-visible behaviour on Home.
     #[serde(default = "default_friends_panel_open")]
@@ -200,6 +204,7 @@ impl Default for Settings {
             crossfade_seconds: 0,
             output_device: None,
             equalizer: EqualizerSettings::default(),
+            loudness: LoudnessSettings::default(),
             friends_panel_open: default_friends_panel_open(),
         }
     }

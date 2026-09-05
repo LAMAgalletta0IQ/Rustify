@@ -51,6 +51,10 @@ const defaultSettings: AppSettings = {
     activePresetId: "flat",
     customPresets: [],
   },
+  loudness: {
+    enabled: false,
+    pregainDb: 0,
+  },
   friendsPanelOpen: true,
 };
 

@@ -351,6 +351,14 @@
       <span><strong>Crossfade</strong><small>Equal-power decoder overlap between consecutive tracks. Applied to the next local playback session; turn it off for spoken-word listening.</small></span>
       <span class="range-row"><input type="range" min="0" max="12" step="1" bind:value={draft.crossfadeSeconds} aria-label="Crossfade duration" /><output>{draft.crossfadeSeconds === 0 ? "Off" : `${draft.crossfadeSeconds}s`}</output></span>
     </label>
+    <div class="field">
+      <span><strong>Loudness normalization</strong><small>Levels tracks toward Spotify's own -14 LUFS target. Applied to the next local playback session.</small></span>
+      <label class="toggle"><input type="checkbox" checked={draft.loudness.enabled} onchange={(event) => { draft.loudness = { ...draft.loudness, enabled: event.currentTarget.checked }; }} /><span aria-hidden="true"></span><strong>{draft.loudness.enabled ? "Enabled" : "Off"}</strong></label>
+    </div>
+    <label class="field">
+      <span><strong>Pregain</strong><small>Extra gain applied on top of normalization, in either direction.</small></span>
+      <span class="range-row"><input type="range" min="-12" max="12" step="0.5" disabled={!draft.loudness.enabled} bind:value={draft.loudness.pregainDb} aria-label="Loudness pregain" /><output>{draft.loudness.pregainDb > 0 ? "+" : ""}{draft.loudness.pregainDb} dB</output></span>
+    </label>
   </section>
 
   <section>

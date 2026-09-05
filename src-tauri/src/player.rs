@@ -16,7 +16,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
-use crate::audio::{self, StreamQuality};
+use crate::audio::{self, LoudnessSettings, StreamQuality};
 use crate::connect;
 use crate::error::{AppError, AppResult};
 use crate::state::{events, AppState, ConnectionStatus, PlaybackState, TokenStore, TrackInfo};
@@ -29,7 +29,11 @@ pub fn percent_to_volume(percent: u8) -> u16 {
     ((percent.min(100) as u32 * MAX_VOLUME as u32) / 100) as u16
 }
 
-fn playback_config(quality: StreamQuality, crossfade_seconds: u8) -> PlayerConfig {
+fn playback_config(
+    quality: StreamQuality,
+    crossfade_seconds: u8,
+    loudness: LoudnessSettings,
+) -> PlayerConfig {
     PlayerConfig {
         bitrate: quality.bitrate(),
         // Besides keeping long-form UI state fresh, this gives podcast
@@ -41,6 +45,15 @@ fn playback_config(quality: StreamQuality, crossfade_seconds: u8) -> PlayerConfi
         // PlayerConfig's default keeps gapless playback enabled; crossfade
         // depends on that continuous sink and must not regress it when off.
         crossfade: std::time::Duration::from_secs(crossfade_seconds.into()),
+        // Toward Spotify's own -14 LUFS target, using whichever of
+        // track/album gain metadata the pinned librespot fork's own
+        // `NormalisationType::Auto` picks and its `Dynamic` compressor
+        // (both defaults, left untouched — see `audio::LoudnessSettings`).
+        // Like `crossfade`, this is baked into `PlayerConfig` at session
+        // start: a Settings change here takes effect on the next login, not
+        // instantly, the same as crossfade already does.
+        normalisation: loudness.enabled,
+        normalisation_pregain_db: loudness.pregain_db as f64,
         ..Default::default()
     }
 }
@@ -64,9 +77,10 @@ pub async fn start_session(
         cache_limit_mb,
         quality,
         crossfade_seconds,
+        loudness,
     } = options;
     let session_config = SessionConfig::default();
-    let player_config = playback_config(quality, crossfade_seconds);
+    let player_config = playback_config(quality, crossfade_seconds, loudness);
     let audio_format = AudioFormat::default();
     let mixer_config = MixerConfig::default();
 
@@ -156,6 +170,7 @@ pub struct PlaybackOptions {
     pub cache_limit_mb: u32,
     pub quality: StreamQuality,
     pub crossfade_seconds: u8,
+    pub loudness: LoudnessSettings,
 }
 
 pub struct StartedSession {
@@ -992,13 +1007,30 @@ mod tests {
 
     #[test]
     fn crossfade_enables_gapless_and_reaches_decoder_config() {
-        let disabled = playback_config(StreamQuality::Normal, 0);
+        let disabled = playback_config(StreamQuality::Normal, 0, LoudnessSettings::default());
         assert!(disabled.crossfade.is_zero());
         assert!(disabled.gapless);
 
-        let enabled = playback_config(StreamQuality::VeryHigh, 7);
+        let enabled = playback_config(StreamQuality::VeryHigh, 7, LoudnessSettings::default());
         assert_eq!(enabled.crossfade, std::time::Duration::from_secs(7));
         assert!(enabled.gapless);
+    }
+
+    #[test]
+    fn loudness_normalization_reaches_decoder_config() {
+        let disabled = playback_config(StreamQuality::Normal, 0, LoudnessSettings::default());
+        assert!(!disabled.normalisation);
+
+        let enabled = playback_config(
+            StreamQuality::Normal,
+            0,
+            LoudnessSettings {
+                enabled: true,
+                pregain_db: 3.5,
+            },
+        );
+        assert!(enabled.normalisation);
+        assert_eq!(enabled.normalisation_pregain_db, 3.5);
     }
 
     #[test]

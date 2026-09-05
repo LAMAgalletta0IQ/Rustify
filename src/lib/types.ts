@@ -79,6 +79,7 @@ export interface AppSettings {
   crossfadeSeconds: number;
   outputDevice: string | null;
   equalizer: EqualizerSettings;
+  loudness: LoudnessSettings;
   friendsPanelOpen: boolean;
 }
 
@@ -98,6 +99,14 @@ export interface EqualizerSettings {
   autoHeadroom: boolean;
   activePresetId: string | null;
   customPresets: EqualizerPreset[];
+}
+
+/** Toward Spotify's own -14 LUFS target, applied by the pinned librespot
+ * fork itself (see `player::playback_config` on the Rust side). Takes effect
+ * on the next login, not instantly — the same as `crossfadeSeconds`. */
+export interface LoudnessSettings {
+  enabled: boolean;
+  pregainDb: number;
 }
 
 export interface AudioDevice {
