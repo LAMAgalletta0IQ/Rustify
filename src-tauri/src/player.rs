@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use librespot::connect::{ConnectConfig, Spirc};
+use librespot::connect::{ConnectConfig, LoadRequest, LoadRequestOptions, Spirc};
 use librespot::core::authentication::Credentials;
 use librespot::core::cache::Cache;
 use librespot::core::config::{DeviceType, SessionConfig};
@@ -321,7 +321,7 @@ fn spawn_event_pump(
                     if track_id.item_type() == "episode" {
                         crate::podcasts::spawn_report(session.clone(), track_id.to_uri(), 0, true);
                     }
-                    spawn_dj_refill(app.clone(), session.clone(), track_id.to_uri());
+                    spawn_dj_advance(app.clone(), session.clone(), track_id.to_uri());
                     state.sleep_timer.on_end_of_track(&app).await;
                     continue;
                 }
@@ -477,69 +477,174 @@ async fn recover_closed_session(app: AppHandle, generation: u64) {
         .store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// Best-effort compatibility bridge until librespot itself understands
-/// Lexicon/hm:// dynamic contexts. It only runs for a track from the active DJ
-/// window and only when the observable queue is low. Failures never interrupt
-/// music playback.
-fn spawn_dj_refill(app: AppHandle, session: Session, ended_uri: String) {
+/// Drives DJ playback one track at a time: an outro for the track that just
+/// ended (if it has one), Lexicon refill when the resolved track list is
+/// running low, an intro for whichever track comes next (if it has one), then
+/// the load that actually starts it.
+///
+/// DJ tracks are deliberately never queued into Spirc via `add_to_queue`
+/// anymore (compare the previous, queue-based implementation this replaced):
+/// playing narration between tracks means Rustify has to decide *when* the
+/// next track starts, and Spirc's own queue auto-advance/crossfade would race
+/// that decision — see `narration.rs`'s doc comment for why narration can't
+/// simply be mixed into librespot's Sink chain instead. A side effect,
+/// documented rather than silently accepted: DJ tracks no longer crossfade
+/// into each other regardless of the crossfade setting (nothing is ever
+/// queued for librespot's own crossfade to preload against), and Rustify's
+/// queue view has nothing to show as "up next" during a DJ session, because
+/// nothing actually is, in Spirc's own queue, until the moment it loads.
+///
+/// Only runs for a track from the active DJ session. Narration failures are
+/// logged and skipped, never allowed to interrupt the music — matching
+/// go-librespot's own "a failing narration clip is not a real error"
+/// behavior for the same case.
+fn spawn_dj_advance(app: AppHandle, session: Session, ended_uri: String) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        let Some(previous) = state.internal_spotify.cached_dj().await else {
+        let Some(mut dj) = state.internal_spotify.cached_dj().await else {
             return;
         };
-        if !previous.active || !previous.tracks.iter().any(|track| track.uri == ended_uri) {
+        if !dj.active || !dj.dynamic_refill_supported {
             return;
         }
-        let remaining = {
-            let queue = state.queue.read().await;
-            queue.queue.len() + queue.autoplay.len()
+        let Some(ended_index) = dj.tracks.iter().position(|track| track.uri == ended_uri) else {
+            return;
         };
-        if remaining >= 8 || !state.internal_spotify.begin_dj_refill() {
+        if !state.internal_spotify.begin_dj_refill() {
             return;
         }
 
-        let outcome = async {
-            let refreshed = state.internal_spotify.resolve_dj(&session, false).await?;
-            let queued = {
-                let queue = state.queue.read().await;
-                queue
-                    .queue
-                    .iter()
-                    .chain(&queue.autoplay)
-                    .map(|track| track.uri.clone())
-                    .collect::<Vec<_>>()
-            };
-            let additions: Vec<_> =
-                crate::spotify::dj_refill_uris(&previous, &refreshed, queued, 32)
-                    .iter()
-                    .filter_map(|uri| SpotifyUri::from_uri(uri).ok())
-                    .collect();
-            if additions.is_empty() {
-                return Ok::<usize, AppError>(0);
+        play_narration_if_present(&app, &session, dj.tracks[ended_index].clone(), "outro").await;
+
+        // Keep enough lookahead that a refill always lands before it is
+        // needed, mirroring the old queue-depth heuristic but against
+        // Rustify's own resolved-track-list index rather than Spirc's queue.
+        if dj.tracks.len().saturating_sub(ended_index) <= 8 {
+            match state.internal_spotify.resolve_dj(&session, false).await {
+                Ok(refreshed) => {
+                    let known: std::collections::HashSet<_> =
+                        dj.tracks.iter().map(|track| track.uri.clone()).collect();
+                    dj.tracks
+                        .extend(crate::spotify::dj_new_tracks(&known, refreshed.tracks));
+                    state.internal_spotify.dj.set_cached(dj.clone()).await;
+                }
+                Err(error) => {
+                    log::warn!(target: "spotify.dj", "dynamic session refill failed: {error}")
+                }
             }
-            let spotify = state.spotify.read().await;
-            let spotify = spotify.as_ref().ok_or(AppError::NotLoggedIn)?;
-            for uri in &additions {
-                spotify.spirc.add_to_queue(uri.clone())?;
-            }
-            Ok(additions.len())
         }
-        .await;
+
+        // Drop tracks that have already played: an open-ended DJ session
+        // would otherwise grow this list for as long as the app keeps
+        // running, for no benefit — nothing before the current track is ever
+        // looked up again.
+        if ended_index > 0 {
+            dj.tracks.drain(..ended_index);
+            state.internal_spotify.dj.set_cached(dj.clone()).await;
+        }
+        let ended_index = 0;
 
         state.internal_spotify.finish_dj_refill();
+
+        let Some(next) = dj.tracks.get(ended_index + 1).cloned() else {
+            log::debug!(target: "spotify.dj", "reached the end of the resolvable DJ session");
+            state
+                .internal_spotify
+                .dj
+                .update_status(false, dj.narration_resolved)
+                .await;
+            return;
+        };
+
+        play_narration_if_present(&app, &session, next.clone(), "intro").await;
+
+        let load_result = {
+            let spotify = state.spotify.read().await;
+            match spotify.as_ref() {
+                Some(spotify) => spotify.spirc.load(LoadRequest::from_tracks(
+                    vec![next.uri.clone()],
+                    LoadRequestOptions {
+                        start_playing: true,
+                        ..Default::default()
+                    },
+                )),
+                None => return,
+            }
+        };
+        if let Err(error) = load_result {
+            log::warn!(target: "spotify.dj", "failed to advance to next DJ track: {error}");
+            return;
+        }
         state
             .internal_spotify
             .dj
-            .update_status(true, previous.narration_resolved)
+            .update_status(true, dj.narration_resolved)
             .await;
-        match outcome {
-            Ok(0) => log::debug!(target: "spotify.dj", "Lexicon refill returned no new tracks"),
-            Ok(count) => {
-                log::debug!(target: "spotify.dj", "added {count} refreshed Lexicon tracks")
-            }
-            Err(error) => log::warn!(target: "spotify.dj", "dynamic queue refill failed: {error}"),
-        }
     });
+}
+
+/// Plays a DJ track's intro narration clip, if it has one. Public entry point
+/// for `commands::discovery::start_dj`, which controls the very first DJ
+/// track's load directly rather than through `spawn_dj_advance` (there is no
+/// "previous track" to fire an `EndOfTrack` and trigger it otherwise).
+pub(crate) async fn play_dj_intro(
+    app: &AppHandle,
+    session: &Session,
+    track: &crate::spotify::DjTrack,
+) {
+    play_narration_if_present(app, session, track.clone(), "intro").await;
+}
+
+/// Resolves, fetches, decodes and plays one track's narration clip of the
+/// given kind ("intro" or "outro"), if it has a script for it. Every failure
+/// mode — no script, resolution error, fetch error, decode error, playback
+/// error — is a no-op: narration is a nice-to-have around the music, never a
+/// gate on it playing.
+async fn play_narration_if_present(
+    app: &AppHandle,
+    session: &Session,
+    track: crate::spotify::DjTrack,
+    kind: &str,
+) {
+    if !track.narration_kinds.iter().any(|k| k == kind) {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let resolved = match state
+        .internal_spotify
+        .resolve_dj_narration(session, &track, kind)
+        .await
+    {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return,
+        Err(error) => {
+            log::warn!(target: "spotify.dj", "{kind} narration resolution failed, skipping it: {error}");
+            return;
+        }
+    };
+    let bytes = match crate::narration::fetch_clip(
+        state.internal_spotify.dj.audio_client(),
+        &resolved.url,
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            log::warn!(target: "spotify.dj", "{kind} narration fetch failed, skipping it: {error}");
+            return;
+        }
+    };
+    let gain = crate::narration::narration_gain(resolved.loudness_db, resolved.true_peak_db, 0.0);
+    let samples = match crate::narration::decode_clip(bytes, gain) {
+        Ok(samples) => samples,
+        Err(error) => {
+            log::warn!(target: "spotify.dj", "{kind} narration decode failed, skipping it: {error}");
+            return;
+        }
+    };
+    if let Err(error) = crate::narration::play_clip(&state.audio, samples).await {
+        log::warn!(target: "spotify.dj", "{kind} narration playback failed: {error}");
+    }
 }
 
 fn spawn_resume_lookup(app: AppHandle, session: Session, uri: String) {

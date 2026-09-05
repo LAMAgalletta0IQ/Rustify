@@ -14,8 +14,8 @@ mod users;
 pub use artist_extras::ArtistStats;
 pub use concerts::ConcertFeed;
 pub use credits::TrackCredits;
-pub(crate) use dj::refill_uris as dj_refill_uris;
-pub use dj::DjSession;
+pub(crate) use dj::new_tracks as dj_new_tracks;
+pub use dj::{DjSession, DjTrack, ResolvedNarration};
 pub use home::HomeFeed;
 pub use playlist_contents::PlaylistContentsPage;
 pub use users::UserSearchPage;
@@ -225,6 +225,30 @@ impl InternalSpotify {
                     .await
                     .map_err(AppError::from)?,
                 dj,
+                &auth.access_token,
+                &auth.client_token,
+                &auth.connection_id,
+            )
+            .await
+    }
+
+    /// Resolves one DJ track's narration clip (see `dj::DjClient::resolve_narration`).
+    pub async fn resolve_dj_narration(
+        &self,
+        session: &Session,
+        track: &DjTrack,
+        kind: &str,
+    ) -> AppResult<Option<ResolvedNarration>> {
+        let auth = first_party_auth(session).await?;
+        self.dj
+            .resolve_narration(
+                session
+                    .spclient()
+                    .base_url()
+                    .await
+                    .map_err(AppError::from)?,
+                track,
+                kind,
                 &auth.access_token,
                 &auth.client_token,
                 &auth.connection_id,

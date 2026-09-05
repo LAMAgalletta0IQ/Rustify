@@ -328,8 +328,6 @@
             <p>Your personalized mix, picked and introduced for you.</p>
             {#if dj.reason === DJ_FALLBACK_REASON}
               <p class="dj-note">Spotify restricts the personalized DJ mix and its AI voice intros to its own clients, so this plays the public DJ playlist instead.</p>
-            {:else if dj.narrationResolved && !dj.narrationPlaybackSupported}
-              <p class="dj-note">Voice intros aren’t available in this app yet — the music still plays.</p>
             {/if}
           {:else if djError}
             <p>{djError}</p>

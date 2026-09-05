@@ -36,8 +36,12 @@ pub struct DjSession {
     pub active: bool,
     /// The TTS endpoint accepted at least one real narration script.
     pub narration_resolved: bool,
-    /// The pinned librespot player cannot yet wrap its decoder with arbitrary
-    /// narration audio. Keep this separate from endpoint reachability.
+    /// Rustify can play a resolved narration clip through its own
+    /// independent `cpal` stream (see `narration.rs`), sequenced around the
+    /// DJ track rather than mixed into librespot's Sink chain. Kept separate
+    /// from `narration_resolved` (endpoint reachability): a clip can still
+    /// fail per-track (fetch/decode/device error) and that degrades silently
+    /// rather than gating playback of the music.
     pub narration_playback_supported: bool,
     /// Rustify can replenish music URIs through Lexicon as the queue drains.
     pub dynamic_refill_supported: bool,
@@ -61,7 +65,7 @@ pub struct DjTrack {
 /// `available` is true because something *will* play; everything describing
 /// the dynamic features is false, because none of them are present. Callers
 /// must not treat this as a resolved Lexicon session — `dynamic_refill_supported`
-/// being false is what stops `spawn_dj_refill` trying to replenish from an
+/// being false is what stops `spawn_dj_advance` trying to replenish from an
 /// endpoint that already refused.
 pub fn fallback_session() -> DjSession {
     DjSession {
@@ -102,6 +106,13 @@ impl Default for DjClient {
 }
 
 impl DjClient {
+    /// Shared client for fetching resolved narration audio clips. Reuses the
+    /// same general-purpose (20s timeout) client already used for Lexicon
+    /// resolve calls rather than standing up a third one.
+    pub fn audio_client(&self) -> &Client {
+        &self.http
+    }
+
     pub async fn cached(&self) -> Option<DjSession> {
         self.cached.read().await.clone()
     }
@@ -181,9 +192,10 @@ impl DjClient {
         self.refill_in_flight.store(false, Ordering::Release);
     }
 
-    /// Resolves the first narration clip to its short-lived signed audio URL.
-    /// The URL never leaves this backend method and is not cached or logged.
-    /// Audio injection consumes this same seam in the hardening pass.
+    /// Resolves the first narration clip found in the session to its
+    /// short-lived signed audio URL, purely as a preflight capability check —
+    /// the URL itself is discarded. Used by `start_dj` to report
+    /// `narration_resolved` without committing to playing anything yet.
     pub async fn prepare_first_narration(
         &self,
         base_url: String,
@@ -200,9 +212,37 @@ impl DjClient {
         }) else {
             return Ok(false);
         };
+        let resolved = self
+            .resolve_narration(
+                base_url,
+                track,
+                kind,
+                access_token,
+                client_token,
+                connection_id,
+            )
+            .await?;
+        Ok(resolved.is_some())
+    }
+
+    /// Resolves one track's narration clip of the given `kind` ("intro",
+    /// "jump" or "outro") to its short-lived signed CDN URL, loudness gain
+    /// inputs, and everything `narration::play_clip` needs downstream.
+    /// Returns `None` when the track has no script for that kind, rather than
+    /// an error — most tracks in a DJ session have no narration at all, and
+    /// that is the ordinary case, not a failure.
+    pub async fn resolve_narration(
+        &self,
+        base_url: String,
+        track: &DjTrack,
+        kind: &str,
+        access_token: &str,
+        client_token: &str,
+        connection_id: &str,
+    ) -> AppResult<Option<ResolvedNarration>> {
         let prefix = format!("narration.{kind}");
         let Some(ssml) = track.metadata.get(&format!("{prefix}.ssml")) else {
-            return Ok(false);
+            return Ok(None);
         };
         let body = tts_request(
             ssml,
@@ -238,31 +278,54 @@ impl DjClient {
                 AppError::LexiconUnavailable(
                     "narration fulfillment returned no secure audio location".into(),
                 )
-            })?;
+            })?
+            .to_owned();
         log::debug!(target: "spotify.dj", "resolved {kind} narration for {} (signed URL redacted, {} chars)", track.uri, location.len());
-        Ok(true)
+        let (loudness_db, true_peak_db) = narration_loudness(&track.metadata, &prefix);
+        Ok(Some(ResolvedNarration {
+            url: location,
+            loudness_db,
+            true_peak_db,
+        }))
     }
 }
 
-pub(crate) fn refill_uris(
-    previous: &DjSession,
-    refreshed: &DjSession,
-    queued: impl IntoIterator<Item = String>,
-    limit: usize,
-) -> Vec<String> {
-    let mut known: HashSet<_> = previous
-        .tracks
-        .iter()
-        .map(|track| track.uri.clone())
-        .chain(queued)
-        .collect();
+/// A resolved narration clip, ready to be fetched and played.
+pub struct ResolvedNarration {
+    pub url: String,
+    pub loudness_db: Option<f32>,
+    pub true_peak_db: Option<f32>,
+}
+
+/// Filters a freshly-resolved track list down to the ones not already known,
+/// preserving order and dropping duplicates within `refreshed` itself. Used
+/// by `player::spawn_dj_advance` to extend its resolved track list without
+/// re-adding a track it has already seen (or already played).
+pub(crate) fn new_tracks(known: &HashSet<String>, refreshed: Vec<DjTrack>) -> Vec<DjTrack> {
+    let mut seen = known.clone();
     refreshed
-        .tracks
-        .iter()
-        .map(|track| track.uri.clone())
-        .filter(|uri| known.insert(uri.clone()))
-        .take(limit)
+        .into_iter()
+        .filter(|track| seen.insert(track.uri.clone()))
         .collect()
+}
+
+/// Reads the loudness and true peak a track's narration metadata declares for
+/// one clip kind. Absence must be reported as `None`, not `0.0`: a caller
+/// normalising against 0 LUFS would attenuate real speech to nothing.
+fn narration_loudness(
+    metadata: &BTreeMap<String, String>,
+    prefix: &str,
+) -> (Option<f32>, Option<f32>) {
+    let loudness = metadata
+        .get(&format!("{prefix}.loudness"))
+        .and_then(|value| value.parse::<f32>().ok());
+    let true_peak = metadata
+        .get(&format!("{prefix}.true_peak"))
+        .and_then(|value| value.parse::<f32>().ok());
+    match (loudness, true_peak) {
+        (Some(loudness), true_peak) => (Some(loudness), true_peak),
+        (None, _) => (None, None),
+    }
 }
 
 fn parse_session(value: &Value, fallback_uri: &str, reason: &str) -> AppResult<DjSession> {
@@ -307,7 +370,7 @@ fn parse_session(value: &Value, fallback_uri: &str, reason: &str) -> AppResult<D
         reason: reason.to_owned(),
         active: false,
         narration_resolved: false,
-        narration_playback_supported: false,
+        narration_playback_supported: true,
         dynamic_refill_supported: true,
     })
 }
@@ -507,33 +570,22 @@ mod tests {
     }
 
     #[test]
-    fn refill_is_bounded_and_excludes_previous_queued_and_duplicate_tracks() {
+    fn new_tracks_excludes_already_known_and_duplicate_tracks() {
         let track = |uri: &str| DjTrack {
             uri: uri.to_owned(),
             ..Default::default()
         };
-        let previous = DjSession {
-            tracks: vec![track("spotify:track:old")],
-            ..Default::default()
-        };
-        let refreshed = DjSession {
-            tracks: vec![
-                track("spotify:track:old"),
-                track("spotify:track:queued"),
-                track("spotify:track:new1"),
-                track("spotify:track:new1"),
-                track("spotify:track:new2"),
-            ],
-            ..Default::default()
-        };
+        let known: HashSet<_> = ["spotify:track:old".to_owned()].into_iter().collect();
+        let refreshed = vec![
+            track("spotify:track:old"),
+            track("spotify:track:new1"),
+            track("spotify:track:new1"),
+            track("spotify:track:new2"),
+        ];
+        let added = new_tracks(&known, refreshed);
         assert_eq!(
-            refill_uris(
-                &previous,
-                &refreshed,
-                ["spotify:track:queued".to_owned()],
-                1
-            ),
-            ["spotify:track:new1"]
+            added.iter().map(|t| t.uri.as_str()).collect::<Vec<_>>(),
+            ["spotify:track:new1", "spotify:track:new2"]
         );
     }
 }

@@ -16,6 +16,7 @@ mod library;
 mod lyrics;
 mod media_keys;
 mod music_videos;
+mod narration;
 mod player;
 mod podcasts;
 mod profiles;

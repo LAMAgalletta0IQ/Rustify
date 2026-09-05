@@ -89,6 +89,17 @@ windows = { version = "0.62", features = [
 # dependency graph. See CLAUDE.md and `npm run gen:types`.
 ts-rs = { version = "12", optional = true }
 
+# Decodes DJ narration clips (short synthesized-speech MP3s fetched from
+# Spotify's client-tts CDN, see spotify/dj.rs and narration.rs). Nothing else
+# in the dependency graph decodes MP3 from Rustify's own code: librespot links
+# a copy of symphonia transitively for track playback, but that instance is
+# private to the librespot crate, not reachable from here. `mp3` only, no
+# default features, to skip the container demuxers/other codecs this narrow
+# use never needs. Pinned to "0.5" to match librespot-playback's own
+# symphonia version exactly (see its Cargo.toml) so the dependency graph
+# resolves one copy instead of two. MPL-2.0, already on deny.toml's allow-list.
+symphonia = { version = "0.5", default-features = false, features = ["mp3"] }
+
 [features]
 default = []
 # Enables the tauri-mcp automation bridge for driving/screenshotting the UI

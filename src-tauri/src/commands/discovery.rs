@@ -194,10 +194,10 @@ pub async fn start_dj(app: AppHandle, state: State<'_, AppState>) -> AppResult<D
     // clients: it answers 403/404 for most accounts, which used to make the DJ
     // button a permanent error message. When that happens, fall back to
     // playing the canonical public DJ playlist as an ordinary context. That
-    // loses the dynamic re-resolution and the spoken intros — neither of which
-    // this app can play anyway (`narration_playback_supported` is false on the
-    // pinned librespot) — but it does play the DJ mix, which is what the
-    // button says it will do.
+    // loses the dynamic re-resolution and the spoken intros (the public
+    // playlist carries no narration metadata to resolve, regardless of
+    // `narration_playback_supported`) — but it does play the DJ mix, which is
+    // what the button says it will do.
     let mut dj = match state.internal_spotify.resolve_dj(&session, true).await {
         Ok(dj) => dj,
         Err(AppError::LexiconUnavailable(reason)) => {
@@ -219,8 +219,19 @@ pub async fn start_dj(app: AppHandle, state: State<'_, AppState>) -> AppResult<D
             log::warn!(target: "spotify.dj", "narration preflight failed; continuing with music: {error}")
         }
     }
-    let uris: Vec<_> = dj.tracks.iter().map(|track| track.uri.clone()).collect();
-    let first = uris.first().cloned();
+
+    // Only the first track is loaded here; `player::spawn_dj_advance` takes
+    // over from `PlayerEvent::EndOfTrack` onward, loading one DJ track at a
+    // time so an intro/outro clip can play in the gap between them. See its
+    // doc comment for why DJ tracks are no longer queued into Spirc upfront.
+    let Some(first_track) = dj.tracks.first().cloned() else {
+        return Err(AppError::LexiconUnavailable(
+            "Lexicon returned no playable DJ tracks".into(),
+        ));
+    };
+    crate::player::play_dj_intro(&app, &session, &first_track).await;
+
+    let first_uri = first_track.uri.clone();
     let activate = !state.playback.read().await.is_active_device;
     let resume_on_error = clear_crossfade_before_transition(&app, &state).await?;
     let load_result = with_spirc(&state, move |spirc| {
@@ -228,10 +239,10 @@ pub async fn start_dj(app: AppHandle, state: State<'_, AppState>) -> AppResult<D
             spirc.activate()?;
         }
         spirc.load(LoadRequest::from_tracks(
-            uris,
+            vec![first_uri.clone()],
             LoadRequestOptions {
                 start_playing: true,
-                playing_track: first.map(PlayingTrack::Uri),
+                playing_track: Some(PlayingTrack::Uri(first_uri)),
                 ..Default::default()
             },
         ))
