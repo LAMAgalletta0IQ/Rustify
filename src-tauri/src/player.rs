@@ -565,15 +565,32 @@ fn spawn_resume_lookup(app: AppHandle, session: Session, uri: String) {
         if !still_current {
             return;
         }
-        let spotify = state.spotify.read().await;
-        let Some(spotify) = spotify.as_ref() else {
-            return;
-        };
+
+        // A crossfade from the track that just ended can still be mixing its
+        // tail under this episode's opening seconds — librespot's crossfade is
+        // a fixed-length decoder overlap that runs independently of Rustify's
+        // own event timing, so it does not know a resume-seek is about to move
+        // the target track out from under it. Bracket the seek exactly like the
+        // manual `seek` command does (see `commands::clear_crossfade_before_transition`),
+        // or the outgoing track's tail keeps blending under audio from the
+        // wrong position.
+        let resume_after = crate::commands::clear_crossfade_before_transition(&app, &state)
+            .await
+            .unwrap_or(false);
+
         let position = resume.position_ms.min(u64::from(u32::MAX)) as u32;
-        if let Err(error) = spotify.spirc.set_position_ms(position) {
-            log::debug!(target: "spotify.podcasts", "automatic resume seek failed for {uri}: {error}");
-        } else {
-            log::debug!(target: "spotify.podcasts", "resumed {uri} at {position}ms");
+        let seek_result =
+            crate::commands::with_spirc(&state, |s| s.set_position_ms(position)).await;
+        match seek_result {
+            Ok(()) => log::debug!(target: "spotify.podcasts", "resumed {uri} at {position}ms"),
+            Err(error) => {
+                log::debug!(target: "spotify.podcasts", "automatic resume seek failed for {uri}: {error}")
+            }
+        }
+        if resume_after {
+            if let Err(error) = crate::commands::with_spirc(&state, |s| s.play()).await {
+                log::debug!(target: "spotify.podcasts", "automatic resume-seek could not restore playback for {uri}: {error}");
+            }
         }
     });
 }

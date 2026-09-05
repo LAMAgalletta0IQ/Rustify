@@ -71,6 +71,23 @@ pub(crate) fn should_clear_crossfade(enabled: bool, local_active: bool, playing:
 /// Pause is the public seam that makes the pinned librespot crossfade PR drop
 /// its outgoing decoder. Return true when callers must restore playback after
 /// their transition command.
+///
+/// **Known gap, not fixable from this layer:** this only brackets transitions
+/// Rustify itself initiates (`next_track`/`previous_track`/`seek`/the podcast
+/// resume-seek in `player::spawn_resume_lookup`). A remote Connect client
+/// (phone, desktop) sending SkipNext/SkipPrev over the dealer while this
+/// device is active goes straight through `Spirc::handle_next`/`handle_prev`
+/// to `Player::handle_command_load` inside the pinned librespot crate, which
+/// does not clear an in-flight `Crossfade` (only `handle_pause` and
+/// `handle_player_stop` do, per `playback::player::PlayerInternal`). Rustify
+/// has no hook into that dealer-message path to inject a pause first, and
+/// pausing reactively once the new track's `PlayerEvent` arrives would abort
+/// audio that already started. Net effect: a remote-triggered skip while
+/// crossfading can let the old track's fade-out tail bleed audibly under the
+/// first ~`crossfade_seconds` of whatever the remote client skipped to. Fixing
+/// this for real needs a change to the pinned librespot fork itself (clearing
+/// `self.crossfade` in `handle_next`/`handle_prev`, or on skip generally), not
+/// something the app layer can patch around.
 pub(crate) async fn clear_crossfade_before_transition(
     app: &AppHandle,
     state: &AppState,
