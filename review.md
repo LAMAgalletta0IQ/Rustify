@@ -70,10 +70,12 @@ rs` client-impersonation headers (the last review's P0-1, and this review's
 original P0-1) are removed — `queryArtistOverview` now sends the same honest
 `WebPlayer`/`open.spotify.com` identity as every other Pathfinder operation,
 with no more fabricated `Spotify/1.x` User-Agent or `xpui.app.spotify.com`
-Origin/Referer anywhere in the file; **live verification of what this does to
-the artist-overview feature is still outstanding and cannot be done from this
-environment** (see the updated P0-1 finding below for exactly what to check
-and what already degrades gracefully if it 403s); a GitHub Actions CI
+Origin/Referer anywhere in the file. **Update, 2026-09-13: live-verified.**
+The maintainer confirmed `queryArtistOverview` still works under the honest
+identity — no 403, no `spotify.artist: artist overview via Pathfinder failed`
+log line. **P0-1 is fully closed, code and live behavior both.** A permanent
+regression check for this is now checklist item 22 in `README.md`. All of
+this session's other fixes were committed as `59f8185`. A GitHub Actions CI
 workflow now runs all seven gates on every push (the single cheapest,
 highest-leverage item the last review flagged and the one thing that *didn't*
 get done in the otherwise-thorough Phase 1–9 cleanup); an unbounded
@@ -235,10 +237,10 @@ targets the prior review named, not easy getters chosen to inflate a count.
 
 | ID | Priority | Area | Issue | Difficulty | Impact | Recommended Action |
 |---|---|---|---|---|---|---|
-| P0-1 | P0 | Security / Legal | **Code fixed this session; live verification still outstanding.** `pathfinder.rs` no longer spoofs Spotify's desktop client — `queryArtistOverview` sends the same honest identity as every other Pathfinder operation now | Medium (done) / — (verification needs a live account) | Critical until verified | Log in with a real account, open an artist page, confirm what happens; wire/accept the fallback per the updated finding below |
+| ~~P0-1~~ | ~~P0~~ | Security / Legal | **RESOLVED 2026-09-13.** `pathfinder.rs` no longer spoofs Spotify's desktop client; live-verified working, no 403 | — | Closed | None — `README.md` checklist item 22 covers regression |
 | P0-2 | P0 | Legal | GPLv3-derived code now in the tree, no LICENSE, no written distribution-safety record anywhere in the repo, and the prior review's own "add MIT/Apache-2.0" fix is now unsafe to follow | Low (writing it down) / High (the underlying decision) | Critical | Write the GPL/undistributed constraint into `CLAUDE.md` and `README.md` before anything else touches licensing; do **not** add a permissive `LICENSE` file. **Explicitly deferred at the maintainer's request during this session — not applied** |
 | P2-1 | P2 | Code quality | `NowPlaying.svelte` still 839 lines, 1.6x the next-largest component, after a partial split | Medium | Medium | A second extraction pass if it grows further; not urgent now |
-| P2-2 | P2 | Testing | No true integration/E2E coverage exists; all automated tests are pure-function/unit-level | High | Medium | Accept the manual checklist as the intentional E2E layer (per `CLAUDE.md`), as this project's own docs already argue — don't chase automated E2E for its own sake |
+| P2-2 | P2 | Testing | No true integration/E2E coverage exists; all automated tests are pure-function/unit-level. **Re-affirmed 2026-09-13**, explicitly, by the maintainer: no automated E2E/integration harness wanted. Instead, the manual checklist was audited for gaps this session (found and fixed: a stale "narration doesn't play" claim left over from before it shipped) and one more dangerous-logic guard (`should_apply_pending_resume` in `player.rs`) was extracted and covered by 3 new unit tests, bringing the suite to 149 | High | Low (down from Medium — the specific gap found was closed) | Keep doing exactly this at the seam of any future dangerous-logic change; don't build E2E infrastructure |
 | P2-4 | P2 | Dependencies | `npm audit` (full) reports 2 moderate advisories in `@vitest/mocker` (dev-only; not in the shipped binary) | Low | Low | Defer the Vitest 5 upgrade until it's not a breaking change, or accept the dev-only risk explicitly |
 | P3-2 | P3 | Dependencies | `cargo deny check` warns on 3 versions of `winnow` via Tauri's own build-time `toml` chain | Extra small | Low | No action available from this repo; re-check after a Tauri upgrade |
 | P4-1 | P4 | Performance | WebView2 memory floor | Very High | Low | Do not pursue (unchanged from last review) |
@@ -283,13 +285,13 @@ below for whenever it's wanted.
 
 ---
 
-## [P0-1] The app impersonated Spotify's first-party desktop client — fixed in code this session, live verification still outstanding
+## [P0-1, RESOLVED] The app impersonated Spotify's first-party desktop client
 
-**Priority:** P0 (until the live-verification step below is done; the code-level defect itself is closed)
+**Priority:** was P0 | **Status:** Fixed in code this session and live-verified 2026-09-13
 **Area:** Security / Legal / Product integrity
 **Difficulty:** Medium (the edit was small; the reason this stayed open for two review cycles was the live-testing dependency, not the code)
-**Impact:** Critical while open; residual impact is now "the artist-overview feature may degrade" rather than "the user's account is at risk"
-**Confidence:** Confirmed (the fix), Unverified (its live behavior)
+**Impact:** Was Critical while open; closed now on both counts — no account-ban exposure, and the artist-overview feature confirmed still working
+**Confidence:** Confirmed (the fix and its live behavior)
 **Evidence:** `src-tauri/src/spotify/pathfinder.rs` — the `desktop_artist` conditional branch is deleted; `query_hash` now sends `app-platform: WebPlayer`, `Origin: https://open.spotify.com`, `Referer: https://open.spotify.com/` unconditionally for every operation, with no per-operation `User-Agent`/`spotify-app-version` override. `cargo check`/`clippy -D warnings`/`fmt --check`/`test --lib` all re-run green after the change.
 
 ### Problem (as found, now fixed)
@@ -328,9 +330,9 @@ the docs already claimed.
 
 ### Desired Behavior
 
-Achieved for the header-honesty half. Not yet confirmed: whether Spotify's
-edge still serves `queryArtistOverview` to a caller identified as the Web
-Player rather than a desktop app.
+Achieved and confirmed: Spotify's edge serves `queryArtistOverview` to a
+caller identified as the Web Player exactly as it does every other Pathfinder
+operation this app already made under that identity.
 
 ### Impact
 
@@ -351,50 +353,39 @@ speculative change this review is trying not to make.
 
 ### Recommended Fix
 
-Done for the code. What's left: log in with a real account, open an artist
-page, and observe what happens.
+Done, both halves.
 
 ### Implementation Plan
 
 1. ~~Delete the conditional header blocks; use `WebPlayer`/`open.spotify.com`
    uniformly.~~ **Done.**
-2. **Live-test against a real account — still the one step nothing in this
-   review or its tooling can substitute for.** Open an artist page. Check the
-   log for `spotify.artist: artist overview via Pathfinder failed for
-   {artist_id}: {error}` (only printed on a hard failure, per
-   `commands/library.rs`).
-   - If no warning appears and the page looks normal: done, no further
-     action, and this can close outright.
-   - If it 403s: decide whether `get_artist_overview`'s failure handling
-     should also attempt `library::artist_tracks`'s REST fallback on a hard
-     Pathfinder failure (not just an empty-field success) — that's a real,
-     separate follow-up, not something to guess at now.
-3. If the fallback question in (2) comes up, that's a new, scoped finding for
-   whoever runs the next pass — not pre-emptively fixed here.
+2. ~~Live-test against a real account.~~ **Done, 2026-09-13: confirmed
+   working, no 403, no failure log line.** The fallback question below never
+   came up.
+3. No further action. `README.md` checklist item 22 now covers this
+   permanently, so a future header change that breaks it gets caught by the
+   existing manual pass rather than needing a dedicated re-check.
 
 ### Acceptance Criteria
 
 - [x] No source file sends a `User-Agent`, `Origin`, `Referer`, or version
       header claiming to be an official Spotify client.
-- [ ] Live-measured behavior of `queryArtistOverview` post-change is recorded
-      somewhere (`obsidian/`, `CLAUDE.md`, or just reported back).
+- [x] Live-measured behavior of `queryArtistOverview` post-change is recorded:
+      confirmed working 2026-09-13, no regression.
 - [x] Docs and code agree on the impersonation policy (they now do, with no
       doc edit needed).
 
 ### Estimated Effort
 
-Small remaining — one login and one page visit.
+None remaining.
 
 ### Dependencies
 
-Live Spotify Premium credentials, which this environment does not have.
+None.
 
 ### Risks if Ignored
 
-None from the code as it stands now. The only remaining risk is discovering,
-later and by accident, that the artist page silently degraded — which is why
-the one-time live check above is still worth doing even though nothing here
-is urgent any more.
+None. Closed.
 
 ---
 
@@ -611,10 +602,38 @@ becomes a rewrite again — same risk the last review named, just further off.
 
 ---
 
-## [P2-2] No true integration or end-to-end coverage exists
+## [P2-2, RE-AFFIRMED] No true integration or end-to-end coverage exists — by explicit, repeated choice
 
-**Priority:** P2 (downgraded from the prior review's P1) | **Area:** Testing | **Difficulty:** High | **Impact:** Medium | **Confidence:** Confirmed
-**Evidence:** 142 Rust tests (up from 106) + 10 Vitest tests, all confirmed by direct execution this session. Every one is a unit/pure-function test; none launches Tauri, librespot, or a real webview. `CLAUDE.md` states this outright and frames the manual 15-step checklist in `README.md` as the deliberate E2E layer, not a stopgap.
+**Priority:** P2 (downgraded from the prior review's P1) | **Area:** Testing | **Difficulty:** High | **Impact:** Low (down from Medium — see 2026-09-13 update) | **Confidence:** Confirmed
+**Evidence:** 149 Rust tests (106 → 142 → 149 across this review and its 2026-09-13 follow-up) + 10 Vitest tests, all confirmed by direct execution. Every one is a unit/pure-function test; none launches Tauri, librespot, or a real webview. `CLAUDE.md` states this outright and frames the manual 15-step checklist in `README.md` as the deliberate E2E layer, not a stopgap.
+
+**Update, 2026-09-13:** presented with four concrete options ranging from
+Rust-level mock-IPC integration tests to a full `tauri-driver` WebDriver CI
+suite, the maintainer explicitly chose the fourth: re-scope this finding
+rather than build new test infrastructure, and instead audit the existing
+manual checklist for gaps and add unit tests for any dangerous-logic edges
+found. That's a second, independent confirmation of the same call this
+finding already recommended — worth recording as a re-affirmation, not just
+leaving the original text standing unchallenged. Concretely, that audit
+found and fixed one real doc bug and one real test gap:
+- `README.md`'s "Known limitations" and checklist item 17 still said DJ
+  narration audio "resolves... but nothing plays it yet" — true when
+  written, false since `403b591`/`b4ba0ad` shipped and CLAUDE.md's own DJ
+  section was updated to match. Left uncorrected, this would have sent a
+  manual tester in to specifically confirm silence, the opposite of the
+  current, correct behavior. Fixed, and checklist item 22 (artist overview)
+  added to close the loop on P0-1's live-verification requirement
+  permanently rather than as a one-time check.
+- `player.rs`'s `spawn_resume_lookup` (the automatic podcast resume-seek,
+  `de96341`) guarded its seek behind an inline three-part boolean condition
+  with no test: still the active device, still on the same track, position
+  still near zero. Wrong in either direction — too loose and an unrelated
+  track gets seeked into; too strict and legitimate resumes get dropped —
+  and nothing would have caught a regression there. Extracted to
+  `should_apply_pending_resume`, matching this codebase's established
+  pattern (`wait_or_stop`, `is_builder_not_available`, `remote_identity`),
+  with 3 new tests covering the fresh-resume, moved-on, and
+  no-longer-active-device cases.
 
 ### Problem
 
@@ -877,23 +896,20 @@ written down where a future reader will find it.
 ## Immediate Actions
 
 **Goal:** Close what's left of the two decisions that were the entire
-remaining risk surface. One is now a code fix with a verification step left;
-the other is still a decision, deliberately untouched this session.
+remaining risk surface. One is now fully closed; the other is still a
+decision, deliberately untouched.
 
-1. **P0-1: live-test the header fix.** The code is done — log in, open an
-   artist page, check the log for a Pathfinder failure warning. Five minutes,
-   whenever there's a live session handy. Not urgent in the way it was;
-   nothing ships broken while this is pending, it's just unverified.
+1. ~~**P0-1: live-test the header fix.**~~ **Done, 2026-09-13.** Confirmed
+   working, no 403, no failure log line. Closed.
 2. **P0-2: write down the GPL/undistributed constraint in `CLAUDE.md` and
    `README.md`, when ready.** Twenty minutes, zero dependencies, and the
    cheapest possible permanent risk reduction available in this review — but
-   deliberately **not done** this session at the maintainer's request. The
+   deliberately **not done** at the maintainer's request. The
    exact text to write is in the P0-2 finding above whenever it's wanted.
 
 **Definition of done.** `queryArtistOverview`'s live behavior post-fix is
-known and, if it degrades, a decision is made about the fallback; whenever
-P0-2 is taken up, `CLAUDE.md`/`README.md` state the GPL constraint in
-writing.
+known — done, it works. Whenever P0-2 is taken up, `CLAUDE.md`/`README.md`
+state the GPL constraint in writing — that's the one item left on this list.
 
 ## Short-Term Plan (1–2 weeks)
 
@@ -972,27 +988,41 @@ roadmap section manufactured for the sake of having one.
 # 15. Testing Plan
 
 The automated suites already cover what they should. What's left is manual,
-by design (per `CLAUDE.md`), and specifically weighted toward what this
-session's code changes still need a live account to confirm:
+by design (per `CLAUDE.md`):
 
-- [ ] **P0-1 live verification (manual, requires live account):** log in,
-      open an artist page, check whether it looks normal and whether the log
-      shows `spotify.artist: artist overview via Pathfinder failed for
-      {artist_id}: {error}`. Nothing to fix ahead of time — just observe and
-      report back.
-- [ ] **Existing 15-step checklist in `README.md`** — unchanged, still the
-      right set of manual cases (login, Setup-screen gating, playback,
-      context continuation, transport, Connect inbound/outbound, token
-      expiry). Re-run it once, since this session touched `pathfinder.rs`,
-      `remote_state.rs`, `friends.rs`, and `narration.rs` — consider adding an
-      artist-overview step to it while there.
+- [x] **P0-1 live verification** — done, 2026-09-13. Confirmed working, no
+      403, no failure log line.
+- [ ] **Existing 15-step checklist in `README.md`**, now 22 steps — item 17
+      (DJ) corrected to describe narration actually playing (it previously
+      said the opposite, a stale leftover from before `403b591` shipped) and
+      item 22 (artist overview) added as the permanent regression check for
+      P0-1. Re-run it once, since recent sessions touched `pathfinder.rs`,
+      `remote_state.rs`, `friends.rs`, `narration.rs`, and now `player.rs`.
 - [ ] **DJ narration cancellation (optional, low priority):** log in, start
       DJ, trigger narration, log out mid-clip, confirm the device goes quiet
       promptly rather than trailing off. The timing logic has fast unit tests
       proving it; this would be the first live confirmation against real
-      hardware and a real session.
+      hardware and a real session. Now also checklist item 17's second half.
+- [ ] **Podcast auto-resume (optional, low priority):** resume an episode,
+      then quickly skip away within ~2s before the resume-seek lands, and
+      confirm it does *not* seek the new track. `should_apply_pending_resume`
+      has unit tests for this; no live confirmation yet.
 
-No new automated test infrastructure is recommended at this time (see P2-2).
+No new automated test infrastructure is recommended at this time (see P2-2,
+re-affirmed 2026-09-13).
+
+**Aside, not a project finding:** this session's local `cargo fmt --check`
+run failed with `the 'rustfmt.exe' binary... is not applicable to the
+'stable-x86_64-pc-windows-msvc' toolchain`, and `rustup component
+add rustfmt` reports it already installed while `rustup component remove`
+then fails looking for a `rustfmt-preview`-named binary that doesn't exist —
+a corrupted local rustup component record on this machine, unrelated to any
+code in this repo (`cargo check`/`clippy -D warnings`/`test --lib` all ran
+clean throughout). CI is unaffected — `dtolnay/rust-toolchain@stable`
+provisions a fresh toolchain per run rather than reusing this machine's.
+Worth a `rustup toolchain uninstall stable-x86_64-pc-windows-msvc` +
+reinstall locally when convenient; not urgent and not attempted here since
+it's a bigger, separate action than this pass's scope.
 
 ---
 
@@ -1012,11 +1042,10 @@ No new automated test infrastructure is recommended at this time (see P2-2).
 - [x] **Automation/debug backdoors** — `tauri-plugin-mcp-bridge` confirmed
       still gated behind a Cargo feature, absent from the default dependency
       graph, bound to loopback only.
-- [x] **Client identity honesty** — **fixed this session** (P0-1). No source
-      file sends a header claiming to be an official Spotify client. Live
-      behavior of `queryArtistOverview` under the new identity is unverified —
-      see §15 — but the security property itself (no fabricated identity) is
-      satisfied regardless of what Spotify's edge decides to do with it.
+- [x] **Client identity honesty** — **fixed and live-verified** (P0-1,
+      closed 2026-09-13). No source file sends a header claiming to be an
+      official Spotify client, and `queryArtistOverview` confirmed still
+      works under the honest identity.
 - [ ] **Licensing/distribution safety** — **at risk, not yet failing.** P0-2:
       currently safe by an undocumented, unenforced constraint. Deliberately
       left unaddressed this session at the maintainer's request.
@@ -1066,20 +1095,18 @@ re-benchmarked:
    changes P0-2's recommended fix entirely. **Why it matters:** every other
    distribution-readiness question (identifier, signing, updater) is
    downstream of this one and shouldn't be worked on independently of it.
-2. **Did `queryArtistOverview` keep working after the header fix?** Only
-   answerable with a live account — see §15. **Why it matters:** if it 403s,
-   there's a follow-up decision about whether `get_artist_overview`'s
-   failure handling should also attempt the REST top-tracks fallback on a
-   hard Pathfinder failure, not just an empty-field success.
+2. ~~**Did `queryArtistOverview` keep working after the header fix?**~~
+   **Answered, 2026-09-13: yes, confirmed working, no 403.** The REST
+   fallback follow-up never came up.
 
 ---
 
 # 20. Final Verdict
 
 1. **Is this project safe to continue in its current state?** Yes, for
-   personal use. The account-risk item (P0-1) is now closed in code; the
-   legal-exposure item (P0-2) remains a decision sitting unmade, by choice,
-   this session.
+   personal use. The account-risk item (P0-1) is now fully closed, code and
+   live behavior both; the legal-exposure item (P0-2) remains a decision
+   sitting unmade, by choice.
 2. **Is it safe to deploy to production, or to anyone else?** No — doing so
    before resolving P0-2 creates a real, mechanical GPL violation, not just a
    generic "no license" gap.
@@ -1090,11 +1117,11 @@ re-benchmarked:
 4. **What is the highest-value improvement?** Still writing the GPL
    constraint into `CLAUDE.md`/`README.md` — twenty minutes, and the only
    remaining fix in this review that closes a risk *permanently* rather than
-   mitigating it. It just wasn't applied this session.
+   mitigating it. It just hasn't been applied yet.
 5. **What should be done first?** Whenever it's wanted: P0-2's documentation
    fix. It has zero dependencies and protects every subsequent distribution
-   decision from being made without that context. Ahead of it, and not
-   dependent on it: the five-minute P0-1 live check.
+   decision from being made without that context. Everything else this
+   review flagged as immediate is now done.
 6. **What should be done second?** Nothing else is time-sensitive. The
    remaining P2/P3 items are real but genuinely optional on any timeline.
 7. **What should be avoided for now?** Adding any `LICENSE` file before P0-2
@@ -1103,7 +1130,6 @@ re-benchmarked:
    without running it through the Tier-3 quarterly review `CLAUDE.md` already
    commits to.
 
-**Recommended next step:** do the five-minute P0-1 live check next time
-there's a real Spotify session open, just to close the loop. P0-2 stays
-exactly where it was left — documented, actionable, and waiting on the
-maintainer's call, not on any more code.
+**Recommended next step:** none required. P0-1 is closed. P0-2 stays exactly
+where it was left — documented, actionable, and waiting on the maintainer's
+call, not on any more code.

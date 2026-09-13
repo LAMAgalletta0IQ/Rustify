@@ -167,11 +167,14 @@ These are upstream gaps, flagged rather than guessed at:
   service (no public Web API exists for this), gated behind first-party
   credentials librespot's own session already holds. See `README_jams.md`
   for the real endpoints, the bearer-token gotchas, and current status.
-- **DJ narration audio** — the music track playback and Lexicon/dynamic-context
-  resolution work; narration (the spoken commentary between tracks) resolves
-  a real, valid signed playback URL from Spotify's TTS endpoint but nothing
-  plays it yet. That would need a second audio pipeline running alongside
-  librespot's own Sink, which needs live device testing to get right.
+- **DJ narration audio** — narration (the spoken commentary between tracks)
+  now plays: it resolves a signed clip URL from Spotify's TTS endpoint and
+  plays it through a second, independent `cpal` stream on the same output
+  device, sequenced (not mixed) around each DJ track. See `CLAUDE.md`'s DJ
+  section for why a second audio pipeline was needed and the resulting
+  tradeoff (DJ tracks no longer crossfade into each other, and the queue view
+  has nothing to show as "up next" during a DJ session until the moment it
+  loads).
 - **Spotify-native Lossless** — FLAC decoding, per-track format inventory and
   storage-resolve/v2 probing are implemented and report an honest capability
   state; actual protected-stream playback needs a PlayPlay key this project
@@ -254,8 +257,10 @@ does something rather than just render:
 
 16. **Home / Made For You** — Daily Mix, Discover Weekly, Release Radar and
     similar cards load with real artwork, open, and play.
-17. **DJ** — starting it plays real tracks; check the log for narration
-    (expected to resolve but not play — see Known limitations).
+17. **DJ** — starting it plays real tracks, and narration clips play audibly
+    between them (see Known limitations for how). Log out mid-clip and
+    confirm the device goes quiet within about a second rather than trailing
+    off for the rest of the clip.
 18. **Jam** — create one, copy the invite, have a second account join it,
     confirm both sides see member/queue updates live.
 19. **Lyrics** — open fullscreen on a track with synced lyrics; the active
@@ -263,5 +268,13 @@ does something rather than just render:
     return to it.
 20. **Friend Activity** — the sidebar rail shows real presence for accounts
     that have visible friend activity, not a static "unavailable" message.
-21. **Sleep timer / crossfade / equalizer** — set each from Settings/Now
-    Playing and confirm an audible effect, not just a UI state change.
+21. **Sleep timer / crossfade / equalizer / loudness normalization** — set
+    each from Settings/Now Playing and confirm an audible effect, not just a
+    UI state change.
+22. **Artist overview** — open an artist page from search or an album credit
+    and confirm bio/top-tracks/concerts load. This goes through Pathfinder's
+    `queryArtistOverview`, the operation whose client-impersonation headers
+    were removed in `pathfinder.rs`; a silent regression here would show up
+    as an artist page loading with empty stats and a
+    `spotify.artist: artist overview via Pathfinder failed for {artist_id}`
+    line in the log, not as a crash.

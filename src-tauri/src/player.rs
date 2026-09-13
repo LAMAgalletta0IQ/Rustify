@@ -669,6 +669,23 @@ async fn play_narration_if_present(
     }
 }
 
+/// Whether a resolved podcast resume position is still safe to apply.
+///
+/// The `/episodes` lookup this guards is async and can resolve after the user
+/// has already skipped away, or after enough of the episode has played that a
+/// seek back to the saved position would be a surprising jump rather than a
+/// resume. `position_ms <= 2_000` is deliberately generous — librespot's own
+/// event timing means this app's view of "just started" can lag the real
+/// device by up to a couple of seconds.
+fn should_apply_pending_resume(playback: &PlaybackState, uri: &str) -> bool {
+    playback.is_active_device
+        && playback
+            .track
+            .as_ref()
+            .is_some_and(|track| track.uri == uri)
+        && playback.position_ms <= 2_000
+}
+
 fn spawn_resume_lookup(app: AppHandle, session: Session, uri: String) {
     tauri::async_runtime::spawn(async move {
         let resume = match crate::podcasts::get(&session, &uri).await {
@@ -682,12 +699,7 @@ fn spawn_resume_lookup(app: AppHandle, session: Session, uri: String) {
         let state = app.state::<AppState>();
         let still_current = {
             let playback = state.playback.read().await;
-            playback.is_active_device
-                && playback
-                    .track
-                    .as_ref()
-                    .is_some_and(|track| track.uri == uri)
-                && playback.position_ms <= 2_000
+            should_apply_pending_resume(&playback, &uri)
         };
         if !still_current {
             return;
@@ -1038,6 +1050,66 @@ mod tests {
         );
         assert!(enabled.normalisation);
         assert_eq!(enabled.normalisation_pregain_db, 3.5);
+    }
+
+    fn track_with_uri(uri: &str) -> TrackInfo {
+        TrackInfo {
+            uri: uri.to_string(),
+            name: "Episode".into(),
+            artists: vec!["Show".into()],
+            album: "Show".into(),
+            album_id: None,
+            album_uri: None,
+            cover_url: None,
+            duration_ms: 1_800_000,
+        }
+    }
+
+    #[test]
+    fn pending_resume_applies_when_still_on_the_same_fresh_track() {
+        let playback = PlaybackState {
+            is_active_device: true,
+            track: Some(track_with_uri("spotify:episode:abc")),
+            position_ms: 500,
+            ..Default::default()
+        };
+        assert!(should_apply_pending_resume(&playback, "spotify:episode:abc"));
+    }
+
+    #[test]
+    fn pending_resume_is_dropped_once_the_user_has_moved_on() {
+        let moved_far_enough = PlaybackState {
+            is_active_device: true,
+            track: Some(track_with_uri("spotify:episode:abc")),
+            position_ms: 2_001,
+            ..Default::default()
+        };
+        assert!(!should_apply_pending_resume(
+            &moved_far_enough,
+            "spotify:episode:abc"
+        ));
+
+        let skipped_to_another_track = PlaybackState {
+            is_active_device: true,
+            track: Some(track_with_uri("spotify:episode:xyz")),
+            position_ms: 100,
+            ..Default::default()
+        };
+        assert!(!should_apply_pending_resume(
+            &skipped_to_another_track,
+            "spotify:episode:abc"
+        ));
+    }
+
+    #[test]
+    fn pending_resume_is_dropped_when_this_device_is_no_longer_active() {
+        let playback = PlaybackState {
+            is_active_device: false,
+            track: Some(track_with_uri("spotify:episode:abc")),
+            position_ms: 100,
+            ..Default::default()
+        };
+        assert!(!should_apply_pending_resume(&playback, "spotify:episode:abc"));
     }
 
     #[test]
