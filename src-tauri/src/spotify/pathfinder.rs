@@ -162,43 +162,27 @@ impl PathfinderClient {
             "variables": variables,
             "extensions": {"persistedQuery": {"version": 1, "sha256Hash": hash}}
         });
-        let desktop_artist = operation == "queryArtistOverview";
+        // Every operation identifies as the Web Player (`open.spotify.com`),
+        // honestly — including `queryArtistOverview`, which used to send a
+        // fabricated desktop-client identity (a specific `Spotify/1.x`
+        // User-Agent build string plus `xpui.app.spotify.com` Origin/Referer)
+        // that no other operation here uses. That claimed an identity this
+        // process does not have; `client-token` and the OAuth bearer below are
+        // the real credentials librespot legitimately holds, and that is all
+        // the authentication this call is entitled to present. If Spotify's
+        // edge only accepts `queryArtistOverview` from a desktop-identified
+        // caller, this degrades to the existing failure path in
+        // `commands/library.rs::get_artist_overview` (empty stats/top-tracks/
+        // concerts, no crash) rather than reintroducing the impersonation.
         let mut request = self
             .http
             .post(ENDPOINT)
             .bearer_auth(access_token)
             .header("client-token", client_token)
-            .header(
-                "app-platform",
-                if desktop_artist {
-                    "Win32_x86_64"
-                } else {
-                    "WebPlayer"
-                },
-            )
-            .header(
-                "Origin",
-                if desktop_artist {
-                    "https://xpui.app.spotify.com"
-                } else {
-                    "https://open.spotify.com"
-                },
-            )
-            .header(
-                "Referer",
-                if desktop_artist {
-                    "https://xpui.app.spotify.com/"
-                } else {
-                    "https://open.spotify.com/"
-                },
-            )
+            .header("app-platform", "WebPlayer")
+            .header("Origin", "https://open.spotify.com")
+            .header("Referer", "https://open.spotify.com/")
             .header("Accept", "application/json");
-        if desktop_artist {
-            request = request
-                .header("spotify-app-version", "896000000")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.179 Spotify/1.2.88.483 Safari/537.36")
-                .header("Accept-Language", "en");
-        }
         if !connection_id.is_empty() {
             request = request.header("Spotify-Connection-Id", connection_id);
         }

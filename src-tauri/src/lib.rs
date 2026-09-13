@@ -3,6 +3,7 @@ mod audio_capabilities;
 mod auth;
 mod commands;
 mod connect;
+mod dealer_util;
 mod dna;
 mod error;
 mod friends;

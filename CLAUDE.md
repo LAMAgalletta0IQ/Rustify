@@ -17,22 +17,24 @@ cd src-tauri; cargo check --no-default-features   # fast Rust type-check
 different feature set than the app actually runs.
 
 ```powershell
-cd src-tauri; cargo test --no-default-features --lib   # 134 unit tests
+cd src-tauri; cargo test --no-default-features --lib   # 142 unit tests
 npm test                                                # vitest run, store.svelte.ts
 cd src-tauri; cargo fmt --check
 cd src-tauri; cargo clippy --no-default-features -- -D warnings
 cd src-tauri; cargo deny check                          # advisories/bans/licenses/sources, deny.toml
 ```
 
-`cargo deny check` needs `cargo install cargo-deny` first (not part of the
-default toolchain). It is local-only — there is no CI to run it automatically,
-so it only catches drift when someone remembers to run it. See `deny.toml`'s
+`cargo deny check` needs `cargo install cargo-deny` first for a local run (not
+part of the default toolchain); `.github/workflows/ci.yml` runs it via
+`EmbarkStudios/cargo-deny-action` on every push/PR, alongside the other four
+gates above and `npm run check`/`npm run build`/`npm test`, so none of this
+depends on someone remembering to run it locally any more. See `deny.toml`'s
 `[advisories.ignore]` for the currently-accepted findings and why each is
 unfixable from this repo (mostly the librespot git pin; a few are Tauri's own
 transitive `urlpattern` -> unmaintained `unic-*` chain) — re-triage that list
 after bumping either dependency.
 
-**There is a Rust unit-test suite (134 tests) and a small Vitest suite for
+**There is a Rust unit-test suite (142 tests) and a small Vitest suite for
 `store.svelte.ts`** (10 tests, mocking `@tauri-apps/api/core`/`event`) — no
 component tests, no E2E.
 
@@ -204,6 +206,18 @@ reset the UI clock mid-track. Use `set_position()` to write and
 Both background tasks live on `SpotifySession` and must be `.abort()`ed on
 logout and session replacement — dropping a `JoinHandle` **detaches** rather
 than cancels, which once left two refreshers hammering the token endpoint.
+
+### Loudness normalization is librespot's, not Rustify's
+
+`audio::LoudnessSettings` (`enabled`, `pregain_db`) is a thin settings struct;
+the actual -14 LUFS (ITU-R BS.1770) normalisation toward Spotify's own target
+is computed by the pinned librespot fork itself via
+`PlayerConfig.normalisation*`, built in `player::playback_config`.
+`pregain_db` is the only knob exposed — librespot's own
+`NormalisationType::Auto` / `NormalisationMethod::Dynamic` compressor tuning
+is left at its defaults rather than surfaced as more settings than this app
+needs. Don't look for DSP-side loudness math in `audio/mod.rs`; it isn't
+there.
 
 ### A closed player channel is recoverable, and must not log the user out
 

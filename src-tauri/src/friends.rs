@@ -18,6 +18,7 @@ use librespot::core::{session::Session, SpotifyUri};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::dealer_util::is_builder_not_available;
 use crate::error::{AppError, AppResult};
 use crate::state::{events, AppState};
 
@@ -451,14 +452,11 @@ fn enqueue_refresh(
     }));
 }
 
-fn is_builder_not_available(error: &librespot::core::Error) -> bool {
-    error.to_string().contains("Builder wasn't available")
-}
-
 pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime::JoinHandle<()>> {
     Ok(tauri::async_runtime::spawn(async move {
         let mut updates = {
             let mut delay = Duration::from_millis(200);
+            let mut other_error_delay = Duration::from_secs(1);
             loop {
                 match session.dealer().add_listen_for(PRESENCE_TOPIC) {
                     Ok(subscription) => break subscription,
@@ -472,11 +470,18 @@ pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime
                         continue;
                     }
                     Err(error) => {
+                        // Never give up outright — friend presence is an optional
+                        // Tier 2 feature that degrades, per CLAUDE.md, rather than
+                        // blocking anything else. Back off the same way the
+                        // transient-race branch above does, capped higher, so a
+                        // persistently broken dealer doesn't retry at a fixed 1/s
+                        // forever with no escalation.
                         log::warn!(
                             target: "spotify.social",
                             "subscribe to friend presence failed: {error}"
                         );
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        tokio::time::sleep(other_error_delay).await;
+                        other_error_delay = (other_error_delay * 2).min(Duration::from_secs(30));
                         continue;
                     }
                 }

@@ -16,6 +16,7 @@ use librespot::protocol::player::PlayerState;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::connect::Device;
+use crate::dealer_util::is_builder_not_available;
 use crate::error::AppResult;
 use crate::queue::{self, QueueView};
 use crate::state::{events, AppState, ConnectionStatus, TrackInfo};
@@ -35,10 +36,6 @@ struct ApplyOutcome {
     queue_changed: bool,
 }
 
-fn is_builder_not_available(error: &librespot::core::Error) -> bool {
-    error.to_string().contains("Builder wasn't available")
-}
-
 pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime::JoinHandle<()>> {
     let local_device_id = session.device_id().to_string();
     Ok(tauri::async_runtime::spawn(async move {
@@ -52,6 +49,7 @@ pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime
         // bubbling the error up as a fatal login failure.
         let mut updates = {
             let mut delay = std::time::Duration::from_millis(200);
+            let mut other_error_delay = std::time::Duration::from_secs(1);
             loop {
                 match session.dealer().add_listen_for(CLUSTER_TOPIC) {
                     Ok(subscription) => break subscription,
@@ -66,10 +64,17 @@ pub fn spawn(app: AppHandle, session: Session) -> AppResult<tauri::async_runtime
                     Err(error) => {
                         // Any other subscription error is not the transient race
                         // — surface it and keep retrying via the normal resubscribe
-                        // path rather than failing the entire login.
+                        // path rather than failing the entire login. Never give up
+                        // outright (Connect-state mirroring is an optional layer on
+                        // top of a session that must otherwise stay usable), but
+                        // back off the same way the transient-race branch above
+                        // does, capped higher, so a persistently broken dealer
+                        // doesn't retry at a fixed 1/s forever with no escalation.
                         log::warn!("spotify.connect: subscribe to Connect state failed: {error}");
                         mark_recovering(&app).await;
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        tokio::time::sleep(other_error_delay).await;
+                        other_error_delay =
+                            (other_error_delay * 2).min(std::time::Duration::from_secs(30));
                         continue;
                     }
                 }

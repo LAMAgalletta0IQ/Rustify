@@ -301,6 +301,27 @@ fn adapt_channels(input: Vec<f32>, from_channels: usize, to_channels: usize) -> 
     out
 }
 
+/// How often the playback thread checks `should_stop` while waiting out the
+/// clip's duration. Short enough that a cancelled session goes quiet almost
+/// immediately, long enough not to burn the thread spinning.
+const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Blocks the calling thread for up to `total`, in [`STOP_POLL_INTERVAL`]
+/// chunks, returning early the first time `should_stop` reports `true`.
+/// Extracted from [`play_clip`]'s stream-lifetime loop so the polling/timing
+/// behavior can be unit-tested without opening a real `cpal` device.
+fn wait_or_stop(total: Duration, should_stop: &impl Fn() -> bool) {
+    let mut waited = Duration::ZERO;
+    while waited < total {
+        if should_stop() {
+            return;
+        }
+        let chunk = STOP_POLL_INTERVAL.min(total - waited);
+        std::thread::sleep(chunk);
+        waited += chunk;
+    }
+}
+
 /// Plays already-decoded interleaved stereo PCM through a short-lived `cpal`
 /// stream on the currently-configured output device, and waits for it to
 /// finish (or a generous timeout, so a device error can never hang DJ
@@ -311,7 +332,22 @@ fn adapt_channels(input: Vec<f32>, from_channels: usize, to_channels: usize) -> 
 /// narration is sequential with the track rather than mixed into it (see this
 /// module's doc comment), so a second, short-lived stream is the simplest
 /// correct design rather than a workaround.
-pub async fn play_clip(runtime: &AudioRuntime, samples: Vec<f32>) -> AppResult<()> {
+///
+/// `should_stop` is polled every [`STOP_POLL_INTERVAL`] while the clip plays
+/// out and, if it ever returns `true`, the stream is dropped (silencing the
+/// device) instead of waiting for the clip to finish naturally. Without this,
+/// a logout or session replacement mid-narration left the underlying OS
+/// thread sleeping for up to the clip's remaining duration — a few seconds of
+/// audio outliving the session it belonged to — because nothing outside this
+/// function's own async caller knew the thread existed. Callers with nothing
+/// to cancel on can pass `|| false`. Generic over a plain closure rather than
+/// this module depending on `AppState`/`AppHandle` directly, so it stays
+/// testable and decoupled from Tauri state the way the rest of this file is.
+pub async fn play_clip(
+    runtime: &AudioRuntime,
+    samples: Vec<f32>,
+    should_stop: impl Fn() -> bool + Send + 'static,
+) -> AppResult<()> {
     if samples.is_empty() {
         return Ok(());
     }
@@ -414,13 +450,13 @@ pub async fn play_clip(runtime: &AudioRuntime, samples: Vec<f32>) -> AppResult<(
 
         match outcome {
             Ok(stream) => {
-                // Keep the stream alive until playback reports completion by
-                // parking this thread; the callback above signals through
-                // `done_rx` on the async side, which owns the actual
-                // wait/timeout. This thread exits (dropping and closing the
-                // stream) once the async side stops waiting, whichever way
-                // that happens.
-                std::thread::sleep(clip_duration);
+                // Keep the stream alive until playback reports completion or
+                // `should_stop` fires, whichever comes first — the only way a
+                // cancelled session can make the device go quiet before the
+                // clip finishes on its own. The callback above still signals
+                // completion through `done_rx` on the async side
+                // independently of this loop.
+                wait_or_stop(clip_duration, &should_stop);
                 drop(stream);
             }
             Err(error) => {
@@ -462,9 +498,49 @@ mod tests {
             samples.push(s);
         }
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(play_clip(&runtime, samples));
+        let result = rt.block_on(play_clip(&runtime, samples, || false));
         println!("play_clip result: {result:?}");
         assert!(result.is_ok());
+    }
+
+    /// Regression test for the bug this session's fix addresses: without
+    /// `should_stop`, a cancelled session's narration thread kept sleeping
+    /// (and the device kept outputting audio) for the clip's full remaining
+    /// duration. Runs no real audio hardware — just the timing/polling loop.
+    #[test]
+    fn wait_or_stop_returns_immediately_when_already_stopped() {
+        let start = std::time::Instant::now();
+        wait_or_stop(Duration::from_secs(5), &|| true);
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "should_stop=true must not wait out anywhere near the full duration"
+        );
+    }
+
+    #[test]
+    fn wait_or_stop_waits_the_full_duration_when_never_stopped() {
+        let total = Duration::from_millis(50);
+        let start = std::time::Instant::now();
+        wait_or_stop(total, &|| false);
+        assert!(
+            start.elapsed() >= total,
+            "should_stop=false must wait out the full duration"
+        );
+    }
+
+    #[test]
+    fn wait_or_stop_stops_partway_through_once_the_flag_flips() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let start = std::time::Instant::now();
+        // Flips true on the second poll — before a 5s duration could ever
+        // elapse on its own, so a passing test proves the early exit fired.
+        wait_or_stop(Duration::from_secs(5), &|| {
+            calls.fetch_add(1, Ordering::Relaxed) >= 1
+        });
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "must stop shortly after the flag flips, not wait out the full 5s"
+        );
     }
 
     #[test]

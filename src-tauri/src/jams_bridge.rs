@@ -19,6 +19,7 @@ use librespot::core::dealer::protocol::{Message as DealerMessage, PayloadValue};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::dealer_util::is_builder_not_available;
 use crate::error::{AppError, AppResult};
 use librespot::core::session::Session;
 
@@ -324,7 +325,7 @@ impl JamController {
             for attempt in 0..12 {
                 match session.dealer().add_listen_for(topic) {
                     Ok(sub) => return Ok(sub),
-                    Err(error) if error.to_string().contains("Builder wasn't available") => {
+                    Err(error) if is_builder_not_available(&error) => {
                         if attempt == 11 {
                             return Err(AppError::Other(format!(
                                 "subscribe to Jam {topic}: dealer not ready after retries: {error}"

@@ -1,0 +1,66 @@
+name: CI
+
+# Runs the same gates CLAUDE.md documents as the manual verification loop
+# (npm run check, npm test, cargo check/test/fmt/clippy --no-default-features,
+# cargo deny check) on every push and PR, so a broken gate is caught here
+# instead of depending on someone remembering to run it locally.
+#
+# windows-latest only: this app is Windows-only by design (Acrylic window
+# effects, DPAPI credential storage, NSIS-only bundling — see CLAUDE.md and
+# deny.toml's `targets = ["x86_64-pc-windows-msvc"]`), so there is nothing to
+# gain from a Linux/macOS job here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (check, build, test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - run: npm test
+
+  backend:
+    name: Backend (fmt, clippy, check, test, deny)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      # librespot is pinned to a git revision (see Cargo.toml), so a cold
+      # build is the long pole in this job; cache it across runs.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: cargo fmt --check
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --no-default-features -- -D warnings
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --no-default-features
+      - name: cargo test --lib
+        working-directory: src-tauri
+        run: cargo test --no-default-features --lib
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check

@@ -119,12 +119,13 @@
           class:on={pb.shuffle}
           onclick={() => store.run(() => api.setShuffle(!pb.shuffle))}
           title="Shuffle"
+          aria-label="Shuffle"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
           </svg>
         </button>
-        <button onclick={() => store.run(api.previousTrack)} title="Previous">
+        <button onclick={() => store.run(api.previousTrack)} title="Previous" aria-label="Previous track">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M6 5h2v14H6zM20 5v14L9 12z" />
           </svg>
@@ -133,6 +134,7 @@
           class="pp"
           onclick={() => store.run(api.playPause)}
           title={pb.isPlaying ? "Pause" : "Play"}
+          aria-label={pb.isPlaying ? "Pause" : "Play"}
         >
           {#if pb.isLoading}
             <span class="dots">…</span>
@@ -146,7 +148,7 @@
             </svg>
           {/if}
         </button>
-        <button onclick={() => store.run(api.nextTrack)} title="Next">
+        <button onclick={() => store.run(api.nextTrack)} title="Next" aria-label="Next track">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M16 5h2v14h-2zM4 5v14l11-7z" />
           </svg>
@@ -155,6 +157,7 @@
           class:on={pb.repeatContext || pb.repeatTrack}
           onclick={cycleRepeat}
           title={pb.repeatTrack ? "Repeat track" : "Repeat"}
+          aria-label={pb.repeatTrack ? "Repeat track" : "Repeat"}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" />

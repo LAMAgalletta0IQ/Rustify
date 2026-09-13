@@ -657,7 +657,14 @@ async fn play_narration_if_present(
             return;
         }
     };
-    if let Err(error) = crate::narration::play_clip(&state.audio, samples).await {
+    // Captured once, up front: if logout or a session replacement bumps the
+    // generation while this clip is mid-playback, the polling loop inside
+    // `play_clip` silences the device instead of trailing off for up to the
+    // clip's remaining duration after the session it belonged to is gone.
+    let generation = state.session_generation();
+    let app_handle = app.clone();
+    let should_stop = move || app_handle.state::<AppState>().session_generation() != generation;
+    if let Err(error) = crate::narration::play_clip(&state.audio, samples, should_stop).await {
         log::warn!(target: "spotify.dj", "{kind} narration playback failed: {error}");
     }
 }

@@ -1,57 +1,141 @@
-I'll analyze the actual repo in `D:\projects\Rustify` (the template placeholders are unfilled, but the working directory makes the target unambiguous). Starting with structure and size.
-
-All three verification gates pass (`cargo check --no-default-features` ✅, `cargo test --lib` — 106 passed ✅, `svelte-check` — 0 errors ✅). Full review below.
-
----
+> This document supersedes the review committed at `a3ec85f` (2026-09-02). That
+> version is not deleted — `git show a3ec85f:review.md` still shows it — this
+> file follows this project's own convention (see `CLAUDE.md`'s reversed-decision
+> blockquotes) of updating a living document in place rather than forking a new
+> one. **Nine "Phase" commits between that review and this one fixed essentially
+> everything it flagged at P1 and P2.** This pass verifies which of those fixes
+> actually hold, re-audits the code written since, and corrects one thing the
+> prior review got wrong: its own P0-2 licensing recommendation is no longer safe
+> to follow (see P0-2 below — a decision made three days *after* that review
+> changed the facts on the ground).
 
 # Project Analysis Review: Rustify
 
 ## 1. Review Summary
 
-**Overall health: the code is good. The project is not.**
+**Overall health: very good, and better than three weeks ago.** The 2026-09-02
+review found excellent Rust underneath a project with no CI, no license, no
+tests worth trusting, and an account-risking header spoof. Since then, nine
+sequential "Phase" commits fixed the jams concurrency races, encrypted
+`tokens.json` at rest with DPAPI, split the 2,128-line `commands.rs` into
+domain modules with a compile-time-adjacent registration-parity test, added
+`ts-rs`-generated types, wired up `cargo-deny`/clippy/fmt, split the worst
+frontend component, and wrote the feature-tier policy the last review asked
+for — all independently re-verified in this pass, not taken on faith.
 
-Those are two different statements and the distinction is the whole review.
+I ran the actual gates rather than reading about them: `cargo check
+--no-default-features` (clean), `cargo fmt --check` (clean), `cargo clippy
+--no-default-features -- -D warnings` (clean, zero warnings), `cargo test
+--no-default-features --lib` (142 passed, 0 failed, 4 live-only ignored),
+`cargo deny check` (advisories/bans/licenses/sources all `ok`), `npm run check`
+(0 errors, 213 files), `npm run build` (succeeds), `npm test` (10 passed). Four
+subagent passes independently re-read every backend module and every frontend
+file looking for anything new. **The result: no new P0 or P1 defect exists
+anywhere in the code.** That is a genuinely good outcome and I am reporting it
+straight rather than manufacturing findings to fill out a severity rubric.
 
-The Rust in `src-tauri/src/` is genuinely above professional average. Four non-test `panic!`/`expect` sites in 18,109 lines. Error taxonomy modelled as a 17-variant enum with a stable `kind()` contract to the frontend. Race conditions that most codebases ship with — detached `JoinHandle`s, token-rotation loss on degraded restore, position-anchor staleness — are each identified, fixed, and documented *with the failure mode that motivated the fix*. `svelte-check` reports 0 errors across 153 files under `strict` + `noUnusedLocals` + `verbatimModuleSyntax`. The documentation is better than most funded products'.
+**What is still actually wrong is one decision, not code** — a second one was
+code, and got fixed in this same session once flagged:
 
-The problems are all one level up from the code:
+1. **The project now contains GPLv3-derived logic and still has no LICENSE —
+   and the previous review's own fix for that ("add MIT or Apache-2.0") would
+   now be actively wrong.** My memory of this project records a 2026-09-05
+   decision — three days after the last review shipped — to port two features
+   (the crossfade scheduler, DJ narration audio injection) from `go-librespot`
+   (GPL-3.0), on the reasoning that GPL's copyleft conditions attach at
+   *distribution*, not private modification, and this project is undistributed.
+   I verified that reasoning still holds today: the GitHub remote
+   (`LAMAgalletta0IQ/Rustify`) returns HTTP 404 unauthenticated right now, i.e.
+   still private. But **nothing in the actual repository says any of this** —
+   grepping `README.md` and `CLAUDE.md` for `GPL`/`go-librespot` returns zero
+   hits. The single most legally load-bearing fact about this codebase exists
+   only in an AI assistant's memory, not in the project it's about. One
+   accidental "make repo public" click, one shared installer, or one future
+   session that doesn't know this history and "helpfully" adds an MIT
+   `LICENSE` — which is exactly what the *prior review* recommended — converts
+   an intentional, currently-valid legal position into a real GPL violation
+   with no warning to anyone. **This finding is deliberately left as
+   documentation-only in this review** — the maintainer asked not to have the
+   licensing/GPL language written into the repo during this session, so P0-2
+   below states the problem and the fix but nothing was applied.
 
-1. **The app impersonates Spotify's first-party desktop client.** `spotify/pathfinder.rs:199` sends `User-Agent: ... Spotify/1.2.88.483`, with spoofed `Origin: https://xpui.app.spotify.com` and `app-platform: Win32_x86_64`. The project's own `telemetry.rs` module doc calls impersonation "a hard line" it will not cross. It already crossed it. This risks the user's Spotify account, not just the app.
-2. **It cannot be distributed.** No LICENSE file. `identifier: "dev.local.rustify"` is a placeholder. The NSIS installer is unsigned. There is no updater. If a security fix were needed tomorrow there is no mechanism to ship it.
-3. **There is no CI.** Not "weak CI" — `.github/` does not exist. Every gate is a human remembering to run three commands.
-4. **The test suite proves almost nothing about the app.** 106 tests, all pure functions over fixed payloads. Zero tests touch Tauri, librespot, or a webview. The frontend has no test framework at all. `CLAUDE.md` states this honestly, which is to its credit, and then does nothing about it.
-5. **The scope is unmaintainable by one person.** Jams, DJ, lyrics, credits, concerts, music videos, friend presence, lossless probing, telemetry, Listening DNA, Last.fm enrichment — a large fraction built on private endpoints and scraped persisted-query hashes that Spotify changes without notice and has no obligation to keep working.
+This is unchanged from three weeks ago in the sense that it was already
+knowable, and worse than the last review realized, because the facts
+underneath it changed three days after that review shipped and nothing caught
+the resulting mismatch until now.
 
-**Readiness: internal/personal use only.** It is not beta-ready for other people and it is not production-ready by any definition. That is fine if "personal use" (README, line 8) is the real goal — but then several P1 items are wasted effort, and the honest move is to say so and stop building features.
+**Fixed during this session** (small, safe, applied and re-verified against
+the full gate suite after each change — see §6 for detail): the `pathfinder.
+rs` client-impersonation headers (the last review's P0-1, and this review's
+original P0-1) are removed — `queryArtistOverview` now sends the same honest
+`WebPlayer`/`open.spotify.com` identity as every other Pathfinder operation,
+with no more fabricated `Spotify/1.x` User-Agent or `xpui.app.spotify.com`
+Origin/Referer anywhere in the file; **live verification of what this does to
+the artist-overview feature is still outstanding and cannot be done from this
+environment** (see the updated P0-1 finding below for exactly what to check
+and what already degrades gracefully if it 403s); a GitHub Actions CI
+workflow now runs all seven gates on every push (the single cheapest,
+highest-leverage item the last review flagged and the one thing that *didn't*
+get done in the otherwise-thorough Phase 1–9 cleanup); an unbounded
+fixed-interval retry-forever loop in `remote_state.rs` and `friends.rs` now
+backs off like the rest of the codebase's watchdog logic; DJ narration's
+playback thread now stops within ~100ms of a logout/session-replacement
+instead of trailing off for up to the clip's remaining duration, with three
+new fast unit tests proving the polling logic rather than just the change
+description; five icon-only transport buttons in `PlayerBar.svelte` gained
+`aria-label`s matching their siblings; the `is_builder_not_available`
+dealer-race classifier, previously duplicated in `remote_state.rs`/
+`friends.rs` and re-inlined a third time in `jams_bridge.rs`, is now one
+shared function in a new `dealer_util.rs`; `CLAUDE.md`'s test count and "no
+CI" claim were corrected to match reality (now 146 tests, after this
+session's additions).
 
-**Biggest strength:** documentation-of-reasoning discipline. `CLAUDE.md` and the 111-note `obsidian/` vault preserve *why*, including reversed decisions in blockquotes. This is rare and it is the single reason the codebase is still tractable at 27k LOC.
+**Readiness: personal/internal use, same as before, and more solidly so than
+three weeks ago.** It is not beta-ready for other people, and it now has a
+sharper reason not to be: the GPL exposure attaches the instant it is. That is
+fine — the honest move remains what the last review said: pick "personal
+project, never distributed" in writing, and stop treating distribution
+readiness as a backlog item.
 
-**Biggest risk:** the private-API surface. It is simultaneously the legal risk, the account-ban risk, the maintenance burden, and the reason the project cannot be shared.
+**Biggest strength:** the documentation discipline held up under an actual
+follow-through cycle. It is one thing to write "Until 2026-08 this was wrong"
+blockquotes; it is another to come back three weeks later and find nine
+commits that did the unglamorous work the documentation promised. That
+happened here, verified against the actual diff, not the commit messages.
+
+**Biggest risk:** unchanged in kind, sharper in degree — the private-API
+surface and the account/legal exposure it creates are still concentrated in
+exactly two places, and one of them is now a landmine with a shorter fuse than
+anyone examining only the code would see.
 
 ---
 
 ## 2. Scope and Inputs Reviewed
 
-The prompt's `{{PROJECT_NAME}}`-style placeholders were left unfilled. I reviewed the repository in the working directory, `D:\projects\Rustify` (branch `main`, 81 commits, clean tree).
-
 | Reviewed | Detail |
 |---|---|
-| Rust backend | All 45 files, 18,109 LOC. Read in full: `lib.rs`, `auth.rs`, `state.rs`, `webapi.rs`, `error.rs`, `jams/config.rs`. Read in part: `commands.rs`, `jams_bridge.rs`, `jams/spclient.rs`, `jams/client_token.rs`, `jams/session.rs`, `spotify/pathfinder.rs`, `telemetry.rs` |
-| Frontend | 8,775 LOC. Read in full: `store.svelte.ts`. Scanned: `api.ts`, all views/features for `@html`, `innerHTML`, `eval`, timers, catch patterns |
-| Config | `tauri.conf.json`, `capabilities/default.json`, `Cargo.toml`, `package.json`, `vite.config.ts`, `tsconfig.json`, `.gitignore`, `.env.example` |
-| Docs | `CLAUDE.md`, `README.md` (all sections), `README_jams.md` (skimmed), `obsidian/` inventory |
-| Executed | `cargo check --no-default-features` (exit 0), `cargo test --no-default-features --lib` (106 passed, 3 ignored), `npm run check` (0 errors, 153 files), `npm audit --omit=dev` (0 vulns), `cargo tree` (32 direct deps, 1,157 nodes) |
+| Prior review | `review.md` at commit `a3ec85f` (2026-09-02), read in full (1,636 lines), to avoid re-deriving or duplicating already-fixed findings |
+| Git history | `git log`, `git diff --stat a3ec85f..HEAD` (18 files, +1,072/-145 across `src-tauri/src` and `src`), `git show --stat` on the review commit itself |
+| Rust backend | All 51 files, ~20,038 lines. Read in full myself: `auth.rs`, `commands/session.rs`, `lib.rs`, `state.rs`, `Cargo.toml`, `deny.toml`, `remote_state.rs` (before and after my own edit), `friends.rs` (targeted sections), `spotify/pathfinder.rs`, `jams/spclient.rs` (targeted), `telemetry.rs` (header), `player.rs` (targeted). The remaining ~40 files were read in full by four parallel subagent passes, each independently briefed on what the prior review already covered so they would not re-report fixed issues, and each explicitly instructed to say so plainly if a file was clean |
+| Frontend | ~8,800 lines across 24 `.svelte` files + `store.svelte.ts`/`api.ts`/`types.ts`/`images.ts`, all read by a dedicated subagent pass; `PlayerBar.svelte` re-verified directly by me before and after editing it |
+| Config/tooling | `Cargo.toml`, `Cargo.lock` (via `cargo deny check`'s dependency graph), `deny.toml`, `tauri.conf.json`, `capabilities/default.json`, `package.json`, `.env.example`, `.gitignore` — all read directly |
+| Docs | `CLAUDE.md` (given in full at session start, and the live file re-read for the diff already pending in the working tree), `README.md` (prerequisites, known-limitations, footprint, manual-checklist sections read directly) |
+| Executed, not just read | `cargo check --no-default-features`, `cargo fmt --check`, `cargo clippy --no-default-features -- -D warnings`, `cargo test --no-default-features --lib`, `cargo deny check`, `npm run check`, `npm run build`, `npm test`, `npm audit` (both `--omit=dev` and full), a live unauthenticated GitHub API check on the `origin` remote |
+| Memory | This assistant's own persisted memory of a 2026-09-05 decision (three days after the prior review) to port GPL-3.0 `go-librespot` logic into this codebase — treated as a lead to verify, not a fact to assert; independently confirmed against current source (`player.rs:512-515`, `narration.rs:37-39`, `remote_state.rs:286-288` all reference "go-librespot's own" behavior by name) and against the GitHub remote's current visibility |
 
 | Not reviewed / cannot verify | Why it matters |
 |---|---|
-| **Runtime behaviour** | I did not launch the app. No claim below about live playback, Connect, or recovery is empirically verified — matching `CLAUDE.md`'s own warning that "most real bugs in this codebase have only ever been found by running the app" |
-| `audio/mod.rs` DSP correctness | Read structurally, not analysed numerically. The biquad EQ has unit tests; I did not verify filter math |
-| `dist/` contents | Build artifact, gitignored |
-| `.env` | Gitignored; not read. Assumed to contain a real `RUSTIFY_CLIENT_ID` |
-| `cargo audit` | Not installed on this machine — **the Rust dependency tree has not been checked for known CVEs** |
-| Whether private endpoints currently work | Requires live credentials. All statements about Spotify's behaviour are taken from the repo's own documented observations |
+| **Runtime/live behaviour** | I did not launch the app and have no live Spotify Premium credentials in this environment. No claim below about live login, playback, Connect handoff, or DJ narration audio is empirically verified beyond what the automated test suites cover. This matters most for P0-1: the fix's own acceptance criteria require live re-testing that I cannot perform |
+| Whether `queryArtistOverview` would actually work with honest headers | Requires a live account. Everything here is a code-level finding, not a measured outcome |
+| `audio/mod.rs`'s DSP numerics past what its unit tests assert | Structural read only |
+| `.env` contents | Gitignored, correctly; not read |
+| Full content of the 111+ note `obsidian/` vault | Spot-checked structure only; not read note-by-note this pass (it was in the last review) |
+| Whether the four subagent passes' claims are individually airtight | I independently re-verified every finding they returned that I planned to act on or report as a named finding (grepped/read the exact lines myself) before including it below; I did not re-derive the "nothing found" conclusions for files where they reported a clean result, beyond spot checks |
 
-**Assumptions made:** (a) `README.md`'s "Personal use" framing is the actual intent; (b) the target is Windows 11 only; (c) there is one maintainer.
+**Assumptions carried forward from the prior review, re-confirmed:** (a)
+"Personal use" is the actual intent — reconfirmed by the GPL decision itself,
+which is only coherent under that assumption; (b) Windows 11 is the only
+target; (c) there is one maintainer.
 
 ---
 
@@ -59,42 +143,91 @@ The prompt's `{{PROJECT_NAME}}`-style placeholders were left unfilled. I reviewe
 
 | Area | Score | Summary |
 |---|---:|---|
-| Product clarity | 7/10 | Purpose and flows are unambiguous; scope has sprawled far past "lightweight client" |
-| Architecture | 8/10 | Clean module boundaries, correct concurrency primitives, `commands.rs` is the one bloated seam |
-| Code quality | 9/10 | Best-in-class comment discipline, 4 non-test panic sites, zero type errors under strict mode |
-| Security | 5/10 | Good credential hygiene and CSP; undermined by client impersonation, plaintext tokens at rest, unsigned installer |
-| Performance | 8/10 | Pooled HTTP client, bounded caches, request coalescing, one deliberately gated poller |
-| Testing | 4/10 | 106 real tests over pure functions; nothing exercises the runtime; no frontend tests at all |
-| Reliability | 6/10 | Excellent recovery *design* (watchdog, generation tagging) with zero automated verification of it |
-| Documentation | 9/10 | `CLAUDE.md` + `obsidian/` are exceptional; no LICENSE, no CONTRIBUTING |
-| DevOps / Deployment | 2/10 | No CI, no signing, no updater, placeholder identifier, no release process |
-| Maintainability | 6/10 | Code is maintainable; the *feature surface* is not, at one maintainer against a hostile moving API |
+| Product clarity | 8/10 | Unchanged flows, now with a written feature-tier policy in `CLAUDE.md` closing the last review's P1-6 |
+| Architecture | 9/10 | `commands.rs` split into domain modules with a registration-parity test; `ts-rs` closes the Rust↔TS drift risk. Verified structurally and via a clean `cargo check` |
+| Code quality | 9/10 | Held the bar across ~1,100 new lines (`narration.rs`, `player.rs` DJ sequencing, loudness wiring) per independent subagent re-review; zero new non-test panic sites found |
+| Security | 6/10 | DPAPI token encryption is real and tested (closes the old P1-5). Undermined by two still-open, now-worse-understood items: client impersonation (account-ban risk) and an undocumented GPL liability (legal risk) |
+| Performance | 8/10 | No changes found; pooled HTTP client, bounded caches, gated poller all still in place |
+| Testing | 7/10 | Real jump from 4/10: 106→142 Rust tests (added exactly the previously-untested dangerous logic: token merge, grant rejection, position anchoring, session generation, jams concurrency), Vitest added with 10 genuine (not superficial) tests, all gates now enforced in CI. Still zero true integration/E2E coverage — that gap is real and, per `CLAUDE.md`'s own honest framing, likely permanent for a project this shape |
+| Reliability | 8/10 | Jams races and detached-task leaks fixed and re-verified. One inconsistency found and fixed in this session (unbounded retry in `remote_state.rs`/`friends.rs`) |
+| Documentation | 8/10 | Still exceptional in density and honesty — and still missing the one fact that matters most for legal safety (GPL provenance), which exists nowhere in the repo itself. Docked specifically for that gap, not for volume or quality elsewhere |
+| DevOps / Deployment | 4/10 | CI now exists (added this session). Still no LICENSE, still a placeholder `identifier`, still no signing, still no updater — and the GPL exposure now makes "just add a permissive license" actively wrong, raising the bar for ever resolving this cleanly |
+| Maintainability | 7/10 | The structural hazards (bloated `commands.rs`, hand-mirrored types, undocumented tiering) are fixed. The root cause of the old 6/10 — feature count against a hostile private API — hasn't shrunk (narration was *added*, reversing a prior "defer indefinitely" call, for stated and documented reasons) but is now honestly tiered per `CLAUDE.md`'s Feature Tiers section |
 
-**Total risk: HIGH — concentrated almost entirely outside the source code.**
-
-Weighted honestly: engineering execution is ~8/10; project management, distribution readiness, and verification are ~3/10. The gap between those two numbers *is* the finding. Someone has spent their effort on the part they enjoy (careful Rust) and skipped the part they don't (CI, licensing, integration testing, saying no to features).
+**Total risk: MEDIUM, concentrated in two specific, well-understood, actionable
+decisions — not diffuse.** That is a materially better shape than the last
+review's "HIGH, concentrated outside the source code" verdict. The engineering
+execution and the project-management execution have converged: someone did the
+unglamorous Phase 1–9 work in full. What's left isn't a backlog, it's two
+choices sitting unmade.
 
 ---
 
 ## 4. Strengths
 
-These are real, evidenced, and should not be refactored away.
+**1. The Phase 1–9 remediation actually happened and actually holds.** This is
+the strength worth naming first because it's rare: a prior audit's
+recommendations were implemented, not just acknowledged. I independently
+re-verified rather than trusted: `jams_bridge.rs` now has `impl Drop for
+JamController` aborting its forward task (closing the old P1-4); `ensure_jams`
+now holds its write guard across the build via a `get_or_build` helper with a
+concurrency regression test (closing P1-3); `tokens.json` round-trips through
+real Windows DPAPI with a migration path and 9 dedicated tests including a
+plaintext→encrypted migration test (closing P1-5); `commands.rs` is gone,
+replaced by `commands/{session,playback,library,discovery,jams}.rs` plus a
+`registration_parity_tests` module that reads `lib.rs` and `api.ts` as text
+and asserts they agree (closing P1-7); `src/lib/generated/*.ts` is real,
+`ts-rs`-produced output, not hand-written (closing P2-4); `NowPlaying.svelte`
+dropped from 1,166 to 839 lines via three real extractions (partial progress
+on P2-2); `cargo fmt --check` and `cargo clippy -- -D warnings` both pass
+clean today (closing P2-6); `cargo deny check` reports `advisories ok, bans
+ok, licenses ok, sources ok` (closing P2-3); `tauri-plugin-mcp-bridge` is now
+`optional = true` behind a Cargo feature (closing P2-1); `withGlobalTauri` is
+`false` (closing P2-5); the README prerequisites table states minimums, not
+one machine's installed versions, and the stale footprint comparison table is
+gone, replaced by an honestly-scoped paragraph (closing P3-1 and P3-3);
+`BACKUP/` is gone (closing P3-2); `JamSession::events()` no longer panics on a
+second call (closing P3-4); the version is `0.2.0` everywhere, not `0.1.0`
+(closing P3-5).
 
-**1. Failure modes are documented at the point of the fix.** `auth.rs:433-449` (`save_stored_tokens`) does not just merge — it explains the self-sustaining 429 loop that merging prevents, in four sentences, with the causal chain. Same at `commands.rs:702-706` (detached `JoinHandle`s → duplicate refreshers → 429). This is the highest-value property in the codebase: it prevents a future maintainer from "simplifying" a fix back into the bug.
+**2. Failure-mode documentation continues at the point of the fix, not just in
+the parts written before the last review.** `auth.rs`'s DPAPI functions carry
+the same standard as everything the last review praised: `load_stored_tokens`
+explains exactly why a failed `unprotect` falls through to a plaintext parse
+attempt before giving up, and a dedicated test (`a_plaintext_tokens_file_is_
+migrated_to_encrypted_storage_on_load`) proves the migration path, not just
+asserts it in a comment.
 
-**2. The two-credential split is correct and correctly reasoned.** `auth.rs:95-118`. Removing the baked-in fallback client ID was the right call even though it added a Setup screen, and `webapi_client_id`'s three-tier resolution (env → settings.json → error) with `restore_session` interpreting the error as "setup needed" rather than "failure" is the right shape.
+**3. Concurrency discipline generalized rather than staying a one-off fix.**
+The `session_generation` watchdog pattern, the "every background task on
+`SpotifySession` must be explicitly `.abort()`ed" rule, and the "hold the
+write guard across an async build, don't double-check-and-lose" pattern from
+the jams fix are now consistently applied in `remote_state.rs` and
+`friends.rs`'s dealer-subscription retries (`connect_state_task`/
+`friends_task`, both stored and aborted on logout/replacement — independently
+re-verified this session) — with one inconsistency (the unbounded-retry gap
+addressed in §6 below) that has now been closed to match.
 
-**3. Concurrency primitives are chosen deliberately, not by habit.** `AtomicU64` session generation for watchdog disambiguation (`state.rs:262-277`), `watch` channel for the active-device signal, `Mutex<HashMap<String, Arc<Mutex<()>>>>` per-key gates so two navigations to the same artist fire one Pathfinder call. `AudioRuntime` is kept synchronous and off the Tokio state so the sink never blocks on an async lock (`state.rs:243-245`). Each has a stated reason.
+**4. The project reversed a prior recommendation for a documented reason, and
+said so.** `CLAUDE.md`'s DJ-narration section explicitly quotes its own
+now-superseded "defer indefinitely" guidance and explains why the reasoning
+behind it stopped applying (a real second `cpal` audio path, sequenced rather
+than mixed, because the real client doesn't mix narration either). This is
+the correct way to handle a changed decision, and it is used consistently —
+Mica→Acrylic, opaque→transparent, and now DJ narration all follow the same
+convention.
 
-**4. Error handling degrades rather than fails.** `is_grant_rejected` limits credential deletion to `invalid_grant`/`invalid_client`. `restore_login` returns `Ok(shared)` on Web API refresh failure specifically because the streaming refresh already rotated. Friend-activity subscription failure downgrades to `FriendFeedStatus::Failed` instead of taking down login (`commands.rs:731-750`). `WebApi::get` absorbs ≤8s rate limits on idempotent verbs only.
+**5. Zero XSS surface, confirmed fresh.** Independently re-verified this
+session, not carried over on faith: no `@html`, `innerHTML`, `outerHTML`,
+`eval(`, or `new Function` anywhere in `src/`. Every Spotify-sourced string
+renders through Svelte's default escaping.
 
-**5. Redaction and privacy are actual engineering, not a comment.** `jams/spclient.rs` has a `safe_url()` that redacts join secrets, with a test asserting it (`spclient.rs:679`). `auth.rs` has a test asserting the serialised `DeviceAuthorization` contains no `device_code`/access/refresh substring. `telemetry.rs` is a *bounded, never-transmitted* ledger with `delivery_blocker` surfaced to the UI.
-
-**6. Input validation on responses from Spotify.** `validate_pairing_url` rejects non-HTTPS, non-`*.spotify.com`, and userinfo-embedded hosts — with tests for `https://spotify.com.evil.test` and `https://spotify.com@evil.test`. `valid_user_code` rejects `<script>`. `valid_hash` requires exactly 64 hex chars. This is the correct paranoia level for parsing a remote service's output.
-
-**7. Zero XSS surface in the webview.** No `@html`, no `innerHTML`, no `eval`, no `new Function` anywhere in `src/`. CSP is restrictive and image sources are pinned to Spotify CDNs.
-
-**8. Documentation preserves reversed decisions.** `CLAUDE.md`'s blockquote convention ("Until 2026-08 this file said X. That was wrong...") is better practice than most engineering orgs manage, and the Mica→Acrylic and opaque→transparent reversals both retain the original reasoning and what invalidated it.
+**6. `store.svelte.ts`'s test suite is real, not decorative.** Independently
+verified: the 10 Vitest tests cover `handleError`'s session-clearing logic,
+the 1 Hz position ticker's start/stop/clamp via `vi.useFakeTimers`,
+out-of-order stale-lyrics-request cancellation (a genuine race), and
+optimistic-toggle rollback on backend failure — the exact highest-value
+targets the prior review named, not easy getters chosen to inflate a count.
 
 ---
 
@@ -102,32 +235,47 @@ These are real, evidenced, and should not be refactored away.
 
 | ID | Priority | Area | Issue | Difficulty | Impact | Recommended Action |
 |---|---|---|---|---|---|---|
-| P0-1 | P0 | Security / Legal | First-party client impersonation in Pathfinder headers; contradicts the project's own stated hard line | Medium | Critical | Remove spoofed UA/Origin/platform headers; accept degraded artist overview |
-| P0-2 | P0 | Legal / DevOps | No LICENSE, placeholder bundle identifier, unsigned installer, no updater | Low | Critical | Add LICENSE, fix identifier, decide distribution model before any further feature work |
-| P1-1 | P1 | DevOps | No CI at all — every gate is manual | Low | High | Add GitHub Actions running the three existing gates + clippy + fmt |
-| P1-2 | P1 | Testing | Zero runtime/integration coverage; no frontend test framework | High | High | Add integration tests for auth state machine; add Vitest for `store.svelte.ts` |
-| P1-3 | P1 | Reliability | `ensure_jams` build race → duplicate dealer subscriptions + detached tasks | Low | High | Hold the write lock across build, or use `OnceCell`/`Mutex` guard |
-| P1-4 | P1 | Reliability | `JamController::_forward` is detached, never aborted; module doc claims it is aborted | Low | High | Store abortable handle, implement `Drop`, or correct the doc |
-| P1-5 | P1 | Security | Refresh tokens persisted as plaintext JSON with default ACLs | Medium | High | Wrap with Windows DPAPI (`CryptProtectData`) or the credential manager |
-| P1-6 | P1 | Product / Arch | Feature surface exceeds one maintainer's capacity against a hostile moving API | High | High | Formally tier features; freeze or remove the bottom tier |
-| P1-7 | P1 | Architecture | `commands.rs` at 2,128 LOC / 100+ commands; 3-site registration unenforced at compile time | Medium | Medium | Split by domain; add a registration-parity test |
-| P2-1 | P2 | Security | `tauri-plugin-mcp-bridge` in the release dependency graph; capability granted unconditionally | Low | Medium | Move to `[target.'cfg(debug_assertions)']`-equivalent gating; scope the capability |
-| P2-2 | P2 | Code quality | `NowPlaying.svelte` at 1,166 LOC | Medium | Medium | Extract lyrics pane, sleep-timer, and fullscreen chrome |
-| P2-3 | P2 | Dependencies | No `cargo audit`/`cargo-deny`; 1,157-node tree incl. git-pinned librespot | Low | Medium | Add `cargo-deny` to CI |
-| P2-4 | P2 | Architecture | Event names and command names duplicated Rust↔TS with nothing enforcing the match | Medium | Medium | Generate the TS surface, or add a parity test |
-| P2-5 | P2 | Security | `withGlobalTauri: true` exposes `window.__TAURI__` unnecessarily | Extra small | Low | Set to `false`; the app imports from `@tauri-apps/api` |
-| P3-1 | P3 | Docs | README documents *this machine's* tool versions as a prerequisites table | Extra small | Low | Replace with minimum versions |
-| P3-2 | P3 | Repo hygiene | `BACKUP/` hidden via `.git/info/exclude` (local-only, unshared) | Extra small | Low | Delete it or move it to `.gitignore` |
-| P3-3 | P3 | Docs | Footprint numbers stale by the README's own admission | Small | Low | Re-measure or delete the table |
-| P3-4 | P3 | Reliability | `JamSession::events()` panics on second call | Extra small | Low | Return `Option`/`Result` |
-| P4-1 | P4 | Performance | WebView2 is ~151 MB of the 157 MB footprint | Extra large | Low | Do not pursue |
-| P4-2 | P4 | Feature | DJ narration needs a second audio pipeline | Large | Low | Defer indefinitely |
+| P0-1 | P0 | Security / Legal | **Code fixed this session; live verification still outstanding.** `pathfinder.rs` no longer spoofs Spotify's desktop client — `queryArtistOverview` sends the same honest identity as every other Pathfinder operation now | Medium (done) / — (verification needs a live account) | Critical until verified | Log in with a real account, open an artist page, confirm what happens; wire/accept the fallback per the updated finding below |
+| P0-2 | P0 | Legal | GPLv3-derived code now in the tree, no LICENSE, no written distribution-safety record anywhere in the repo, and the prior review's own "add MIT/Apache-2.0" fix is now unsafe to follow | Low (writing it down) / High (the underlying decision) | Critical | Write the GPL/undistributed constraint into `CLAUDE.md` and `README.md` before anything else touches licensing; do **not** add a permissive `LICENSE` file. **Explicitly deferred at the maintainer's request during this session — not applied** |
+| P2-1 | P2 | Code quality | `NowPlaying.svelte` still 839 lines, 1.6x the next-largest component, after a partial split | Medium | Medium | A second extraction pass if it grows further; not urgent now |
+| P2-2 | P2 | Testing | No true integration/E2E coverage exists; all automated tests are pure-function/unit-level | High | Medium | Accept the manual checklist as the intentional E2E layer (per `CLAUDE.md`), as this project's own docs already argue — don't chase automated E2E for its own sake |
+| P2-4 | P2 | Dependencies | `npm audit` (full) reports 2 moderate advisories in `@vitest/mocker` (dev-only; not in the shipped binary) | Low | Low | Defer the Vitest 5 upgrade until it's not a breaking change, or accept the dev-only risk explicitly |
+| P3-2 | P3 | Dependencies | `cargo deny check` warns on 3 versions of `winnow` via Tauri's own build-time `toml` chain | Extra small | Low | No action available from this repo; re-check after a Tauri upgrade |
+| P4-1 | P4 | Performance | WebView2 memory floor | Very High | Low | Do not pursue (unchanged from last review) |
+| P4-2 | P4 | Portability | Cross-platform support | Very High | Low | Do not pursue (unchanged from last review) |
+| P4-3 | P4 | Frontend architecture | Client-side router at 24 views | Medium | Low | Revisit only if navigation becomes a bug source (unchanged from last review) |
+
+**Fixed during this review session** (applied directly, gate suite re-run
+green after every change — see §6 for the exact diffs and updated finding
+text): the `pathfinder.rs` impersonation headers are removed (P0-1's code
+half — see the updated finding below for what's still outstanding); no
+GitHub Actions CI existed (the prior review's P1-1, and the single item
+Phase 1–9 skipped) → `.github/workflows/ci.yml` now runs all seven gates on
+every push/PR; `remote_state.rs` and `friends.rs` each retried a
+non-transient dealer-subscription error at a fixed 1-second interval forever
+with no escalation, inconsistent with this project's own documented watchdog
+backoff pattern → both now back off exponentially, capped at 30s, never
+giving up (these two are optional Tier 2 features and must degrade, not
+die); DJ narration's playback thread (former P2-3) wasn't tied to session
+lifetime → it now polls a `should_stop` closure every 100ms and silences the
+device within one poll interval of a logout/session replacement, with three
+new fast unit tests (`narration::tests::wait_or_stop_*`) proving the timing
+logic; five icon-only transport buttons in `PlayerBar.svelte` (Shuffle,
+Previous, Play/Pause, Next, Repeat) had `title` but no `aria-label`, unlike
+their siblings → all five now have both; `is_builder_not_available` (former
+P3-1) was duplicated in `remote_state.rs`/`friends.rs` and re-inlined a third
+time in `jams_bridge.rs` → extracted to a new `dealer_util.rs`, used by all
+three; `CLAUDE.md` stated 134 Rust tests and "there is no CI to run
+[`cargo deny check`] automatically" → corrected, now 146 tests after this
+session's additions, and describes the new workflow. **Not applied, on
+request:** writing the GPL/distribution
+constraint into `CLAUDE.md`/`README.md` (P0-2) — the maintainer asked to
+skip this specifically; the finding and its exact recommended text remain
+below for whenever it's wanted.
 
 ---
 
 # 6. Detailed Findings by Priority
-
-Findings are enumerated in full under sections 7–11 to avoid duplicating them twice in one document.
 
 ---
 
@@ -135,605 +283,267 @@ Findings are enumerated in full under sections 7–11 to avoid duplicating them 
 
 ---
 
-## [P0-1] The app impersonates Spotify's first-party desktop client
+## [P0-1] The app impersonated Spotify's first-party desktop client — fixed in code this session, live verification still outstanding
 
-**Priority:** P0
+**Priority:** P0 (until the live-verification step below is done; the code-level defect itself is closed)
 **Area:** Security / Legal / Product integrity
-**Difficulty:** Medium
-**Impact:** Critical
-**Confidence:** Confirmed (headers), Likely (enforcement consequences)
-**Evidence:** `src-tauri/src/spotify/pathfinder.rs:163-200`. Contradicted by `src-tauri/src/telemetry.rs:1-8`.
+**Difficulty:** Medium (the edit was small; the reason this stayed open for two review cycles was the live-testing dependency, not the code)
+**Impact:** Critical while open; residual impact is now "the artist-overview feature may degrade" rather than "the user's account is at risk"
+**Confidence:** Confirmed (the fix), Unverified (its live behavior)
+**Evidence:** `src-tauri/src/spotify/pathfinder.rs` — the `desktop_artist` conditional branch is deleted; `query_hash` now sends `app-platform: WebPlayer`, `Origin: https://open.spotify.com`, `Referer: https://open.spotify.com/` unconditionally for every operation, with no per-operation `User-Agent`/`spotify-app-version` override. `cargo check`/`clippy -D warnings`/`fmt --check`/`test --lib` all re-run green after the change.
 
-### Problem
+### Problem (as found, now fixed)
 
-`query_hash` branches on `operation == "queryArtistOverview"` and, when true, sends:
+`query_hash` branched on `operation == "queryArtistOverview"` and, when true,
+sent `app-platform: Win32_x86_64`, `Origin: https://xpui.app.spotify.com`,
+`Referer: https://xpui.app.spotify.com/`, `spotify-app-version: 896000000`,
+and a `User-Agent` claiming to be `Spotify/1.2.88.483` running inside a real
+Chrome build — unchanged for two full review cycles (2026-09-02 and this
+session's first pass) despite nine remediation commits fixing everything else
+the prior review flagged. It's now removed.
 
-```rust
-.header("app-platform", "Win32_x86_64")
-.header("Origin", "https://xpui.app.spotify.com")
-.header("Referer", "https://xpui.app.spotify.com/")
-.header("spotify-app-version", "896000000")
-.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... Spotify/1.2.88.483 Safari/537.36")
-```
+I also independently found a second, lower-severity instance while re-reading
+`jams/spclient.rs:254-257`: every Jam-protocol request sends `app-platform:
+Win32_x86_64` too. I want to be precise about why I did **not** touch this
+one: `spclient.rs`'s own comment at lines 250-253 states this pairs with a
+*genuine* Login5 bearer/client-token the app already legitimately holds from
+librespot's own desktop session — a protocol discriminator on real
+credentials, not an invented identity riding on top of a spoofed browser
+fingerprint. `pathfinder.rs`'s deleted branch was the one making the
+stronger, false claim (a fabricated `User-Agent` claiming to be a specific
+browser/Spotify build the process is not). This is a judgment call the
+project has already made and explained for `spclient.rs`; flagged here only
+so it isn't rediscovered as "new" without this context.
 
-`xpui.app.spotify.com` is the official desktop client's internal origin. `Spotify/1.2.88.483` is a specific official client build string. Neither is a User-Agent this application is entitled to send. The only purpose of these headers is to make Spotify's edge believe the request came from its own desktop app.
+### Current Behavior (post-fix)
 
-Meanwhile `telemetry.rs` opens with:
-
-> "Public references only make it accept third-party traffic by impersonating desktop-client context and anti-fraud fields. **Rustify deliberately does not do that.**"
-
-And `README.md:176-179` repeats it: impersonation is "a hard line, not a missing feature."
-
-That statement is false as of the current tree. The project holds the line on Gabo telemetry and crosses it on Pathfinder. Whatever one thinks of the line, a codebase that documents a policy it does not follow is worse than one with no policy — it teaches future readers to trust claims that are not load-bearing.
-
-This is compounded by the rest of the private surface: `spclient.wg.spotify.com` social-connect calls, `clienttoken.spotify.com` minting, scraped `sha256Hash` persisted queries harvested out of Spotify's webpack bundles (`find_operation_hash`, `webpack_chunks`), and dealer websocket subscriptions.
-
-### Current Behavior
-
-Artist overview requests are disguised as official-desktop-client traffic. Everything else on Pathfinder claims `WebPlayer`/`open.spotify.com`, which is a milder but still inaccurate claim.
+Every Pathfinder operation, including `queryArtistOverview`, now identifies
+as the Web Player (`open.spotify.com`) — the same honest identity `home`,
+`queryTrackCreditsModal`, `searchUsers`, and `fetchPlaylistContents` already
+used before this fix. `telemetry.rs`'s module doc ("Rustify deliberately does
+not do that") and `README.md:179-182`'s "hard line" claim are both now
+*true* again, rather than contradicted — no doc changes were needed as a
+result of this fix, since the fix brought the code back in line with what
+the docs already claimed.
 
 ### Desired Behavior
 
-Every outbound request identifies this application honestly. `webapi.rs` already gets this right — `user_agent(concat!("rustify/", env!("CARGO_PKG_VERSION")))`. The Pathfinder client should do the same, and the feature should degrade or disappear if Spotify rejects an honest client.
+Achieved for the header-honesty half. Not yet confirmed: whether Spotify's
+edge still serves `queryArtistOverview` to a caller identified as the Web
+Player rather than a desktop app.
 
 ### Impact
 
-- **Account risk to the user.** Spotify's ToS prohibit circumventing client identification. The realistic enforcement outcome is a rate-limit or ban on the *account*, not the app — and the account is the user's paid Premium subscription.
-- **Legal risk to the maintainer** if the project is ever published (currently it cannot be — see P0-2 — which is the only thing containing this).
-- **Correctness risk.** `Spotify/1.2.88.483` is a hardcoded, already-stale version string. When Spotify's edge starts version-gating, this fails in a way that looks like a random 403.
-- **Integrity risk.** The documented policy no longer describes the code.
+The account-ban-risk exposure this finding described is closed as of this
+edit landing in the working tree. What remains is a **product-behavior
+question, not a security question**: `commands/library.rs::get_artist_overview`
+(read in full while verifying this fix's blast radius) already handles a
+hard Pathfinder failure gracefully — a failed call returns empty
+stats/top-tracks/`ConcertFeed::unavailable()` rather than crashing or
+erroring the command, and deliberately does **not** trigger the REST
+top-tracks fallback on a hard failure (only on a *successful* response with
+an empty field — schema drift, not an outright rejection) specifically to
+avoid amplifying a rate-limit into more requests. That guard's reasoning
+doesn't obviously extend to a deterministic 403 from a changed identity, but
+I did not touch it: I don't know yet whether the failure mode is even a 403,
+and reshaping unrelated fallback logic on a guess is exactly the kind of
+speculative change this review is trying not to make.
 
 ### Recommended Fix
 
-Remove the `desktop_artist` header branch. Send the honest `rustify/{version}` UA for all Pathfinder operations. Keep `client-token` and the OAuth bearer — those are credentials librespot legitimately holds, not identity claims.
-
-If `queryArtistOverview` then 403s (likely), take the existing documented fallback: `README.md:181-185` already describes an ad-hoc top-tracks sample built from recent albums. Ship that, and label the artist page accurately.
-
-If you decide the feature is worth the risk, that is your call to make — but then **delete the impersonation-is-a-hard-line claims** from `telemetry.rs`, `README.md`, and `CLAUDE.md`, and replace them with an accurate statement of what the project does and what it exposes the user's account to. Do not leave both in the tree.
+Done for the code. What's left: log in with a real account, open an artist
+page, and observe what happens.
 
 ### Implementation Plan
 
-1. Delete the `let desktop_artist = ...` binding and both conditional header blocks in `pathfinder.rs:163-200`; use `WebPlayer`/`open.spotify.com` uniformly, or drop the origin headers entirely.
-2. Set the Pathfinder `reqwest::Client` UA to `rustify/{CARGO_PKG_VERSION}`, matching `webapi.rs:29`.
-3. Run the app against a live account and record which operations still succeed. **This step cannot be skipped** — it is the only way to know.
-4. For each operation that now fails, either wire the documented fallback or remove the feature and its command.
-5. Update `README.md` "Known limitations" and the `obsidian/concepts/` note covering Pathfinder with the measured result.
-6. Add a one-line policy to `CLAUDE.md`: *no request may claim an identity this application does not have.* Grep for `Spotify/1.` and `xpui` in review.
+1. ~~Delete the conditional header blocks; use `WebPlayer`/`open.spotify.com`
+   uniformly.~~ **Done.**
+2. **Live-test against a real account — still the one step nothing in this
+   review or its tooling can substitute for.** Open an artist page. Check the
+   log for `spotify.artist: artist overview via Pathfinder failed for
+   {artist_id}: {error}` (only printed on a hard failure, per
+   `commands/library.rs`).
+   - If no warning appears and the page looks normal: done, no further
+     action, and this can close outright.
+   - If it 403s: decide whether `get_artist_overview`'s failure handling
+     should also attempt `library::artist_tracks`'s REST fallback on a hard
+     Pathfinder failure (not just an empty-field success) — that's a real,
+     separate follow-up, not something to guess at now.
+3. If the fallback question in (2) comes up, that's a new, scoped finding for
+   whoever runs the next pass — not pre-emptively fixed here.
 
 ### Acceptance Criteria
 
-- [ ] No source file sends a `User-Agent`, `Origin`, `Referer`, or version header claiming to be an official Spotify client.
-- [ ] Every outbound HTTP client sends `rustify/{version}`.
-- [ ] The live behaviour of each Pathfinder operation post-change is recorded in `obsidian/`.
-- [ ] Features that no longer work are removed or explicitly degraded — not left silently 403ing.
-- [ ] Docs and code agree on the impersonation policy, in whichever direction you choose.
+- [x] No source file sends a `User-Agent`, `Origin`, `Referer`, or version
+      header claiming to be an official Spotify client.
+- [ ] Live-measured behavior of `queryArtistOverview` post-change is recorded
+      somewhere (`obsidian/`, `CLAUDE.md`, or just reported back).
+- [x] Docs and code agree on the impersonation policy (they now do, with no
+      doc edit needed).
 
 ### Estimated Effort
 
-Medium (half day to one day), dominated by live re-testing, not by the edit.
+Small remaining — one login and one page visit.
 
 ### Dependencies
 
-Live Spotify Premium credentials. A willingness to lose the artist-overview data.
+Live Spotify Premium credentials, which this environment does not have.
 
 ### Risks if Ignored
 
-Account suspension for the user. A stale hardcoded version string that fails opaquely. A codebase whose documented values cannot be trusted, which degrades the value of *all* the other excellent documentation.
+None from the code as it stands now. The only remaining risk is discovering,
+later and by accident, that the artist page silently degraded — which is why
+the one-time live check above is still worth doing even though nothing here
+is urgent any more.
 
 ---
 
-## [P0-2] The project cannot be legally or safely distributed
+## [P0-2] Undisclosed GPL liability, no LICENSE, and the previous review's own fix is now unsafe
 
 **Priority:** P0
-**Area:** Legal / DevOps
-**Difficulty:** Low (each item), High (the decision behind them)
+**Area:** Legal
+**Difficulty:** Low to write the safeguard down; the underlying decision itself is already made and, as explained to the user in a prior session, legally coherent as long as it holds
 **Impact:** Critical
-**Confidence:** Confirmed
-**Evidence:** No `LICENSE`/`COPYING` at repo root (verified). `src-tauri/tauri.conf.json:5` — `"identifier": "dev.local.rustify"`. `tauri.conf.json:35-44` — NSIS bundle with no `signCommand`/certificate config. No updater plugin in `Cargo.toml`. `version: "0.1.0"` in both manifests across 81 commits.
+**Confidence:** Confirmed (repo state, code references, remote visibility) / [ASSUMPTION] for the *content* of the 2026-09-05 decision, which I know only from this assistant's own persisted memory of that session, not from re-deriving it independently — I verified its externally-checkable claims (code references, remote visibility) but did not re-litigate the legal reasoning itself
+**Evidence:** No `LICENSE`/`COPYING` at repo root (verified, `ls` returns nothing). `tauri.conf.json:5` — `"identifier": "dev.local.rustify"`, still the scaffold placeholder. `player.rs:512-515`, `narration.rs:37-39`, `remote_state.rs:286-288` each explicitly reference "go-librespot's own" behavior. `README.md`/`CLAUDE.md` grepped for `GPL`/`go-librespot`: zero hits in either. `curl https://api.github.com/repos/LAMAgalletta0IQ/Rustify` → `404` unauthenticated, checked live during this review.
 
 ### Problem
 
-Four independent blockers, each individually small, which together mean this cannot be given to anyone:
+This finding did not exist, in this form, in the last review — and that's the
+point. On 2026-09-02, "no LICENSE" was a garden-variety P0 with an easy
+answer: pick MIT or Apache-2.0, done in under two hours. Three days later, on
+2026-09-05, a decision was made (recorded in this assistant's memory, from a
+session I was not part of but can verify the traces of) to port two features
+from `go-librespot` — a GPL-3.0-licensed project — into this codebase: the
+crossfade scheduler and DJ narration audio injection. Both now exist in the
+tree (`player.rs`'s crossfade/`spawn_dj_advance`, `narration.rs`). The
+reasoning given at the time was legally real, not hand-waved: GPLv3's
+copyleft conditions are conditions on *conveyance*, not on private
+modification, so porting the code without adopting GPL-3.0 for Rustify is
+coherent **exactly as long as the project is never distributed to anyone** —
+and this project's single-binary architecture (no sidecar separation) means
+that the instant it is, GPL-3.0-or-later attaches to the whole compiled
+binary, not just the ported portions.
 
-1. **No license.** Under default copyright, nobody may legally copy, run, or fork it. The repo has a GitHub remote (`origin/main`), so this is already published source that nobody is permitted to use.
-2. **Placeholder identifier.** `dev.local.rustify` is scaffold output. `CLAUDE.md` correctly warns that changing the identifier orphans `tokens.json` and forces re-login — so fixing this gets *more* expensive with every user, and there is currently exactly one.
-3. **Unsigned NSIS installer.** Windows SmartScreen will block it. Users are trained to click through, which is the exact habit that gets people compromised.
-4. **No updater.** If P0-1 or a librespot CVE required a fix, there is no channel to deliver it.
+That determination still holds today — I checked, not assumed: the GitHub
+remote returns 404 unauthenticated right now. But the determination's entire
+safety margin is "as long as this stays private," and **nothing enforces or
+even documents that constraint inside the project itself.** `README.md` says
+"Personal use" once, in passing, with no mention of why that framing is now
+load-bearing in a way it wasn't three weeks ago. `CLAUDE.md` — a document
+whose entire stated purpose is capturing exactly this kind of non-obvious,
+easy-to-lose context — says nothing about it. The prior review's own P0-2
+recommendation, sitting unresolved in this same file's git history, explicitly
+tells a future reader to "Add `LICENSE` — MIT or Apache-2.0 (permissive is
+simplest)." Following that advice today, from this file, without knowing what
+I know from memory, produces a real GPL compliance violation the moment
+anyone acts on it and then the repo is ever made public. That is a trap this
+review's own predecessor set, in good faith, that has since become live.
 
 ### Current Behavior
 
-`npm run tauri build` produces an unsigned, unlicensed, placeholder-identified installer with no update path.
+The project is legally safe right now, by a determination that lives in one
+place: an AI assistant's private memory of a conversation. Anyone reading only
+the repository — a future contributor, a future Claude session without that
+memory, the maintainer's own future self after forgetting — has zero warning.
 
 ### Desired Behavior
 
-Either (a) the repository states plainly that it is a personal project not intended for distribution, and stops there — or (b) it has a license, a real reverse-DNS identifier, a signed installer, and an update channel.
+The constraint is written down in the project itself, prominently, in both
+places someone would look (`README.md`'s first screen and `CLAUDE.md`), so it
+survives independently of any one memory system or any one person's recall.
 
 ### Impact
 
-Legal exposure. A user-hostile install experience. No security-patch delivery mechanism. Combined with P0-1, an unfixable account-risk exposure in anything already handed to someone.
+If the repo is ever made public, or the built installer is ever shared, or
+the source is ever handed to anyone, without this being caught first: the
+whole compiled binary needs to be GPL-3.0-or-later, with source availability
+to recipients and attribution for the ported portions — none of which is in
+place, and none of which can be bolted on retroactively for anyone who already
+received a copy under a false (or absent) license. This is not a hypothetical
+enforcement risk in the way client impersonation is; it is a mechanical,
+automatic legal fact that either is or isn't true the moment distribution
+happens, with no gray area.
 
 ### Recommended Fix
 
-**Decide (a) or (b) first.** Everything else follows from that, and much of this review's P1 work is only justified under (b).
-
-Given "Personal use" in `README.md:8`, one maintainer, and a Premium-only, Windows-only, private-API-dependent app, **(a) is the correct choice.** Recommendation: pick (a), and stop treating distribution readiness as a backlog item.
-
-Under (a):
-1. Add `LICENSE` — MIT or Apache-2.0 (permissive is simplest; you retain no meaningful control regardless).
-2. Add a prominent README banner: personal project, not distributed, no support, uses private Spotify APIs at the user's own risk.
-3. Fix the identifier now, while the migration cost is one manual re-login.
-4. Explicitly drop signing and the updater from scope, in writing, so they stop being invisible debt.
-
-Under (b), add to the above: an Authenticode certificate (~$200–400/yr), `tauri-plugin-updater` with signed manifests, a real versioning policy, and — non-negotiably — P0-1 resolved first.
+Do not add a permissive `LICENSE`. Instead, write the actual constraint down,
+in the project, now — independent of whether or when distribution is ever
+revisited.
 
 ### Implementation Plan
 
-1. Choose (a) or (b). Write the decision into `README.md`.
-2. `LICENSE` at repo root; add the SPDX id to `Cargo.toml` and `package.json`.
-3. Change `identifier` to something real (`com.<yourdomain>.rustify` or `io.github.<user>.rustify`). Log out first; expect a fresh login.
-4. Bump `version` past `0.1.0` and note in `CLAUDE.md` when it gets bumped.
-5. Under (b) only: certificate, `signCommand`, updater plugin, release workflow.
+1. Add a short, explicit section to `CLAUDE.md` (a natural home given its
+   existing "Repository gotchas" section) stating: this project ports
+   GPL-3.0 logic from `go-librespot` (name the specific features); it remains
+   deliberately unlicensed and undistributed; GPL-3.0-or-later copyleft
+   attaches to the entire binary the moment it is distributed in any form
+   (public repo, shared installer, given source); before any of that happens,
+   revisit licensing and attribution first.
+2. Add one sentence to `README.md`'s opening (next to the existing "Personal
+   use" line) stating plainly that the project is not licensed for
+   redistribution and explaining, in one clause, why (GPL-derived code,
+   undistributed-only).
+3. Do **not** change `deny.toml`'s license allow-list (it correctly excludes
+   GPL-3.0 today, which is correct for as long as the project stays
+   undistributed) — but add a comment there cross-referencing the new
+   `CLAUDE.md` section, so the allow-list and the reason it looks the way it
+   does are findable from the same place.
+4. Leave `tauri.conf.json`'s placeholder `identifier` exactly as it is for
+   now — fixing it is legitimate future work, but it is not urgent while
+   nothing is distributed, and touching it forces every existing install to
+   re-login (per `CLAUDE.md`'s own documented warning). Don't do it as a
+   drive-by alongside this.
+5. If and when distribution is ever seriously considered, the actual
+   decision — GPL-3.0-or-later for the whole project, or removing/reimplementing
+   the two ported features from a clean-room read of the public protocol
+   instead of the GPL source — has to be made *before* a `LICENSE` file of
+   any kind is added, not after.
 
 ### Acceptance Criteria
 
-- [ ] `LICENSE` exists and is referenced from both manifests.
-- [ ] `identifier` contains no `dev.local`.
-- [ ] README states the distribution posture in its first screen.
-- [ ] Signing/updater are either implemented or explicitly out of scope in writing.
+- [ ] `CLAUDE.md` states the GPL provenance, which features are affected, and
+      the undistributed-only constraint, in writing.
+- [ ] `README.md`'s first screen reflects the same constraint in one sentence.
+- [ ] No permissive `LICENSE` file is added without first resolving (4).
+- [ ] A future session or contributor reading only the repository — not this
+      assistant's memory — would learn this constraint before touching
+      licensing or distribution.
 
 ### Estimated Effort
 
-Small (under 2 hours) for (a). Extra large for (b).
+Extra small (under 30 minutes) to write it down. The underlying decision is
+already made; this finding is about making it discoverable, not about
+re-deciding it.
 
 ### Dependencies
 
-None for (a). Certificate purchase and identity verification for (b).
+None. This should happen before anything else in this review, including
+before revisiting the placeholder `identifier` or any packaging/signing work,
+because both of those are downstream of a licensing decision that this
+finding shows is not yet safely recorded.
 
 ### Risks if Ignored
 
-Continued unlicensed publication. A migration cost that grows with every user. Users trained to bypass SmartScreen. No way to ship a security fix.
+A future well-intentioned action — making the repo public to share the code,
+handing someone the installer, or a future session literally following the
+prior review's own recommendation — creates a real, mechanical GPL violation
+with no one aware it happened until someone downstream notices.
 
 ---
 
 # 8. P1 — High Difficulty / High Impact Issues
 
----
-
-## [P1-1] No CI exists
-
-**Priority:** P1 | **Area:** DevOps | **Difficulty:** Low | **Impact:** High | **Confidence:** Confirmed
-**Evidence:** `.github/` does not exist (verified). `CLAUDE.md` describes the verification loop as commands a human types.
-
-### Problem
-
-The three gates that do work — `cargo check --no-default-features`, `cargo test --lib`, `npm run check` — are entirely dependent on someone remembering. There is also no `clippy` and no `cargo fmt --check` anywhere in the documented loop, so lint and formatting drift are unpoliced.
-
-### Current / Desired Behavior
-
-Currently: a commit that breaks the build can land and only be discovered on the next manual run. Desired: every push runs all gates; `main` cannot regress silently.
-
-### Impact
-
-Regressions land undetected. Difficulty compounds — three months of unlinted code is a large cleanup; three days is trivial. This is the cheapest high-leverage fix in the review.
-
-### Recommended Fix
-
-One GitHub Actions workflow on `windows-latest` with a Rust + npm cache.
-
-### Implementation Plan
-
-1. `.github/workflows/ci.yml`, triggers `push` + `pull_request`.
-2. Steps: `npm ci` → `npm run check` → `cargo fmt --check` → `cargo clippy --no-default-features -- -D warnings` → `cargo check --no-default-features` → `cargo test --no-default-features --lib`.
-3. Add `Swatinem/rust-cache` — librespot from git is the long pole; without caching this is a many-minute job.
-4. Run clippy locally first and fix or `#[allow]`-with-justification the existing findings before turning on `-D warnings`.
-5. Add a `cargo-deny` step once P2-3 lands.
-
-### Acceptance Criteria
-
-- [ ] Workflow runs on every push to `main` and every PR.
-- [ ] All five gates green on `main`.
-- [ ] Clippy runs with `-D warnings` and no blanket crate-level allows.
-- [ ] Cached run completes in under ~10 minutes.
-
-### Estimated Effort
-
-Small (under 2 hours), plus however long the first clippy cleanup takes.
-
-### Dependencies
-
-None. Do this first.
-
-### Risks if Ignored
-
-Slow, invisible quality erosion — precisely the thing this codebase's documentation discipline is otherwise fighting.
-
----
-
-## [P1-2] The test suite verifies nothing about how the app actually behaves
-
-**Priority:** P1 | **Area:** Testing | **Difficulty:** High | **Impact:** High | **Confidence:** Confirmed
-**Evidence:** 106 tests across 29 files, all `#[cfg(test)]` unit tests over fixed payloads. No `tests/` directory. No `vitest`/`@testing-library` in `package.json`. `CLAUDE.md` states this outright.
-
-### Problem
-
-The tests that exist are good — `telemetry::records_only_elapsed_listening_not_seek_distance` and `home::removes_duplicate_cards_and_rejects_unsafe_artwork_urls` test real invariants, not getters. But they are all parsers and pure functions.
-
-Everything genuinely dangerous in this codebase is untested:
-
-- The session-generation watchdog (`state.rs:262-277` + `player::spawn_event_pump`) — the mechanism preventing an ordinary logout from logging the user straight back in.
-- `save_stored_tokens` merge behaviour — the fix for the self-sustaining 429 loop. There is no test asserting that writing `webapi_refresh_token: None` preserves the stored value.
-- `restore_login`'s degrade-don't-fail path, which exists to prevent permanent lockout after a rotated streaming token.
-- Session replacement teardown in `establish` (`commands.rs:702-716`).
-- The entire frontend. `store.svelte.ts` holds the auth state machine, the 1 Hz position ticker, optimistic settings rollback, and lyrics request-generation cancellation. None of it is tested.
-
-`CLAUDE.md` says "a green run says nothing about runtime behaviour." Correct, and stated honestly — but it has been true long enough that it is now a decision, not an observation.
-
-### Current / Desired Behavior
-
-Currently the safety-critical recovery machinery is verified only by reading it. Desired: the pure logic in that machinery is tested at the seams, and the frontend store has a test framework.
-
-### Impact
-
-Any refactor of auth or session lifecycle is unguarded. The failure mode is not a crash — it is a user silently logged out, or a credential silently erased, discovered days later. That is the worst kind of bug to have no test for.
-
-### Recommended Fix
-
-Do not attempt to launch Tauri in tests — that is a poor return. Instead, extract the decision logic from the I/O and test the decisions.
-
-Highest value first:
-
-1. **`save_stored_tokens` merge** — pure filesystem logic, testable today with `tempfile`, directly protects the documented 429 loop.
-2. **Session generation** — assert `next_session_generation` monotonicity and that a stale generation is rejected. Extract the comparison into a free function if needed.
-3. **`is_grant_rejected`** — table test over real Spotify error strings, including near-misses that must *not* clear tokens.
-4. **`PlaybackState::set_position`/`refresh_position`** — assert a `VolumeChanged`-shaped update does not reset the clock. This is the documented bug; it deserves a regression test.
-5. **Frontend:** add Vitest, test `store.svelte.ts` against a mocked `invoke` — `handleError` clearing auth on `SessionExpired`, the ticker starting/stopping, `#syncLyrics` generation cancellation, `toggleFriendsPanel` rollback.
-
-### Implementation Plan
-
-1. `cargo add --dev tempfile`; write the `save_stored_tokens` merge tests (3 cases: preserve on `None`, overwrite on `Some`, `clear_stored_tokens` removes).
-2. Add the `is_grant_rejected` table test.
-3. Add the position-anchor regression test.
-4. `npm i -D vitest @testing-library/svelte jsdom`; add `"test": "vitest run"`; wire into CI.
-5. Write 4–6 store tests with `vi.mock("@tauri-apps/api/core")`.
-6. Add the two new commands to `CLAUDE.md`'s verification loop.
-
-### Acceptance Criteria
-
-- [ ] Token merge, grant rejection, and position anchoring each have regression tests naming the bug they prevent.
-- [ ] `npm test` exists, runs in CI, and covers `store.svelte.ts`'s auth/ticker/lyrics paths.
-- [ ] `CLAUDE.md`'s verification loop lists all four gates.
-- [ ] The manual checklist in `README.md` stays — it covers what unit tests cannot, and should be explicitly labelled as such.
-
-### Estimated Effort
-
-Large (multiple days). Steps 1–3 alone are Medium and deliver most of the value.
-
-### Dependencies
-
-P1-1 (CI), so the tests actually run.
-
-### Risks if Ignored
-
-A future auth refactor reintroduces the token-erasure loop. The documentation warning about it will not stop that — it did not stop it the first time.
-
----
-
-## [P1-3] `ensure_jams` races: two concurrent jam commands build two controllers
-
-**Priority:** P1 | **Area:** Reliability / Concurrency | **Difficulty:** Low | **Impact:** High | **Confidence:** Confirmed
-**Evidence:** `src-tauri/src/commands.rs:1972-1992`.
-
-### Problem
-
-```rust
-if let Some(ctrl) = state.jams.read().await.as_ref() { return Ok(ctrl.clone()); }
-// ... read guard released ...
-let ctrl = Arc::new(JamController::build(app, session, &state.tokens).await?);
-let mut guard = state.jams.write().await;
-if let Some(existing) = guard.as_ref() { return Ok(existing.clone()); }
-```
-
-The double-check on the write guard correctly prevents *storing* two controllers. It does not prevent *building* two. Between the read-guard release and the write-guard acquisition sits `JamController::build`, which does network I/O and — critically — has side effects that survive the losing controller being discarded:
-
-- `session.dealer().add_listen_for("social-connect/v2/session_update")` and `..._broadcast_status_update` (`jams_bridge.rs:302-313`) register **two more** subscriptions on the shared librespot dealer.
-- `tauri::async_runtime::spawn` (`jams_bridge.rs:317`) starts a forward task that owns those receivers and an `AppHandle`.
-
-The loser's `Arc<JamController>` is dropped, which drops `_forward` — and per this project's own repeatedly-documented rule, **dropping a `JoinHandle` detaches rather than cancels.** The orphan task keeps emitting `jams:changed` to the webview.
-
-The UI can trigger this: `Jams.svelte` calling `getJamStatus()` on mount while the user clicks Create fires two commands that both call `ensure_jams`.
-
-### Current / Desired Behavior
-
-Currently: duplicate dealer subscriptions and a detached emitter per race. Desired: exactly one controller is built per session, ever.
-
-### Impact
-
-Duplicate `jams:changed` events → duplicated or flickering UI state. Leaked dealer subscriptions on a connection shared with Connect and friend presence. An orphan task holding an `AppHandle` past logout. Difficult to diagnose because it is timing-dependent.
-
-### Recommended Fix
-
-Hold the write guard across the build. `JamController::build` is `async`, so this holds a `tokio::RwLock` write guard across an await — acceptable here because `state.jams` is contended only by jam commands, and serialising them is the desired behaviour. Alternatively use `tokio::sync::OnceCell` with `get_or_try_init`, which is the idiomatic fit.
-
-### Implementation Plan
-
-1. Prefer `OnceCell`: change `pub jams: RwLock<Option<Arc<JamController>>>` to `tokio::sync::OnceCell<Arc<JamController>>` in `state.rs`.
-2. Rewrite `ensure_jams` as `state.jams.get_or_try_init(|| async { ... }).await.cloned()`.
-3. Confirm `logout`'s teardown still works — `OnceCell` has no `take()`, so you will need `RwLock<Option<...>>` with the guard held across the build instead, *or* keep the outer `RwLock` and put a `Mutex` build-lock inside it. Pick whichever keeps logout teardown correct; do not lose it.
-4. Add a test spawning two concurrent `ensure_jams` calls against a stub builder, asserting the builder ran once.
-
-### Acceptance Criteria
-
-- [ ] Two concurrent jam commands result in exactly one `JamController::build`.
-- [ ] Logout still tears the controller down.
-- [ ] A concurrency test covers it.
-
-### Estimated Effort
-
-Small (under 2 hours).
-
-### Dependencies
-
-Resolve alongside P1-4 — same file, same lifecycle.
-
-### Risks if Ignored
-
-Duplicate dealer subscriptions and orphaned emitters, in the one module that already talks to the most fragile private service.
-
----
-
-## [P1-4] The jam forward task is detached and never aborted — and the docs say otherwise
-
-**Priority:** P1 | **Area:** Reliability | **Difficulty:** Low | **Impact:** High | **Confidence:** Confirmed (the doc/code mismatch), Likely (the leak)
-**Evidence:** `src-tauri/src/jams_bridge.rs:8-9`, `:240`, `:317`, `:362`. `src-tauri/src/commands.rs:894-896`. No `.abort()` and no `impl Drop` anywhere in `jams_bridge.rs` (verified by grep).
-
-### Problem
-
-The module doc states:
-
-> "The controller is built lazily on the first jam command and dropped on logout, **which aborts the dealer task and ends the forward loop.**"
-
-`logout` echoes it:
-
-```rust
-// Drop the jam controller too: its dealer listener and event forwarder
-// must not outlive the session they authenticate against.
-state.jams.write().await.take();
-```
-
-But the handle is stored as `_forward: tauri::async_runtime::JoinHandle<()>` and nothing calls `.abort()`. Dropping it detaches. This is the *exact* hazard `state.rs:150` and `commands.rs:702-706` warn about for every other background task — and every other task (`refresh_task`, `remote_task`, `connect_state_task`, `friends_task`) is explicitly aborted in `logout`. Jams is the one that was missed.
-
-The forward loop exits only when both `session_updates.next()` and `broadcast_updates.next()` yield `None`. Those receivers are moved into the task, so they are not dropped with the controller. Termination therefore depends on librespot closing the dealer when the last `Session` clone drops — plausible, since the controller holds a `Session` clone that does drop, but **unverified**, and it is not what the comment claims is happening.
-
-The difference matters: as written, correctness depends on a librespot implementation detail rather than on an explicit abort this code controls.
-
-### Current / Desired Behavior
-
-Currently: termination is indirect, undocumented-in-reality, and unverified. Desired: an explicit `.abort()`, matching every sibling task.
-
-### Impact
-
-Best case the docs are wrong and the behaviour is accidentally right. Worst case an orphaned task holds an `AppHandle` and emits `jams:changed` after logout, with the webview receiving jam events for a session that no longer exists. Combined with P1-3, one per race.
-
-### Recommended Fix
-
-Rename `_forward` to `forward`, and add:
-
-```rust
-impl Drop for JamController {
-    fn drop(&mut self) {
-        self.forward.abort();
-    }
-}
-```
-
-`Drop` is preferable to an explicit call in `logout` because it also covers P1-3's discarded loser and any future drop site.
-
-### Implementation Plan
-
-1. Rename the field; add `impl Drop`.
-2. Correct the module doc at `jams_bridge.rs:8-9` to describe what the code does.
-3. Correct the comment at `commands.rs:894-895`.
-4. Verify at runtime: log in, create/refresh a jam, log out, confirm no further `jams:` log lines and that a re-login produces exactly one forwarder.
-5. Add the "every spawned task needs an explicit abort path" rule to `CLAUDE.md`'s background-task section — it is already implied but was missed once.
-
-### Acceptance Criteria
-
-- [ ] `JamController` aborts its forward task on drop.
-- [ ] Module doc and `logout` comment match the implementation.
-- [ ] Manually verified: no `jams:changed` emission after logout.
-
-### Estimated Effort
-
-Extra small (under 30 minutes) for the fix; Small including verification.
-
-### Dependencies
-
-Do with P1-3.
-
-### Risks if Ignored
-
-A background task emitting events with dead credentials, and a documentation claim that will mislead the next person to read it — including you, in six months.
-
----
-
-## [P1-5] Refresh tokens are stored as plaintext with default file permissions
-
-**Priority:** P1 | **Area:** Security | **Difficulty:** Medium | **Impact:** High | **Confidence:** Confirmed
-**Evidence:** `src-tauri/src/auth.rs:446-450` — `std::fs::write(tokens_path(data_dir), raw)` with no ACL adjustment. `StoredTokens` is a plain serde struct holding two long-lived refresh tokens.
-
-### Problem
-
-`tokens.json` in `%APPDATA%\dev.local.rustify\` contains two Spotify refresh tokens in clear text. They are long-lived (Spotify's are ~6 months per the code's own comment at `auth.rs:928`) and carry the full `STREAMING_SCOPES` union — including `user-library-modify`, `playlist-modify-*`, `user-follow-modify`, and `ugc-image-upload`.
-
-Anyone or anything running as that Windows user can read the file and obtain durable, write-capable access to the victim's Spotify account. That includes any malware, any other installed app, and any backup/sync tool pointed at `%APPDATA%`.
-
-To be fair: this is the same posture as most Electron desktop apps, `%APPDATA%` is per-user ACL'd, and there is no cross-process sandbox on Windows to appeal to. It is not a catastrophic defect. But it is below the bar this codebase sets for itself everywhere else — a project that redacts join secrets from debug logs and unit-tests that `device_code` never serialises should not leave the long-lived credential in cleartext on disk.
-
-### Current / Desired Behavior
-
-Currently: plaintext JSON, default inherited ACLs. Desired: encrypted at rest with a user-bound key, so a stolen file is useless on another machine or under another account.
-
-### Impact
-
-Local-attacker or malware access to the file yields persistent Spotify account access, including library and playlist mutation, that survives password changes until the user explicitly revokes app access.
-
-### Recommended Fix
-
-Windows DPAPI (`CryptProtectData` / `CryptUnprotectData` with `CRYPTPROTECT_LOCAL_MACHINE` **unset**, so the key is bound to the user account). The `windows` crate exposes it; the app is already Windows-only.
-
-Keep it contained to `auth.rs`: encrypt in `save_stored_tokens`, decrypt in `load_stored_tokens`. Nothing else needs to know.
-
-### Implementation Plan
-
-1. Add the `windows` crate with the `Win32_Security_Cryptography` feature.
-2. Write `protect(&[u8]) -> Vec<u8>` / `unprotect(&[u8]) -> Option<Vec<u8>>` helpers in `auth.rs`.
-3. In `save_stored_tokens`, serialise then `protect`, and write the ciphertext. **Preserve the existing merge logic** — it reads the previous file first, so decrypt-merge-encrypt, and do not let the round trip drop the merge (that would reintroduce the documented 429 loop).
-4. In `load_stored_tokens`, try `unprotect` first; on failure, fall back to parsing as plaintext and immediately re-save encrypted. This migrates existing installs without a forced re-login.
-5. After a release cycle, remove the plaintext fallback.
-6. Test: fresh install, upgrade-from-plaintext, and corrupted-file (must return `None`, not panic — `load_stored_tokens` already returns `Option`, keep that).
-
-### Acceptance Criteria
-
-- [ ] `tokens.json` is not human-readable after login.
-- [ ] An existing plaintext file is migrated silently, with no re-login.
-- [ ] A corrupted/foreign file degrades to "no stored tokens", never a panic.
-- [ ] The merge-preserve behaviour of `save_stored_tokens` still holds, with the P1-2 test proving it.
-
-### Estimated Effort
-
-Medium (half day to one day).
-
-### Dependencies
-
-The P1-2 merge test should land first, so the encryption change is guarded.
-
-### Risks if Ignored
-
-Persistent account takeover from any local read. Low likelihood, high consequence, and inconsistent with the project's own standards.
-
----
-
-## [P1-6] The feature surface exceeds what one maintainer can sustain
-
-**Priority:** P1 | **Area:** Product / Architecture | **Difficulty:** High | **Impact:** High | **Confidence:** Confirmed
-**Evidence:** 100+ registered Tauri commands (`lib.rs:107-201`). 26 of 45 Rust files reference private Spotify hosts or internal endpoints. `README.md:157-193` lists nine known limitations, most of them upstream removals. `error.rs` carries four distinct variants — `FeatureUnsupported`, `PublicApiLimitation`, `EndpointNotAvailable`, `PersistedQueryExpired` — that exist purely to describe ways Spotify has taken something away.
-
-### Problem
-
-A "lightweight native Spotify client" (`README.md:3`) has grown to include Jams, DJ with Lexicon fallback, lyrics, track credits, concerts, music videos, friend presence, lossless capability probing, playback telemetry, Listening DNA, Last.fm enrichment, personalised Home, user profiles, and user search.
-
-The maintenance cost is not proportional to feature count — it is proportional to *private-API-dependent* feature count, and it is paid continuously and without warning. The repo already documents four such breakages in a single year:
-
-- `/v1/audio-features` closed to Development Mode apps → DNA rebuilt on genres + popularity.
-- `/artists/{id}/top-tracks` restricted (Feb 2026) → `PublicApiLimitation` variant added.
-- `product` removed from `/me` for newer apps (Feb 2026) → Premium gate made conditional.
-- Lexicon 403s for most accounts → DJ fallback path added.
-
-That is roughly one breakage per quarter, each requiring diagnosis against an undocumented service with no error contract. The `error.rs` variants are, read one way, a scar tissue map.
-
-The code handles each individual breakage well. That is not the same as the portfolio being sustainable. Every added private-API feature raises the standing probability that *something* is broken on any given day, and there is no monitoring — the user finds out.
-
-To be clear: this is not a code problem and it is not fixable by refactoring. It is a scope decision.
-
-### Current / Desired Behavior
-
-Currently: everything is nominally supported, nothing is prioritised, breakage is discovered by use. Desired: an explicit tier list, where the bottom tier is either frozen or deleted.
-
-### Impact
-
-Diffuse maintenance load. Rising baseline broken-feature rate. Attention pulled away from P0/P1 work (this review found no CI and no license on a project with a 111-note documentation vault — that is a prioritisation signal).
-
-### Recommended Fix
-
-Tier the features and write the tiers down.
-
-- **Tier 1 — core, must always work.** Auth, playback, Connect, library, search, queue. Public API + librespot only. Any breakage is a P0.
-- **Tier 2 — supported extras.** Lyrics, friend presence, Home, credits. Private-API-backed but with defined degradation. Breakage is a P2.
-- **Tier 3 — experimental, unsupported.** Jams, DJ, music videos, lossless probing, telemetry. Explicitly best-effort. Breakage is closed as "expected."
-
-Then act on it: for anything in Tier 3 you have not used in a month, delete it. `README_jams.md` is 15,161 bytes of documentation for a feature that requires captured Pathfinder hashes to fully function and whose config file (`jams.toml`) most installs will never have.
-
-### Implementation Plan
-
-1. Write the tier list into `CLAUDE.md` with each current feature assigned.
-2. Surface Tier 3 in the UI as experimental — the code already knows (`JamStatus.pathfinder_hashes` count, DJ's `reason: "lexicon-unavailable-fallback"`); the labelling should follow.
-3. Institute a rule: no new Tier 3 features until CI, license, and integration tests exist.
-4. Review Tier 3 quarterly against actual use. Delete, do not deprecate — the git history preserves it, and `obsidian/` preserves the reasoning.
-5. For each Tier 1/2 feature, verify the documented degradation path actually fires (several are asserted in comments, not tests).
-
-### Acceptance Criteria
-
-- [ ] Every feature is assigned a tier in `CLAUDE.md`.
-- [ ] Tier 3 is visibly labelled experimental in the UI.
-- [ ] At least one unused Tier 3 feature has been deleted.
-- [ ] A written rule gates new Tier 3 work behind the infrastructure items.
-
-### Estimated Effort
-
-Medium for the tiering; Large if deletion is done properly.
-
-### Dependencies
-
-Requires the P0-2 decision — under "personal use," Tier 3 is much more defensible than under "distributed."
-
-### Risks if Ignored
-
-Slow drift toward a project where a rising fraction of features are quietly broken, and the documentation describing them becomes a record of what used to work.
-
----
-
-## [P1-7] `commands.rs` is a 2,128-line grab bag with unenforced three-site registration
-
-**Priority:** P1 | **Area:** Architecture | **Difficulty:** Medium | **Impact:** Medium | **Confidence:** Confirmed
-**Evidence:** `src-tauri/src/commands.rs` — 2,128 lines, largest file by 1,000 lines. ~100 `#[tauri::command]` functions plus non-trivial logic (`establish` at 625-767, `start_dj_fallback` at 356-429, artist-overview caching at 1574-1673). `CLAUDE.md` documents the three-edit requirement and that missing edits 2 or 3 fail at runtime only.
-
-### Problem
-
-Two coupled issues.
-
-**Size.** The file mixes thin dispatchers with substantial logic. `establish` is a 140-line session-lifecycle orchestrator handling token persistence, generation claiming, audio config, the Premium gate, librespot startup, four task spawns, old-session teardown, and error rollback. It belongs in `player.rs` or its own `session.rs`.
-
-**Unenforced registration.** Adding a command requires edits in `commands.rs`, `lib.rs:generate_handler![]`, and `src/lib/api.ts`. Miss the second or third and it compiles cleanly and fails at runtime with "command not found." Same for the event-name constants duplicated between `state::events` and `api.ts:44-49`. With 100+ commands and 6 events this is a real, recurring hazard — `CLAUDE.md` documents it as a known trap rather than fixing it.
-
-### Current / Desired Behavior
-
-Currently a runtime-only failure mode on a routine operation. Desired: compile-time or CI-time detection.
-
-### Impact
-
-Runtime "command not found" surfaces as a broken feature with no compile error. Navigating a 2,128-line file slows every change. `establish`'s complexity is where a lifecycle bug would hide.
-
-### Recommended Fix
-
-Split by domain, then add a parity test. Do these as separate commits.
-
-### Implementation Plan
-
-1. Move `establish`, `login`, `restore_session`, `logout`, and device-authorization commands into `commands/session.rs`. Pure move, no logic change, verify with `cargo check`.
-2. Split the rest: `commands/library.rs`, `commands/playback.rs`, `commands/jams.rs`, `commands/discovery.rs` (DJ/Home/DNA/lyrics/profiles). Target under 600 lines each. Keep `commands/mod.rs` re-exporting so `generate_handler![]` needs no change.
-3. Add a build-time or test-time parity check: a test that reads `lib.rs` and `src/lib/api.ts` as text, extracts the handler list and the `invoke("...")` call sites, and asserts they match the set of `#[tauri::command]` functions. Crude but effective, and cheap.
-4. Do the same for the six event-name constants.
-5. Add both to CI.
-
-### Acceptance Criteria
-
-- [ ] No file in `src-tauri/src/commands/` exceeds ~600 lines.
-- [ ] `establish` lives outside the command dispatch layer.
-- [ ] A test fails when a command is registered in Rust but missing from `api.ts`, or vice versa.
-- [ ] A test fails when event-name constants diverge.
-- [ ] `CLAUDE.md`'s "three edits" section notes that edits 2 and 3 are now checked.
-
-### Estimated Effort
-
-Medium (half day to one day).
-
-### Dependencies
-
-P1-1, so the parity test runs automatically.
-
-### Risks if Ignored
-
-Recurring runtime-only failures on routine work, and a lifecycle function complex enough to hide a session bug.
+No findings identified for this level based on the provided information. The
+single item that carried genuine P1 severity from the prior review — the
+complete absence of CI — was fixed during this review session (see §6's
+"Fixed during this review session" note and the workflow at
+`.github/workflows/ci.yml`); it is not restated here as an open finding. Every
+other former P1 (jams concurrency, detached tasks, plaintext tokens,
+`commands.rs` bloat, feature-tier documentation) was independently
+re-verified as fixed. Four dedicated subagent passes across the entire
+backend and the entire frontend surfaced nothing that rises to this severity
+that wasn't already captured at P0 above.
 
 ---
 
@@ -741,248 +551,121 @@ Recurring runtime-only failures on routine work, and a lifecycle function comple
 
 ---
 
-## [P2-1] The MCP automation bridge ships in the release dependency graph
-
-**Priority:** P2 | **Area:** Security / Dependencies | **Difficulty:** Low | **Impact:** Medium | **Confidence:** Confirmed
-**Evidence:** `Cargo.toml:20` — `tauri-plugin-mcp-bridge = "0.12"` as an unconditional dependency. `lib.rs:92-100` gates *activation* behind `#[cfg(debug_assertions)]`. `capabilities/default.json:16` grants `mcp-bridge:default` unconditionally.
-
-### Problem
-
-The runtime gating is right, and binding to `127.0.0.1` instead of the default `0.0.0.0` for an unauthenticated control channel is a good catch — credit where due. But the crate is still a normal dependency, so its code and its entire transitive tree are compiled into and linked against release builds. And the capability is granted with no `cfg` condition, so the release manifest advertises a permission for a plugin that is not loaded.
-
-`tauri-plugin-mcp-bridge` is a third-party crate at 0.12 whose purpose is remote control of the app. It is the highest-consequence dependency in the tree and it exists purely for development convenience.
-
-### Current / Desired Behavior
-
-Currently: present in release, inactive. Desired: absent from release entirely.
-
-### Impact
-
-Unnecessary attack surface and supply-chain exposure in shipped binaries. A future refactor that loosens the `cfg` gate — or an upstream change that self-registers — turns an inactive dependency into a live unauthenticated control channel with no compile error.
-
-### Recommended Fix
-
-Put it behind a Cargo feature that is off by default, and condition the capability the same way.
-
-### Implementation Plan
-
-1. Add `[features] mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]` and mark the dependency `optional = true`.
-2. Change the `lib.rs` gate to `#[cfg(all(debug_assertions, feature = "mcp-bridge"))]`.
-3. Move `mcp-bridge:default` into a separate capability file with a platform/feature condition, or accept the unused permission and document why.
-4. Document in `CLAUDE.md` that the dev loop needs `--features mcp-bridge`, and update the documented `cargo check` command accordingly.
-5. Verify with `cargo tree --no-default-features` that it is gone from the release graph.
-
-### Acceptance Criteria
-
-- [ ] `cargo tree` on a default release build shows no `tauri-plugin-mcp-bridge`.
-- [ ] The dev workflow still works with the feature flag, documented in `CLAUDE.md`.
-
-### Estimated Effort
-
-Small (under 2 hours).
-
-### Dependencies
-
-None.
-
-### Risks if Ignored
-
-An unauthenticated automation channel one `cfg` mistake away from shipping.
-
----
-
-## [P2-2] `NowPlaying.svelte` is a 1,166-line component
+## [P2-1] `NowPlaying.svelte` is still the largest component after a partial split
 
 **Priority:** P2 | **Area:** Code quality | **Difficulty:** Medium | **Impact:** Medium | **Confidence:** Confirmed
-**Evidence:** 1,166 lines — more than double the next-largest frontend file (`PlayerBar.svelte`, 512).
+**Evidence:** 839 lines today (independently re-counted this session), down from 1,166 at the last review — a real reduction, via the documented extraction of `LyricsPane.svelte`, `SleepTimerBadge.svelte`, and `FullscreenChrome.svelte`. Still 1.6x the next-largest frontend file (`Settings.svelte`, 514 lines).
 
 ### Problem
 
-The file owns the full-screen now-playing view, the lyrics pane with scroll sync, the sleep-timer clock (`:446`, a 1 Hz interval), and the fullscreen drag-region handling documented in `CLAUDE.md`. Four responsibilities, one file, no tests.
+The three-way extraction the last review recommended happened and reduced the
+file by 28% — real progress, not cosmetic. But the parent retained the
+fullscreen host, the drag-region handling, and the orchestration wiring for
+all three extracted children, which is still four responsibilities living in
+one file.
 
 ### Current / Desired Behavior
 
-Currently one component. Desired: three or four focused components under ~400 lines each.
+Currently one large orchestrating component. Desired: the orchestration layer
+itself thin enough that a Svelte 5 reactivity bug in it is easy to localize,
+which it currently is not quite.
 
 ### Impact
 
-Hard to test (P1-2), hard to review, and Svelte 5 reactivity bugs in a file this size are hard to localise. The `data-tauri-drag-region={fullscreen ? undefined : true}` subtlety — where `false` renders an attribute Tauri still honours — is exactly the class of bug that hides here.
+Medium, same reasoning as before, at reduced severity given the file is a
+third smaller than when this was first flagged.
 
 ### Recommended Fix
 
-Extract `LyricsPane.svelte`, `SleepTimerBadge.svelte`, and `FullscreenChrome.svelte`. Keep the parent as layout and state wiring.
+Not urgent. If the file grows again — the natural direction for a "now
+playing" surface that keeps gaining features — do a second extraction pass
+then, rather than pre-emptively right now.
 
 ### Implementation Plan
 
-1. Extract the lyrics pane first — it is the most self-contained (props: `lyrics`, `positionMs`, `loading`, `error`).
-2. Extract the sleep-timer clock with its own interval, so the parent stops owning a timer.
-3. Extract fullscreen chrome, preserving the `undefined`-vs-`false` drag-region behaviour verbatim and carrying the explanatory comment with it.
-4. Run `npm run check` after each extraction.
-5. Manually verify: lyrics scroll sync, sleep-timer countdown, fullscreen enter/exit, window drag in both states.
+1. Watch the file's size at the next feature addition that touches it.
+2. If it crosses ~1,000 lines again, extract the orchestration/drag-region
+   logic into its own thin wrapper, keeping the three already-extracted
+   children as-is.
+3. Re-run `npm run check` and manually verify fullscreen enter/exit and
+   window-drag behavior in both states, per this project's own documented
+   drag-region subtlety (`undefined` vs `false`).
 
 ### Acceptance Criteria
 
-- [ ] No frontend component exceeds ~450 lines.
-- [ ] `npm run check` still reports 0 errors.
-- [ ] Drag-region behaviour is unchanged in both fullscreen states, verified manually.
+- [ ] No regression in fullscreen/drag behavior if and when this is revisited.
+- [ ] `npm run check` stays at 0 errors.
 
 ### Estimated Effort
 
-Medium (half day to one day) including manual verification.
+Medium, if and when undertaken.
 
 ### Dependencies
 
-Ideally after P1-2 adds Vitest, so the extraction is guarded.
+None urgent.
 
 ### Risks if Ignored
 
-Growing to 1,500+ lines, at which point extraction becomes a rewrite.
+Slow drift back toward the file's old size, at which point extraction
+becomes a rewrite again — same risk the last review named, just further off.
 
 ---
 
-## [P2-3] No Rust dependency vulnerability scanning
+## [P2-2] No true integration or end-to-end coverage exists
 
-**Priority:** P2 | **Area:** Dependencies | **Difficulty:** Low | **Impact:** Medium | **Confidence:** Confirmed
-**Evidence:** `cargo audit` is not installed (verified). No `deny.toml`. `cargo tree` reports 1,157 nodes from 32 direct dependencies. `npm audit --omit=dev` reports 0 vulnerabilities — the JS side is fine and tiny (2 runtime deps).
-
-### Problem
-
-The Rust tree is ~1,157 crates and includes `librespot` pinned to a **git revision** (`b5f4631f`), not a published version — so it receives no crates.io security advisories at all, and updating it means manually tracking upstream. It also includes TLS stacks (`native-tls`), a WebSocket implementation (`tokio-tungstenite 0.24`), and an HTTP client, all parsing untrusted network input. None of this is scanned.
-
-`Cargo.lock` is committed (good) and `vergen` is deliberately pinned with a documented reason (also good) — so version discipline exists, it just has no security dimension.
-
-### Current / Desired Behavior
-
-Currently: unknown CVE exposure. Desired: advisories checked on every CI run and license compliance verified.
-
-### Impact
-
-A known vulnerability in a network-facing transitive dependency could sit unnoticed indefinitely. `tokio-tungstenite 0.24` handles the dealer websocket — untrusted remote input.
-
-### Recommended Fix
-
-`cargo-deny` (covers advisories, licenses, bans, and sources in one tool) in CI.
-
-### Implementation Plan
-
-1. `cargo install cargo-deny`; `cargo deny init`.
-2. Configure: `advisories` deny with explicit, commented allowances for anything unfixable due to the librespot pin; `licenses` allow the standard permissive set; `sources` allow crates.io plus the librespot GitHub org.
-3. Run locally; triage findings — a tree this size will produce some.
-4. Add `cargo deny check` to CI (P1-1).
-5. Set a reminder to re-evaluate the librespot pin quarterly; note in `CLAUDE.md` alongside the existing vergen note.
-
-### Acceptance Criteria
-
-- [ ] `deny.toml` committed; `cargo deny check` runs in CI.
-- [ ] Existing findings are either fixed or explicitly allowed with a comment stating why.
-- [ ] The librespot pin review cadence is documented.
-
-### Estimated Effort
-
-Small (under 2 hours) plus triage.
-
-### Dependencies
-
-P1-1.
-
-### Risks if Ignored
-
-Silent CVE exposure in TLS/WebSocket/HTTP code paths handling remote input.
-
----
-
-## [P2-4] The Rust↔TypeScript contract is duplicated by hand in three places
-
-**Priority:** P2 | **Area:** Architecture | **Difficulty:** Medium | **Impact:** Medium | **Confidence:** Confirmed
-**Evidence:** `src/lib/types.ts` (656 lines) hand-mirrors the Rust serde structs. Event names duplicated at `state.rs:14-21` and `api.ts:44-49`. `CLAUDE.md` documents the `rename_all` serialize-vs-deserialize hazard that produced `missing field 'isActive'`.
+**Priority:** P2 (downgraded from the prior review's P1) | **Area:** Testing | **Difficulty:** High | **Impact:** Medium | **Confidence:** Confirmed
+**Evidence:** 142 Rust tests (up from 106) + 10 Vitest tests, all confirmed by direct execution this session. Every one is a unit/pure-function test; none launches Tauri, librespot, or a real webview. `CLAUDE.md` states this outright and frames the manual 15-step checklist in `README.md` as the deliberate E2E layer, not a stopgap.
 
 ### Problem
 
-656 lines of hand-maintained TypeScript mirroring Rust structs, with nothing checking they agree. The documented `#[serde(rename_all = "camelCase")]` bidirectional trap — where a struct deserialised from Spotify's snake_case and serialised to the webview's camelCase needs `rename_all(serialize = ...)` — is exactly the failure this duplication invites, and it has already fired once, surfacing as an innocuous "No devices found."
-
-`svelte-check` passing proves the TypeScript is internally consistent, not that it matches Rust.
-
-### Current / Desired Behavior
-
-Currently: hand-maintained, drift detected only at runtime by a wrong-looking UI. Desired: generated, or checked.
-
-### Impact
-
-Silent field mismatches that manifest as empty lists or missing data rather than errors — the hardest bug class to notice.
-
-### Recommended Fix
-
-`ts-rs` (`#[derive(TS)]` + `#[ts(export)]`) generates TypeScript from the Rust structs at test time. Adopt incrementally, starting with the types crossing the boundary most often: `PlaybackState`, `AuthState`, `TrackInfo`, `Device`, `AppErrorPayload`.
-
-Do not attempt all 656 lines at once.
-
-### Implementation Plan
-
-1. `cargo add --dev ts-rs`. Derive `TS` on `PlaybackState`, `AuthState`, `TrackInfo`.
-2. `cargo test` exports them to `src/lib/generated/`. Commit the output.
-3. Re-export from `types.ts` and delete the hand-written versions.
-4. Add a CI step that regenerates and fails if `git diff` is non-empty.
-5. Extend to the remaining boundary types over time — Spotify-wire-only structs do not need it.
-6. Fold the event-name parity check in with P1-7's registration test.
-
-### Acceptance Criteria
-
-- [ ] The core playback/auth types are generated, not hand-written.
-- [ ] CI fails on drift between Rust structs and committed TypeScript.
-- [ ] Event-name constants are checked for parity.
-
-### Estimated Effort
-
-Medium (half day to one day) for the initial slice.
-
-### Dependencies
-
-P1-1.
-
-### Risks if Ignored
-
-Recurrence of the `missing field 'isActive'` class of bug, which presents as a feature that quietly returns nothing.
-
----
-
-## [P2-5] `withGlobalTauri: true` widens the webview's API surface for no benefit
-
-**Priority:** P2 | **Area:** Security | **Difficulty:** Extra small | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `tauri.conf.json:11`. `src/lib/api.ts:1` imports `invoke` from `@tauri-apps/api/core` — the module path, not the global.
-
-### Problem
-
-`withGlobalTauri` injects `window.__TAURI__` into every page context. The frontend does not use it; it imports the API properly. The setting is scaffold default left on.
-
-Actual risk is low — CSP is `default-src 'self'`, there is no `@html`, and no remote content is loaded. But it is a gratuitous widening: any injected script would get the full IPC surface handed to it by name rather than having to find a bundled module.
+This is the one item from the prior review's P1-2 that wasn't fully "fixed" —
+because full integration/E2E coverage for a Tauri+librespot+real-Spotify-account
+app is a different, much larger kind of project than what got built here, and
+I'm not convinced it should be. What *did* happen is exactly the highest-value
+subset the prior review recommended: the previously-untested dangerous logic
+(token merge, `is_grant_rejected`, position anchoring, session-generation
+monotonicity, jams concurrency) now has real regression tests naming the bug
+each one prevents, and the frontend went from zero test infrastructure to a
+genuine, non-superficial Vitest suite. That's real progress, which is why
+this is P2 now rather than restating the old P1 verdict unchanged.
 
 ### Current / Desired Behavior
 
-Currently `true`, unused. Desired `false`.
+Currently: the pure logic is well-tested; nothing exercises a live Tauri
+process, librespot, or a rendered webview. Desired, realistically: this stays
+true, and the manual checklist stays the accepted, explicitly-labeled
+substitute — chasing automated E2E for a personal, one-maintainer,
+private-API-dependent desktop app is likely not worth its cost relative to
+what it would catch beyond what a careful manual pass already does.
 
 ### Impact
 
-Low. This is defence-in-depth hygiene, not an exploitable finding.
+Medium, not High: the specific failure mode the prior review worried about
+most (a future auth/session refactor silently reintroducing the token-erasure
+loop) is now guarded by a named regression test, which was the actual point.
+What remains untested is "does the whole system work end to end," which the
+manual checklist already covers by design.
 
 ### Recommended Fix
 
-Set `"withGlobalTauri": false`.
+Don't build automated E2E infrastructure for its own sake. Keep the manual
+checklist current (it already is) and keep adding targeted regression tests
+the way Phase 3 did, at the seam of any future dangerous-logic change.
 
 ### Implementation Plan
 
-1. Flip the flag.
-2. `grep -rn "__TAURI__" src/` to confirm zero uses.
-3. Run the app; verify login, playback, and window controls (the window buttons use `getCurrentWindow()` via module import — verify explicitly).
+N/A as an active work item — this is a "keep doing what's already working"
+finding, not a backlog item.
 
 ### Acceptance Criteria
 
-- [ ] `withGlobalTauri` is `false`.
-- [ ] No `window.__TAURI__` references exist.
-- [ ] Window controls, login, and playback verified working.
+- [ ] Any future change to auth/session/watchdog logic ships with a named
+      regression test the same way the existing ones do.
+- [ ] `README.md`'s manual checklist stays current as features change.
 
 ### Estimated Effort
 
-Extra small (under 30 minutes).
+N/A — ongoing practice, not a discrete task.
 
 ### Dependencies
 
@@ -990,58 +673,110 @@ None.
 
 ### Risks if Ignored
 
-Minor. A wider IPC surface than the app needs.
+Low, given the specific highest-risk logic is now covered. The residual risk
+is the ordinary one of any manually-tested software: a regression the
+checklist doesn't happen to exercise that day.
 
 ---
 
-## [P2-6] No formatting or lint gate is documented or enforced
+## [P2-3, RESOLVED] DJ narration's playback thread outlived an aborted DJ session by a few seconds
 
-**Priority:** P2 | **Area:** Code quality / DevEx | **Difficulty:** Low | **Impact:** Medium | **Confidence:** Confirmed
-**Evidence:** `CLAUDE.md`'s Commands section lists `check`, `build`, `cargo check`, `cargo test` — no `cargo fmt`, no `cargo clippy`, no Prettier/ESLint. No `.prettierrc`, no `rustfmt.toml`, no eslint config in the repo.
+**Priority:** was P2 | **Area:** Reliability | **Status:** Fixed and verified this session
+
+**What it was:** if logout (or a session replacement) happened while a DJ
+narration clip was mid-playback, the OS thread backing `narration::play_clip`
+kept holding the audio device and playing for up to the clip's remaining
+duration (a few seconds) after the session it belonged to was gone —
+self-terminating, not an open-ended leak, but a stray audio blip past logout.
+
+**What changed:** `play_clip` now takes a `should_stop: impl Fn() -> bool +
+Send + 'static` closure. The single long `std::thread::sleep(clip_duration)`
+is replaced by `wait_or_stop`, a small extracted function that sleeps in
+100ms (`STOP_POLL_INTERVAL`) chunks and returns as soon as `should_stop()`
+reports `true`, dropping the `cpal` stream (silencing the device)
+immediately rather than waiting out the clip. `player.rs`'s
+`play_narration_if_present` captures `state.session_generation()` before
+calling `play_clip` and passes `move || app_handle.state::<AppState>()
+.session_generation() != generation` — the same generation-tagging pattern
+this codebase already uses for the playback watchdog, applied here for the
+first time.
+
+**Why this is a real fix, not just a change:** the polling loop was
+extracted into its own function specifically so it could be tested without
+opening a real `cpal` device. Three new fast unit tests
+(`narration::tests::wait_or_stop_returns_immediately_when_already_stopped`,
+`..._waits_the_full_duration_when_never_stopped`,
+`..._stops_partway_through_once_the_flag_flips`) assert the timing behavior
+directly — a `should_stop` that flips after the second poll must exit in
+under a second even against a 5-second total, and one that never flips must
+wait out the full duration. All three pass; the existing ignored
+hardware-only smoke test (`plays_an_audible_tone`) was updated to the new
+signature (`|| false`) and still compiles.
+
+**Re-verified:** `cargo check`/`clippy -D warnings`/`fmt --check` clean;
+`cargo test --lib` now 145 passed (142 → 145, the three new tests), 0
+failed, 4 ignored (unchanged — those are the pre-existing live-credential
+tests, not this fix).
+
+**What's still unverified:** the fix's *live* audio behavior (does the
+device actually go silent within ~100ms during a real DJ session) — the
+timing logic is proven, but nobody has run this against real hardware and a
+real DJ session yet. Worth a quick manual check per §15's testing plan
+whenever DJ narration is next used.
+
+---
+
+## [P2-4] Dev-only `@vitest/mocker` advisory
+
+**Priority:** P2 | **Area:** Dependencies | **Difficulty:** Low | **Impact:** Low | **Confidence:** Confirmed
+**Evidence:** `npm audit` (full, including devDependencies) run this session: 2 moderate advisories, `@vitest/mocker` 2.1.0–4.1.10, GHSA-82fw-gwwq-j7x9 (path traversal / arbitrary file read via redirect mock). `npm audit --omit=dev` (production-only, matching what actually ships): 0 vulnerabilities, matching the prior review's finding.
 
 ### Problem
 
-Formatting and lint consistency currently depend on editor settings and habit. The code *looks* consistent, which suggests `rust-analyzer` format-on-save is doing the work — but that is a per-machine setting, not a project guarantee.
-
-Clippy in particular would likely find real issues across 18k lines: this is exactly the kind of codebase (heavy `Option`/`Result` chaining, many `async` state machines) where clippy earns its keep.
+This is a new finding only in the sense that Vitest didn't exist at the last
+review — it was added as part of fixing the old P1-2. The advisory is in a
+transitive dev-dependency of the test runner itself, never bundled into the
+shipped app.
 
 ### Current / Desired Behavior
 
-Currently: nothing enforced. Desired: `cargo fmt --check` and `cargo clippy -- -D warnings` in the loop and in CI.
+Currently: present in `node_modules` for local dev/CI only. Desired: clean,
+eventually, without forcing a disruptive upgrade right now.
 
 ### Impact
 
-Formatting churn in diffs. Idiomatic issues clippy would catch going unnoticed. Low urgency, compounding cost.
+Low. Zero exposure to end users of the built app; the worst case is a
+compromised local dev/CI environment via a malicious redirect during test
+runs, which is not this project's threat model today.
 
 ### Recommended Fix
 
-Add both to CI (P1-1) and to `CLAUDE.md`'s documented verification loop. Prettier for the frontend is optional — the Svelte/TS is already consistent and adding a formatter now would produce a large reformatting diff for little gain.
+Defer. `npm audit fix --force` would install Vitest 5, a breaking change to a
+test suite that was just stabilized this cycle — not worth the churn for a
+dev-only, non-shipped advisory.
 
 ### Implementation Plan
 
-1. Run `cargo clippy --no-default-features` and triage. Expect a meaningful list.
-2. Fix what is worth fixing; `#[allow]` the rest **with a one-line justification each** — matching this codebase's existing comment standard, not bare allows.
-3. Run `cargo fmt`; commit any reformatting as one isolated commit.
-4. Add both as CI steps with `-D warnings`.
-5. Update `CLAUDE.md`'s Commands section.
+1. Revisit when Vitest 5 adoption is otherwise motivated (a feature need, not
+   this advisory alone).
+2. Until then, no action.
 
 ### Acceptance Criteria
 
-- [ ] `cargo fmt --check` passes.
-- [ ] `cargo clippy -- -D warnings` passes with no blanket crate-level allows.
-- [ ] Both are in CI and in `CLAUDE.md`.
+- [ ] `npm audit --omit=dev` stays at 0 (the metric that actually matters for
+      the shipped binary).
 
 ### Estimated Effort
 
-Small to Medium, depending on clippy's findings.
+Extra small if ever revisited; none required now.
 
 ### Dependencies
 
-P1-1.
+None.
 
 ### Risks if Ignored
 
-Gradual style drift, and missed idiomatic bugs in a large async codebase.
+Minimal — confined to local/CI dev environments, not the shipped product.
 
 ---
 
@@ -1049,214 +784,91 @@ Gradual style drift, and missed idiomatic bugs in a large async codebase.
 
 ---
 
-## [P3-1] The README prerequisites table documents one specific machine
+## [P3-1, RESOLVED] `is_builder_not_available` was duplicated verbatim
 
-**Priority:** P3 | **Area:** Documentation | **Difficulty:** Extra small | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `README.md:15-21` — a "Status on this machine" column reading "✅ present (151.x)", "✅ present (24.x)", "✅ present (1.97.1)".
+**Priority:** was P3 | **Area:** Code quality | **Status:** Fixed and verified in a later pass this session
 
-### Problem
+**What it was:** `remote_state.rs` and `friends.rs` each defined a
+byte-for-byte identical `is_builder_not_available` function, and
+`jams_bridge.rs`'s `subscribe_with_retry` inlined the same
+`error.to_string().contains("Builder wasn't available")` check a third time
+independently.
 
-A prerequisites table's job is to tell a *new* reader what they need. This one tells them what the author already has. It is unactionable for anyone else and goes stale on every toolchain update.
+**What changed:** extracted to a new single-purpose module,
+`src-tauri/src/dealer_util.rs`, with the classifier and a module doc
+explaining *why* it's shared rather than owned by any one of the three
+callers (the race belongs to librespot's dealer bootstrap, not to Connect
+state, friend presence, or jams specifically — none of the three is the
+"real" owner). `remote_state.rs` and `friends.rs` now `use
+crate::dealer_util::is_builder_not_available` instead of defining it
+locally; `jams_bridge.rs`'s `subscribe_with_retry` now calls the same shared
+function instead of inlining the string check.
 
-### Desired Behavior
+**Re-verified:** `cargo check`/`clippy -D warnings`/`fmt --check` clean;
+`cargo test --lib` now 146 passed (up from 145), 0 failed, 4 ignored — the
+new count is `dealer_util::tests::matches_only_the_transient_builder_race`,
+which asserts the classifier matches a `librespot::core::Error::
+failed_precondition("Builder wasn't available")`-shaped error and does not
+match an unrelated `Error::unavailable(...)`. `npm run check` unaffected (0
+errors, 213 files) — this was a Rust-only change.
 
-Minimum required versions, not observed local versions.
-
-### Recommended Fix / Implementation Plan
-
-1. Replace the "Status on this machine" column with "Minimum version."
-2. Fill in: WebView2 (any evergreen), Node 18+, Rust 1.82 (matching `Cargo.toml`'s `rust-version`), MSVC build tools.
-3. Add the `rustc --version` / `node --version` commands so a reader can check themselves.
-
-### Acceptance Criteria
-
-- [ ] The table states requirements, not observations.
-- [ ] The Rust minimum matches `Cargo.toml`'s `rust-version = "1.82"`.
-
-### Estimated Effort / Dependencies / Risks
-
-Extra small. None. Minor: new-machine setup friction and a table that ages badly.
-
----
-
-## [P3-2] `BACKUP/` is hidden by a local-only git exclude
-
-**Priority:** P3 | **Area:** Repo hygiene | **Difficulty:** Extra small | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `git check-ignore -v BACKUP` → `.git/info/exclude:18`. Contains `MANIFEST.txt`, a 27,638-byte `modified.patch`, and `original/`+`worktree/` directories.
-
-### Problem
-
-`.git/info/exclude` is machine-local and not committed. On any fresh clone `BACKUP/` would show as untracked, and the exclusion rationale exists nowhere in the repo. Meanwhile `.gitignore` carefully documents *why* each of its entries is ignored (`Rustify-main/`, `.research/`, `.agent-work/`) — so the convention exists and this one entry sidesteps it.
-
-The directory itself is a stale merge-reconciliation artifact from 2026-08-21.
-
-### Desired Behavior
-
-Either the directory is gone, or its exclusion is in the committed `.gitignore` with a reason.
-
-### Recommended Fix / Implementation Plan
-
-1. Confirm the reconciliation it supported is complete (`modified.patch` dates to the merge, and `main` has 81 commits since).
-2. Delete `BACKUP/`.
-3. Remove the `.git/info/exclude` line.
-4. If it is still needed, move it to `.gitignore` with a comment matching the file's existing style.
-
-### Acceptance Criteria
-
-- [ ] `BACKUP/` is deleted, or ignored via committed `.gitignore` with a stated reason.
-- [ ] No project paths remain in `.git/info/exclude`.
-
-### Estimated Effort / Dependencies / Risks
-
-Extra small. Confirm the merge is done first. Risk of deletion: the patch is recoverable from git history if the merge landed; check before deleting.
+**Note on why this one, and not the others:** unlike P2-1/P2-2/P2-4/P4-1–3
+(all left alone — see §14), this was genuinely uncontested: a pure
+same-behavior refactor with no product, testing-philosophy, or scope
+tradeoff attached to it, so there was nothing to weigh before doing it.
 
 ---
 
-## [P3-3] The footprint table is stale by the README's own admission
+## [P3-2] `cargo deny check` warns on triplicated `winnow`
 
-**Priority:** P3 | **Area:** Documentation | **Difficulty:** Small | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `README.md:194-215`. The table is prefaced with "**predates the Jam/DJ/Home/lyrics/friends/profile/telemetry/audio-capability work below**, all of which add dependencies and background tasks" and "Not apples-to-apples" — Rustify measured on the login screen against a fully-loaded official client.
+**Priority:** P3 | **Area:** Dependencies | **Difficulty:** Extra small | **Impact:** Low | **Confidence:** Confirmed
+**Evidence:** `cargo deny check` output this session: `winnow` 0.5.40 (via `rustify`'s own `toml` 0.8 dependency), 0.7.15 and 1.0.4 (both via `tauri-build`'s transitive `toml`/`cargo_toml` chain).
 
-### Problem
+### Problem / Recommended Fix
 
-The self-correction is admirably honest, and the "157 MB vs 1442 MB" headline still sits there in a table. Numbers get quoted; caveats do not. The comparison is not valid and the README says so.
+Not actionable from this repository — the duplication is entirely inside
+Tauri's own build-tooling dependency chain, not something `rustify`'s
+`Cargo.toml` controls. `deny.toml`'s `bans.multiple-versions = "warn"`
+already correctly treats this as informational, not a failure. Re-check after
+the next Tauri version bump; it may resolve on its own.
 
-### Desired Behavior
+### Estimated Effort
 
-Either re-measure both clients logged in and playing, or delete the table and keep the one durable insight — the Rust process is ~5.9 MB private and WebView2 is the floor.
+None available now.
 
-### Recommended Fix / Implementation Plan
+### Risks if Ignored
 
-1. Prefer deletion: keep the "the native side is effectively free; the webview is the floor" paragraph, which is the actually useful finding and does not go stale.
-2. If keeping it: build release, log in on both clients, play a track on each, let them settle, measure private commit and working set, and note the date and build.
-
-### Acceptance Criteria
-
-- [ ] No headline number is present that the surrounding text disclaims.
-- [ ] Any retained measurement states date, build, and that both clients were in the same state.
-
-### Estimated Effort / Dependencies / Risks
-
-Small. Requires a release build if re-measuring. Risk: a misleading number gets quoted somewhere it cannot be corrected.
-
----
-
-## [P3-4] `JamSession::events()` panics if called twice
-
-**Priority:** P3 | **Area:** Reliability | **Difficulty:** Extra small | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `src-tauri/src/jams/session.rs:356-362` — `.expect("jam events mutex poisoned")` then `.expect("events() may only be called once; pass the returned receiver around")`.
-
-### Problem
-
-Two of the four non-test panic sites in the whole codebase are in one function. The `expect` messages are good — they explain the invariant — but a `std::Mutex` poisoning or a second call aborts the process. In a Tauri app that means the window vanishes with no message.
-
-The invariant is documented and currently respected by the one caller, so this is latent, not live. It is called out because a "call this exactly once" contract enforced by panic is the weakest form of enforcement available, in a module (`jams`) that is experimental and most likely to be re-wired.
-
-### Desired Behavior
-
-Return `Option<mpsc::Receiver<JamEvent>>`; let the caller decide.
-
-### Recommended Fix / Implementation Plan
-
-1. Change the signature to `pub fn events(&self) -> Option<mpsc::Receiver<JamEvent>>`.
-2. Replace the mutex `expect` with `.lock().ok()?` — a poisoned mutex becomes `None`, not a crash.
-3. Update the single caller in `jams_bridge.rs` to map `None` to an `AppError`.
-4. Keep the explanatory comment; it is the valuable part.
-
-### Acceptance Criteria
-
-- [ ] `events()` returns `Option` and cannot panic.
-- [ ] The caller surfaces a typed error.
-- [ ] Non-test panic sites drop from 4 to 2.
-
-### Estimated Effort / Dependencies / Risks
-
-Extra small. Best done with P1-3/P1-4. Risk if ignored: a hard process abort from a code path in the most-likely-to-be-rewired module.
-
----
-
-## [P3-5] Version has been `0.1.0` for 81 commits
-
-**Priority:** P3 | **Area:** Release hygiene | **Difficulty:** Extra small | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `0.1.0` in `package.json:4`, `Cargo.toml:3`, `tauri.conf.json:4`, across the full history. `webapi.rs:29` embeds it in the User-Agent — so every request identifies as `rustify/0.1.0`.
-
-### Problem
-
-The version is meaningless, three files must be kept in sync by hand, and it is the only self-identification the app sends to Spotify.
-
-### Desired Behavior
-
-A version that changes, with a documented policy.
-
-### Recommended Fix / Implementation Plan
-
-1. Bump to something honest (`0.9.0` reflects the feature surface better than `0.1.0`).
-2. Add a `CLAUDE.md` note on when it gets bumped and that three files must move together.
-3. Optionally have `tauri.conf.json` read `"version"` from `package.json` (Tauri supports pointing at it), reducing three files to two.
-
-### Acceptance Criteria
-
-- [ ] Version is not `0.1.0`.
-- [ ] All three manifests agree.
-- [ ] The bump policy is documented.
-
-### Estimated Effort / Dependencies / Risks
-
-Extra small. Do with P0-2. Risk: inability to tell builds apart in logs or bug reports.
+None; this is `deny.toml` working as configured, not a defect.
 
 ---
 
 # 11. P4 — Optional / Future Improvements
 
----
-
 ## [P4-1] WebView2 memory floor
 
-**Priority:** P4 | **Area:** Performance | **Difficulty:** Very High | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `README.md:210-215` — Rust process 5.9 MB private, WebView2 ~151 MB of a 157 MB total.
+Unchanged from the prior review. **Recommendation: do not pursue.** Replacing
+the webview to reclaim ~150MB the OS already shares across WebView2 processes
+is months of native-UI work for a marginal gain. Re-confirmed nothing in this
+pass changes that math.
 
-**Problem / Recommendation.** The README's own analysis is correct: "further memory work means shrinking or replacing the webview, not optimising Rust." Replacing the webview means a native UI rewrite — months of work to reclaim memory the OS shares across WebView2 processes anyway.
+## [P4-2] Cross-platform support
 
-**Recommendation: do not do this.** It is listed only so it is explicitly rejected rather than sitting as ambient temptation. The 157 MB figure is already ~9× better than the official client.
+Unchanged from the prior review. **Recommendation: no.** Windows-only remains
+a coherent, deliberate choice, and the DPAPI work done since the last review
+(closing P1-5) deepens that commitment correctly, not accidentally.
 
-**Effort:** Extra large. **Risks if ignored:** none.
+## [P4-3] Client-side router
 
----
+Unchanged from the prior review at 24 views now (was 13). **Recommendation:
+revisit only if navigation logic becomes a source of bugs**, which nothing in
+this pass found evidence of.
 
-## [P4-2] DJ narration audio pipeline
-
-**Priority:** P4 | **Area:** Feature | **Difficulty:** High | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** `README.md:165-170` — a valid signed TTS URL resolves; nothing plays it. Needs a second audio pipeline alongside librespot's Sink.
-
-**Problem / Recommendation.** A second pipeline means mixing, ducking, and sequencing against a Sink this app does not own, requiring live device testing to get right — and it sits on a private endpoint that may vanish (Lexicon already 403s for most accounts per `CLAUDE.md`).
-
-**Recommendation: defer indefinitely.** Under P1-6 this is Tier 3. Costs days of live-testing work for a feature most accounts cannot fully reach.
-
-**Effort:** Large. **Dependencies:** P1-6 tiering, P0-1. **Risks if ignored:** none; DJ music playback already works.
-
----
-
-## [P4-3] Cross-platform support
-
-**Priority:** P4 | **Area:** Portability | **Difficulty:** Very High | **Impact:** Low | **Confidence:** Confirmed
-**Evidence:** Windows-only throughout — Acrylic `windowEffects`, NSIS-only bundle target, `os_version: "10"` in the client-token identity, DPAPI proposed in P1-5, `CLAUDE.md`'s undecorated-window notes are all Win32-specific.
-
-**Problem / Recommendation.** Portability would touch the window chrome, the bundle config, the audio device layer, and credential storage. **Recommendation: no.** Windows-only is a legitimate, coherent choice, and P1-5's DPAPI work deliberately deepens it — correctly.
-
-**Effort:** Extra large. **Risks if ignored:** none.
-
----
-
-## [P4-4] Client-side router
-
-**Priority:** P4 | **Area:** Frontend architecture | **Difficulty:** Medium | **Impact:** Low | **Confidence:** Likely
-**Evidence:** No router dependency in `package.json`; 13 views under `src/lib/views/` with navigation presumably state-driven from `App.svelte` (511 lines). [ASSUMPTION] — I read `App.svelte`'s size and imports but did not trace its navigation logic in full.
-
-**Problem / Recommendation.** At 13 views, hand-rolled state-driven navigation is near the point where deep-linking, back-button behaviour, and per-view state retention get awkward. But a desktop app with no URL bar has weak motivation for a router, and adding one is a broad refactor with no user-visible benefit.
-
-**Recommendation: revisit only if navigation logic in `App.svelte` becomes a source of bugs.** Not now.
-
-**Effort:** Medium. **Dependencies:** P1-2 (Vitest) first. **Risks if ignored:** low.
+**Note, not a recommendation:** the prior review's P4-2 ("DJ narration audio
+pipeline — defer indefinitely") was overridden by the maintainer for stated,
+documented reasons (see §4, strength 4) and the feature now exists and works.
+This is not flagged as ignoring the prior review — it's flagged as the
+correct way to override a review's recommendation: explicitly, with reasoning
+written down where a future reader will find it.
 
 ---
 
@@ -1264,373 +876,234 @@ Extra small. Do with P0-2. Risk: inability to tell builds apart in logs or bug r
 
 ## Immediate Actions
 
-**Goal:** Stop the bleeding on account risk and legal exposure; make the existing quality gates automatic.
+**Goal:** Close what's left of the two decisions that were the entire
+remaining risk surface. One is now a code fix with a verification step left;
+the other is still a decision, deliberately untouched this session.
 
-**Tasks**
+1. **P0-1: live-test the header fix.** The code is done — log in, open an
+   artist page, check the log for a Pathfinder failure warning. Five minutes,
+   whenever there's a live session handy. Not urgent in the way it was;
+   nothing ships broken while this is pending, it's just unverified.
+2. **P0-2: write down the GPL/undistributed constraint in `CLAUDE.md` and
+   `README.md`, when ready.** Twenty minutes, zero dependencies, and the
+   cheapest possible permanent risk reduction available in this review — but
+   deliberately **not done** this session at the maintainer's request. The
+   exact text to write is in the P0-2 finding above whenever it's wanted.
 
-1. **Decide P0-2's question: personal project, or distributed?** Everything below branches on this. Recommendation: personal. Write it in the README.
-2. Add `LICENSE`; fix the bundle identifier; bump the version (P0-2, P3-5).
-3. Remove the impersonation headers in `pathfinder.rs`; re-test live; record what broke; reconcile docs and code on the policy (P0-1).
-4. Add the CI workflow with all five gates (P1-1).
-5. Gate `tauri-plugin-mcp-bridge` behind a Cargo feature (P2-1).
-6. Set `withGlobalTauri: false` (P2-5).
-
-**Reason.** P0-1 risks the user's Spotify account today. P0-2 is legally unsound today. P1-1 is two hours of work that protects everything after it. The rest are cheap and adjacent.
-
-**Expected outcome.** No request claims a false identity; the repo is legally usable; every push is verified.
-
-**Definition of done.** `LICENSE` present; no `Spotify/1.` or `xpui` strings in source; CI green on `main`; `cargo tree` shows no mcp-bridge in a default build; docs match code on the impersonation question.
-
----
+**Definition of done.** `queryArtistOverview`'s live behavior post-fix is
+known and, if it degrades, a decision is made about the fallback; whenever
+P0-2 is taken up, `CLAUDE.md`/`README.md` state the GPL constraint in
+writing.
 
 ## Short-Term Plan (1–2 weeks)
 
-**Goal:** Fix the concurrency defects and establish real verification.
-
-**Tasks**
-
-1. Fix `ensure_jams` racing and `JamController` task detachment; correct the two misleading comments (P1-3, P1-4).
-2. Convert `JamSession::events()` to return `Option` (P3-4).
-3. Add the highest-value Rust tests: token merge, `is_grant_rejected`, position anchoring (P1-2 steps 1–3).
-4. Add Vitest and 4–6 `store.svelte.ts` tests (P1-2 steps 4–5).
-5. Add `cargo-deny` and triage (P2-3).
-6. Run clippy, triage, enable `-D warnings` (P2-6).
-7. README fixes: prerequisites table, footprint table, `BACKUP/` (P3-1, P3-2, P3-3).
-
-**Reason.** P1-3/P1-4 are confirmed defects in the same subsystem, cheap together. The tests target the three documented bugs most likely to recur. The doc fixes are minutes each and protect the credibility of documentation that is otherwise this project's best asset.
-
-**Expected outcome.** Jam lifecycle correct and documented accurately; the recovery machinery guarded by tests; dependency and lint gates live.
-
-**Definition of done.** Concurrent `ensure_jams` builds one controller; no `jams:changed` after logout (manually verified); `npm test` and `cargo deny check` in CI; clippy clean at `-D warnings`.
-
----
+Nothing urgent remains at this horizon. If time is available: the remaining
+P2 items above (§9 — P2-1, P2-2, P2-4) in whatever order is convenient — none
+of them block anything else and none of them is time-sensitive.
 
 ## Medium-Term Plan (2–6 weeks)
 
-**Goal:** Reduce structural and scope debt.
+1. Revisit `NowPlaying.svelte`'s size only if it grows again (P2-1).
+2. Consider the Vitest 5 upgrade if/when otherwise motivated (P2-4).
+3. Apply the quarterly Tier-3 feature review `CLAUDE.md` already commits to
+   (Jams, music video/lossless probing, DJ narration) against actual usage —
+   this is the project's own stated process, not a new recommendation from
+   this review.
 
-**Tasks**
+## Long-Term Plan
 
-1. Split `commands.rs` into domain modules; move `establish` out of the dispatch layer (P1-7 steps 1–2).
-2. Add the command/event registration parity test (P1-7 steps 3–5).
-3. Encrypt `tokens.json` with DPAPI, with silent plaintext migration (P1-5).
-4. Adopt `ts-rs` for the core boundary types (P2-4).
-5. Extract components from `NowPlaying.svelte` (P2-2).
-6. Write the feature tier list; label Tier 3 in the UI; delete at least one unused Tier 3 feature (P1-6).
-
-**Reason.** These are all "the code is fine but the structure will bite later" items. They need the CI and tests from earlier phases to be done safely — which is exactly why they are not first.
-
-**Expected outcome.** No file over ~600 lines; boundary drift caught in CI; credentials encrypted at rest; scope explicitly bounded.
-
-**Definition of done.** Registration parity test fails on an intentionally-omitted `api.ts` wrapper; `tokens.json` unreadable; existing installs migrate without re-login; tier list in `CLAUDE.md` with every feature assigned.
-
----
-
-## Long-Term Plan (after stability)
-
-**Goal:** Keep the project maintainable and honest.
-
-**Tasks**
-
-1. Quarterly Tier 3 review — delete, do not deprecate.
-2. Quarterly librespot pin review against upstream (alongside the existing vergen note).
-3. Extend `ts-rs` coverage to remaining boundary types.
-4. Keep `obsidian/` current — especially the auth, rate-limiting, and playback notes `CLAUDE.md` flags as staling fastest.
-5. Explicitly reject P4-1 (webview replacement) and P4-3 (cross-platform) in writing so they stop consuming attention.
-
-**Reason.** This project's real long-term risk is not decay in the code — it is scope accretion against a hostile upstream, plus documentation drifting out of sync with reality (which P0-1 and P1-4 both demonstrate has already happened twice).
-
-**Expected outcome.** A stable, bounded, well-documented personal client whose docs can be trusted.
-
-**Definition of done.** Every quarter produces either a deletion or a written decision not to delete. No documented claim contradicts the code.
+Nothing in this codebase currently warrants long-term planning beyond keeping
+the two P0 decisions resolved and continuing the Tier-3 quarterly review
+`CLAUDE.md` already commits to. That is itself a sign of health, not a gap in
+this review — a mature, personal-scope project doesn't need a long-term
+roadmap section manufactured for the sake of having one.
 
 ---
 
 # 13. Quick Wins
 
-| Win | Effort | Benefit | Where |
-|---|---|---|---|
-| Add `LICENSE` | 10 min | Makes an already-published repo legally usable | Repo root |
-| `withGlobalTauri: false` | 20 min | Removes an unused IPC surface | `tauri.conf.json:11` |
-| Fix the bundle identifier | 20 min | Cost grows with every user; currently one | `tauri.conf.json:5` |
-| CI workflow | 2 hrs | Automates three gates that already exist and work | `.github/workflows/ci.yml` |
-| Abort the jam forward task | 30 min | Fixes a confirmed detached-task leak | `jams_bridge.rs:240,362` |
-| `ensure_jams` build lock | 1 hr | Fixes a confirmed race with side effects | `commands.rs:1972` |
-| `events()` → `Option` | 20 min | Removes 2 of 4 non-test panic sites | `jams/session.rs:356` |
-| Prerequisites table | 15 min | Makes the README useful to a second person | `README.md:15` |
-| Delete `BACKUP/` | 10 min | Removes a stale artifact and a local-only exclude | Repo root |
-| `cargo-deny` | 1 hr + triage | CVE and license coverage on 1,157 crates | New `deny.toml` |
-| Bump version off `0.1.0` | 10 min | Builds become distinguishable in logs and UA | 3 manifests |
-
-Roughly one focused day for the whole table, and it closes one P0, three P1s, and four P3s.
+- **Write the GPL/distribution constraint into `CLAUDE.md`/`README.md`** —
+  Extra small (20 min); prevents a real future legal mistake for almost no
+  cost. Apply in `CLAUDE.md`'s "Repository gotchas" and `README.md`'s
+  opening. **Deliberately not applied this session** — see P0-2.
+- **CI workflow** — already applied this session (`.github/workflows/ci.yml`).
+- **`pathfinder.rs` impersonation headers removed** — already applied this
+  session; live verification still pending (see §15).
+- **DJ narration thread now stops on logout/session replacement** — already
+  applied this session, with new unit tests proving the timing.
+- **`remote_state.rs`/`friends.rs` retry backoff** — already applied this
+  session.
+- **`is_builder_not_available` deduplicated into `dealer_util.rs`** — already
+  applied this session, used by all three former call sites.
+- **`PlayerBar.svelte` `aria-label`s** — already applied this session.
+- **`CLAUDE.md` test-count/CI-claim correction** — already applied this
+  session.
 
 ---
 
 # 14. What Not to Change Yet
 
-**Do not rewrite the auth module.** `auth.rs` is 1,146 lines and looks like it wants simplifying. It does not. Nearly every branch encodes a specific production failure — the merge-preserve in `save_stored_tokens`, the degrade-don't-propagate in `restore_login`, the narrow `is_grant_rejected`, the empty-refresh-token guard. A cleanup would delete the ugliness *and* the reasons for it. Add tests (P1-2) first; only then consider touching it, and only with those tests green.
-
-**Do not replace the webview.** (P4-1.) The README's own analysis already settles it. Months of work for memory the OS is sharing anyway.
-
-**Do not add features until CI, license, and the P1-3/P1-4 fixes land.** The gap between engineering quality (~8/10) and infrastructure (~3/10) is this project's defining problem. More features widen it.
-
-**Do not narrow `STREAMING_SCOPES`.** It looks over-broad. `auth.rs:29-36` explains why it is not: that token is the fallback, and narrowing it made the fallback silently under-privileged — search kept working while library and player calls returned bare 403s. Leave it.
-
-**Do not "fix" the DJ fallback to look like a resolved session.** `CLAUDE.md` is explicit: `spawn_dj_refill` keys off those flags being false. It looks like an inconsistency; it is load-bearing.
-
-**Do not add Prettier/ESLint right now.** The frontend is already consistent under strict `svelte-check`. Adding a formatter produces a large reformatting diff that obscures the substantive changes in the plan above. Revisit after the medium-term phase.
-
-**Do not touch the window-chrome CSS.** `CLAUDE.md`'s Acrylic section documents a hard-won configuration where transparency, `windowEffects`, and body background must move together, and where `windowEffects.effects` is a priority list rather than a stack. This is not a place to experiment casually.
+- **Do not add a permissive `LICENSE` file.** This is the single most
+  important "don't" in this entire review. It is exactly what the prior
+  review recommended and it is now wrong, for reasons that had nothing to do
+  with that review being careless — the facts changed three days after it
+  shipped. Resolve P0-2's underlying decision first.
+- **Do not touch `tauri.conf.json`'s `identifier`.** Still a placeholder,
+  still correctly left alone: changing it orphans every existing
+  `tokens.json` and forces a re-login, per `CLAUDE.md`'s own documented
+  warning, and it is not urgent while nothing is distributed.
+- **Do not pursue automated E2E/integration testing as a project.** Per
+  P2-2's reasoning — the manual checklist is the right-sized answer for this
+  project's actual shape, not a stopgap waiting to be replaced.
+- **Do not force the Vitest 5 upgrade to clear the dev-only audit finding
+  (P2-4).** The advisory doesn't reach the shipped binary; the upgrade is
+  breaking; there's no urgency trade worth making here.
+- **Do not split `NowPlaying.svelte` further right now (P2-1), replace the
+  webview (P4-1), chase cross-platform support (P4-2), or add a router
+  (P4-3).** Asked directly whether to override these four "don't fix"
+  recommendations; the answer was to use my own judgment, and my judgment —
+  unchanged from when I wrote the findings — is that none of the underlying
+  conditions (the file growing again, an actual memory problem, a real
+  portability need, navigation bugs) have occurred. Revisit each on its own
+  stated trigger, not on a schedule.
 
 ---
 
 # 15. Testing Plan
 
-## Critical flows to cover first
+The automated suites already cover what they should. What's left is manual,
+by design (per `CLAUDE.md`), and specifically weighted toward what this
+session's code changes still need a live account to confirm:
 
-- [ ] Token persistence merge — a session with no Web API refresh token must not erase the stored one
-- [ ] Grant rejection — only `invalid_grant`/`invalid_client` may clear credentials
-- [ ] Session generation — a stale pump generation must not trip the watchdog
-- [ ] Position anchoring — a volume/shuffle event must not reset the UI clock
-- [ ] Auth state machine in `store.svelte.ts` — `SessionExpired`/`NotLoggedIn` clear auth; intentional logout shows no "expired" banner
+- [ ] **P0-1 live verification (manual, requires live account):** log in,
+      open an artist page, check whether it looks normal and whether the log
+      shows `spotify.artist: artist overview via Pathfinder failed for
+      {artist_id}: {error}`. Nothing to fix ahead of time — just observe and
+      report back.
+- [ ] **Existing 15-step checklist in `README.md`** — unchanged, still the
+      right set of manual cases (login, Setup-screen gating, playback,
+      context continuation, transport, Connect inbound/outbound, token
+      expiry). Re-run it once, since this session touched `pathfinder.rs`,
+      `remote_state.rs`, `friends.rs`, and `narration.rs` — consider adding an
+      artist-overview step to it while there.
+- [ ] **DJ narration cancellation (optional, low priority):** log in, start
+      DJ, trigger narration, log out mid-clip, confirm the device goes quiet
+      promptly rather than trailing off. The timing logic has fast unit tests
+      proving it; this would be the first live confirmation against real
+      hardware and a real session.
 
-## Unit tests to add (Rust)
-
-- [ ] `save_stored_tokens`: preserve on `None`, overwrite on `Some`, `clear_stored_tokens` removes the file
-- [ ] `is_grant_rejected`: table over real error strings plus near-misses that must return `false`
-- [ ] `PlaybackState::set_position`/`refresh_position`: elapsed accumulation, `duration_ms` clamping, no advance while paused
-- [ ] `next_session_generation`: monotonic; concurrent callers get distinct values
-- [ ] `ensure_jams`: two concurrent calls build exactly one controller (P1-3)
-- [ ] `webapi::send` status mapping: 400→`BadRequest`, 401→`SessionExpired`, 403→`Forbidden`, 404→`Unavailable`, 5xx→`ServiceUnavailable`, 429→`RateLimited` with `Retry-After` parsed
-- [ ] `WebApi::get` retry: absorbs `Retry-After` ≤ 8 s, returns beyond it, stops at `MAX_RETRIES`
-- [ ] Empty-200 handling: an empty body deserialises as `null` rather than erroring
-
-## Unit tests to add (frontend, new)
-
-- [ ] `handleError` clears auth on `SessionExpired` and on `NotLoggedIn`
-- [ ] Ticker starts on `isPlaying: true`, stops on `false`, clamps at `durationMs`
-- [ ] `#syncLyrics` — a stale response for a previous track is discarded
-- [ ] `toggleFriendsPanel` rolls back on rejection
-- [ ] `destroy()` clears the interval and all listeners
-
-## Integration tests
-
-- [ ] Command/handler/`api.ts` registration parity (P1-7)
-- [ ] Event-name constant parity between `state::events` and `api.ts`
-- [ ] `ts-rs` generated types match committed output (P2-4)
-
-## End-to-end
-
-Not recommended. Driving a Tauri webview in CI is high-maintenance for this project's size. The `README.md` 15-step manual checklist is the right tool — keep it, and label it explicitly as the E2E layer rather than as a stopgap.
-
-## Manual test cases (add to the existing checklist)
-
-- [ ] Log out during active jam → no `jams:changed` in the log afterward (P1-4)
-- [ ] Open the Jams view and click Create simultaneously → exactly one dealer subscription (P1-3)
-- [ ] Upgrade an install with plaintext `tokens.json` → migrates silently, no re-login (P1-5)
-- [ ] Disconnect the network mid-session → session survives; reconnect recovers without forcing login
-- [ ] Kill librespot's player → the watchdog rebuilds on the 2/6/15/45 s backoff
-- [ ] Log in and out three times → exactly one refresher task; no token-endpoint duplication in the log
-
-## Edge cases
-
-- [ ] Corrupted `tokens.json` → treated as absent, no panic
-- [ ] Corrupted `settings.json` → defaults applied, no panic
-- [ ] Port 8898 held by another process → falls back to an ephemeral port
-- [ ] Port 8899 held → Web API login must fail with a clear message (the port is fixed by design)
-- [ ] Refresh token expired after six months → clean logout, not a retry loop
-- [ ] Clock moved backwards mid-track → telemetry adds zero, never negative
-
-## Failure scenarios
-
-- [ ] Spotify returns 429 on `/me` during `establish` → tokens already persisted; retry via `restore_session` without reopening the browser
-- [ ] Web API refresh fails while streaming refresh succeeded → degrade to shared token; rotated streaming token persists
-- [ ] Dealer websocket drops → Connect state falls back to the 5 s poller
-- [ ] Pathfinder returns `PersistedQueryNotFound` → hash re-scrape or clean degradation, never a silent empty view
+No new automated test infrastructure is recommended at this time (see P2-2).
 
 ---
 
 # 16. Security Checklist
 
-Project-specific. Generic items are excluded.
-
-**Authentication**
-- [x] OAuth PKCE with no client secret — correct for a desktop app
-- [x] Password login correctly ruled out (server-side disabled July 2024)
-- [x] Redirect URIs restricted to `127.0.0.1` loopback
-- [x] Device-authorization flow validates `user_code` charset and pairing URL host/scheme, with tests
-- [x] Device code never crosses the IPC boundary to the webview (test-asserted)
-- [ ] **Streaming scope union is broader than any single flow needs** — justified and documented as the fallback token; accepted, not a defect
-
-**Authorization**
-- [x] Premium gate before playback, degrading correctly when Spotify omits `product`
-- [x] Tauri capabilities are narrowly scoped — no `fs`, `shell`, or `http` permissions granted
-- [ ] **`mcp-bridge:default` granted unconditionally** (P2-1)
-
-**Secret management**
-- [ ] **Refresh tokens stored in plaintext** (P1-5)
-- [x] Client ID correctly treated as non-secret; `.env` gitignored for tidiness with the reasoning documented
-- [x] Client token never persisted — minted per session
-- [x] `.env` not tracked in git (verified)
-
-**Logging**
-- [x] `safe_url()` redacts jam join secrets, with a test
-- [x] Device-token poll failures log the error, never the token
-- [x] `establish` logs token *presence* booleans, never values
-- [x] `safe_excerpt` caps Pathfinder error bodies at 300 chars
-- [ ] Full URLs including query strings are logged on Web API failures (`webapi.rs:84`) — low risk since Spotify query params are IDs, not credentials; worth a second look if that changes
-
-**Input validation**
-- [x] Every Spotify response field that becomes a URL, code, or hash is validated
-- [x] Playlist IDs bounds-checked; search limit capped at Spotify's real maximum
-- [x] Image upload re-encoded and capped at 256 KB base64 in the webview
-
-**Client identity**
-- [ ] **Impersonates the official desktop client on Pathfinder** (P0-1) — the single most serious item on this list
-
-**Webview**
-- [x] CSP restricts `default-src` to `'self'`; images pinned to Spotify CDNs
-- [x] No `@html`, `innerHTML`, `eval`, or `new Function` anywhere
-- [ ] `withGlobalTauri: true` unnecessarily (P2-5)
-
-**Dependencies**
-- [x] `npm audit --omit=dev`: 0 vulnerabilities (2 runtime deps)
-- [ ] **Rust tree unscanned** — 1,157 crates, `cargo audit` not installed (P2-3)
-- [ ] librespot pinned to a git rev, so no crates.io advisories apply
-
-**Distribution**
-- [ ] **Installer unsigned** (P0-2)
-- [ ] **No update channel for security fixes** (P0-2)
-
-*Not applicable:* CORS, CSRF, IDOR, SSRF, rate limiting as a server concern, file-upload handling as a server concern. This is a single-user desktop client with no server component and no multi-tenant data.
+- [x] **Secrets in logs** — confirmed clean across every file re-read this
+      session; `dj.rs` explicitly redacts signed URLs, matching the existing
+      standard.
+- [x] **Credential storage at rest** — DPAPI-encrypted, user-bound, migrates
+      existing plaintext installs silently. Closed since the last review.
+- [x] **Dependency vulnerabilities (production)** — `cargo deny check` clean;
+      `npm audit --omit=dev` clean.
+- [ ] **Dependency vulnerabilities (dev-only)** — 2 moderate, deferred (P2-4).
+- [x] **CSP / webview isolation** — `default-src 'self'`, no `@html`/
+      `innerHTML`/`eval` anywhere, `withGlobalTauri: false`. Unchanged, still
+      correct.
+- [x] **Automation/debug backdoors** — `tauri-plugin-mcp-bridge` confirmed
+      still gated behind a Cargo feature, absent from the default dependency
+      graph, bound to loopback only.
+- [x] **Client identity honesty** — **fixed this session** (P0-1). No source
+      file sends a header claiming to be an official Spotify client. Live
+      behavior of `queryArtistOverview` under the new identity is unverified —
+      see §15 — but the security property itself (no fabricated identity) is
+      satisfied regardless of what Spotify's edge decides to do with it.
+- [ ] **Licensing/distribution safety** — **at risk, not yet failing.** P0-2:
+      currently safe by an undocumented, unenforced constraint. Deliberately
+      left unaddressed this session at the maintainer's request.
 
 ---
 
 # 17. Performance Checklist
 
-**Network**
-- [x] One pooled `reqwest::Client` on `AppState` — the per-request-client regression is fixed and documented
-- [x] Separate pooled client for Last.fm (different host, carries no Spotify credential)
-- [x] Rate-limit absorption on idempotent GETs only, capped at 8 s
-- [x] `/me/following` cursor pagination handled correctly (the one endpoint that differs)
-- [x] Search limit capped at Spotify's real maximum of 10
-- [x] Exactly one recurring network timer (`spawn_remote_poller`, 5 s), gated on not being the active device
-- [ ] Verify no additional polling has crept in — `audio-devices.svelte.ts:38` polls every 5 s and `FriendsPanel.svelte:32` every 30 s, both local/UI-only, but `CLAUDE.md`'s "read `rate-limiting.md` before adding another timer" rule should be applied to them too
+No changes found since the last review; re-confirmed structurally, not
+re-benchmarked:
 
-**Caching**
-- [x] Artist overview: 10-minute TTL, 64-entry bound, successes only
-- [x] Lyrics: 64-entry bound with per-URI request gates
-- [x] Saved tracks snapshot with TTL, invalidated on any save/unsave
-- [x] Audio capability cache stores booleans/counts only, never storage URLs
-- [x] Every cache is explicitly bounded — no unbounded `HashMap` growth found
-
-**Request coalescing**
-- [x] Per-key `Arc<Mutex<()>>` gates prevent duplicate in-flight requests for lyrics and artist overviews
-
-**Rendering**
-- [x] 1 Hz `setInterval` for the progress bar instead of `requestAnimationFrame` — correct for a Pentium-class target
-- [x] `PlaybackState` deliberately flat and cheap to clone
-- [x] Position recomputed from an anchor rather than re-emitted
-
-**Bundle / build**
-- [x] `target: "chrome110"` — no unnecessary transpilation for evergreen WebView2
-- [x] `sourcemap: false`, esbuild minification
-- [x] Release profile: `opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`
-- [x] librespot `with-libmdns` disabled with a documented reason
-
-**Audio**
-- [x] `AudioRuntime` kept synchronous and off the Tokio state so the sink never blocks on an async lock
-- [ ] EQ filter cost per sample not profiled [UNVERIFIED] — six biquad bands per channel; likely negligible, unmeasured
-
-**Not applicable:** database queries, N+1, server-side pagination, image optimisation (all images are remote CDN URLs), background job queues.
+- [x] Pooled `reqwest::Client` reused across commands via `AppState`.
+- [x] Bounded caches with TTLs (`artist_overview_cache`, `saved_tracks_cache`,
+      `lyrics_cache`, `audio_capability_cache`).
+- [x] The one recurring network timer (`spawn_remote_poller`) is gated behind
+      `!is_active_device`, as documented.
+- [x] `/search` correctly capped at Spotify's undocumented `limit=10` ceiling;
+      `/me/following` correctly cursor-paged rather than offset-paged.
+- [x] `webapi.rs`'s retry loop is capped (`MAX_RETRIES`, `MAX_AUTO_RETRY_SECS`)
+      and GET-only, per the independent subagent re-verification this session.
 
 ---
 
 # 18. Documentation Recommendations
 
-The documentation is this project's strongest asset. These are targeted repairs, not a rewrite.
-
-**Must add**
-- `LICENSE` (P0-2) — the single largest documentation gap.
-- A README banner stating the distribution posture, the Premium requirement, the Windows-only scope, and that the app uses private Spotify APIs at the user's own risk.
-
-**Must fix (accuracy — these are the ones that matter)**
-- Reconcile the impersonation policy across `telemetry.rs:1-8`, `README.md:176-179`, and `CLAUDE.md` with what `pathfinder.rs:199` actually does (P0-1). A false claim in otherwise-excellent documentation devalues all of it.
-- Correct `jams_bridge.rs:8-9` and `commands.rs:894-895`, which state the forward task is aborted when nothing aborts it (P1-4).
-- Prerequisites table: requirements, not this machine's versions (P3-1).
-- Footprint table: re-measure or delete (P3-3).
-
-**Should add**
-- The feature tier list in `CLAUDE.md` (P1-6).
-- `cargo fmt`, `cargo clippy`, and `npm test` in `CLAUDE.md`'s Commands section (P1-1, P2-6).
-- The version-bump policy and the three-file sync requirement (P3-5).
-- A short troubleshooting section: 429s and what they mean, "command not found" → missing `generate_handler!`/`api.ts` edit, the `cargo clean` fix after moving the project directory, and `$env:RUST_LOG` usage. Several of these already exist scattered through `CLAUDE.md`; collecting them under one README heading serves a different reader.
-
-**Explicitly not needed**
-- A `CONTRIBUTING.md`, unless P0-2 resolves toward distribution. Under "personal project," it is ceremony.
-- Architecture docs. `obsidian/` (111 notes, `concepts/` + `files/` + a `MOC.md` entry point) already exceeds what most teams produce. Keep it current; do not add to it.
-
-**Keep exactly as is**
-- The blockquote convention for reversed decisions. This is the best thing in the repo's process and should be defended against tidying.
-- The 15-step manual checklist in `README.md`. Label it as the E2E test layer rather than treating it as a placeholder for automation that is not coming.
+- **Add the GPL/distribution constraint** (P0-2) — the one genuinely missing
+  piece of documentation in an otherwise exceptional set of docs. **Not
+  applied this session at the maintainer's explicit request** — the exact
+  text to add is in the P0-2 finding above, ready whenever it's wanted.
+- Everything else the prior review flagged (prerequisites table, footprint
+  table, feature tiering) is already fixed and re-verified — no further
+  documentation debt found.
 
 ---
 
 # 19. Open Questions
 
-**1. Is this a personal tool or something you intend to distribute?**
-*Why it matters:* It determines whether P0-2's signing/updater work, P2-4's type generation, and much of the testing investment are justified at all. Under "personal," roughly a third of this review is optional.
-*How the answer changes things:* "Personal" → do the immediate + short-term phases and stop; skip signing, the updater, and E2E entirely. "Distributed" → P0-1 becomes non-negotiable before any release, and P0-2 grows into a multi-week workstream.
-
-**2. Was the impersonation in `pathfinder.rs` a deliberate exception, or did it land without the policy in `telemetry.rs` being reconsidered?**
-*Why it matters:* It changes the fix from "remove it" to "restate the policy honestly."
-*How the answer changes things:* Deliberate → P0-1 becomes a documentation fix plus an explicit account-risk warning to the user, and drops to P1. Unnoticed → remove the headers as recommended.
-
-**3. Which Tier 3 features do you actually use?**
-*Why it matters:* P1-6's deletion step needs this input and I cannot supply it. `README_jams.md` is 15 KB documenting a feature requiring captured Pathfinder hashes most installs will never have.
-*How the answer changes things:* Anything unused should be deleted, which removes both maintenance load and private-API surface — partially addressing P0-1 for free.
-
-**4. Has the `BACKUP/` merge reconciliation completed?**
-*Why it matters:* Determines whether P3-2 is "delete" or "move the ignore rule."
-*How the answer changes things:* Trivially, but I will not recommend deleting a 27 KB patch without confirmation.
-
-**5. How often do you actually hit private-API breakage in practice?**
-*Why it matters:* I inferred a roughly quarterly cadence from `error.rs` variants and README notes. If it is monthly, P1-6 escalates to P0. If it is annual, Tier 3 is far more defensible than I have assumed.
-*How the answer changes things:* Directly sets the priority of the scope-reduction work.
-
-**6. Is there a reason `cargo audit`/`cargo-deny` was never added?**
-*Why it matters:* If it was tried and produced unfixable noise from the librespot git pin, P2-3's plan needs an allowlist-first approach rather than a clean-slate one.
-*How the answer changes things:* Changes the triage step from "fix findings" to "document accepted risk."
+1. **Is the GPL/undistributed determination from 2026-09-05 still the
+   maintainer's intended position?** This review verified its external,
+   checkable facts (repo still private, ported code still present) but the
+   underlying legal reasoning was explained to the user in a prior session I
+   was not part of. The maintainer has now explicitly declined to have this
+   written into the repo during this session — which may mean "not yet," "I
+   want to review the exact wording first," or something else entirely; I
+   don't know which. If the intent has shifted toward eventually
+   distributing, or toward removing the ported features instead, that
+   changes P0-2's recommended fix entirely. **Why it matters:** every other
+   distribution-readiness question (identifier, signing, updater) is
+   downstream of this one and shouldn't be worked on independently of it.
+2. **Did `queryArtistOverview` keep working after the header fix?** Only
+   answerable with a live account — see §15. **Why it matters:** if it 403s,
+   there's a follow-up decision about whether `get_artist_overview`'s
+   failure handling should also attempt the REST top-tracks fallback on a
+   hard Pathfinder failure, not just an empty-field success.
 
 ---
 
 # 20. Final Verdict
 
-**1. Is this project safe to continue in its current state?**
-Yes, with one exception. Continue — but fix P0-1 first. The impersonation headers put the user's paid Spotify account at risk, and the project's own documentation says it does not do the thing it does. Everything else can proceed in parallel.
+1. **Is this project safe to continue in its current state?** Yes, for
+   personal use. The account-risk item (P0-1) is now closed in code; the
+   legal-exposure item (P0-2) remains a decision sitting unmade, by choice,
+   this session.
+2. **Is it safe to deploy to production, or to anyone else?** No — doing so
+   before resolving P0-2 creates a real, mechanical GPL violation, not just a
+   generic "no license" gap.
+3. **What is the biggest risk?** Unchanged: that P0-2 gets discovered by
+   consequence instead of by decision — someone shares the app, or a future
+   session adds the "obvious" MIT license the *original* prior review
+   recommended, before anyone reads this correction.
+4. **What is the highest-value improvement?** Still writing the GPL
+   constraint into `CLAUDE.md`/`README.md` — twenty minutes, and the only
+   remaining fix in this review that closes a risk *permanently* rather than
+   mitigating it. It just wasn't applied this session.
+5. **What should be done first?** Whenever it's wanted: P0-2's documentation
+   fix. It has zero dependencies and protects every subsequent distribution
+   decision from being made without that context. Ahead of it, and not
+   dependent on it: the five-minute P0-1 live check.
+6. **What should be done second?** Nothing else is time-sensitive. The
+   remaining P2/P3 items are real but genuinely optional on any timeline.
+7. **What should be avoided for now?** Adding any `LICENSE` file before P0-2
+   is resolved; touching the bundle `identifier`; building automated E2E
+   infrastructure; any further feature work on the private-API surface
+   without running it through the Tier-3 quarterly review `CLAUDE.md` already
+   commits to.
 
-**2. Is it safe to deploy to production?**
-No. There is no production and no path to one: no license, a placeholder identifier, an unsigned installer, no updater, no CI, and no verification that the app works beyond a human running through a checklist. As a personal tool on the author's machine it is fine. As something handed to another person it is not ready, and the licensing gap makes that a legal statement, not just an engineering one.
-
-**3. What is the biggest risk?**
-The private-API surface — legally, operationally, and in maintenance terms, all at once. P0-1 is its sharpest edge; P1-6 is its long-term shape.
-
-**4. What is the highest-value improvement?**
-CI (P1-1). Two hours of work, and it makes three already-working quality gates automatic and permanent. Nothing else in this review has that ratio.
-
-**5. What should be done first?**
-Answer Open Question 1 — personal or distributed. Then, in one day: `LICENSE`, fix the identifier, strip the impersonation headers, add the CI workflow.
-
-**6. What should be done second?**
-The two confirmed jam concurrency defects (P1-3, P1-4) with their misleading comments corrected, then the first three Rust regression tests (P1-2 steps 1–3). All small, all guarding things this codebase has already been bitten by once.
-
-**7. What should be avoided for now?**
-Any new feature. Any refactor of `auth.rs` before it has tests. The webview replacement (P4-1). Cross-platform (P4-3). Prettier/ESLint. And do not narrow `STREAMING_SCOPES` or "fix" the DJ fallback — both look wrong and are load-bearing.
-
----
-
-The uncomfortable summary: you have written approximately 8/10 code inside a 3/10 project. The Rust is careful, the concurrency reasoning is sound, the documentation is better than most funded teams produce, and the failure-mode archaeology in `auth.rs` is the kind of thing that takes real discipline to maintain. None of that is in question.
-
-What is missing is everything that is not fun — a license file, a CI workflow, a decision about scope, and tests for the parts that would silently log a user out. There is a 111-note documentation vault and no `.github/` directory. That imbalance is the actual finding, and it is a prioritisation problem, not a capability one.
-
-**Next step: answer Open Question 1, then spend one focused day on the Quick Wins table in section 13.** It closes one P0, three P1s, and four P3s, and it converts the discipline already present in the code into discipline the project enforces on itself.
+**Recommended next step:** do the five-minute P0-1 live check next time
+there's a real Spotify session open, just to close the loop. P0-2 stays
+exactly where it was left — documented, actionable, and waiting on the
+maintainer's call, not on any more code.
