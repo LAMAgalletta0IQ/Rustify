@@ -614,6 +614,16 @@ export type JamEventPayload = Record<string, unknown>;
 
 export const MAX_VOLUME = 65535;
 
+/**
+ * sessionStorage key NowPlaying.svelte mirrors its pre-fullscreen window
+ * bounds to, and App.svelte checks on startup to recover a window left
+ * monitor-sized by a reload that happened mid-fullscreen (a dev-mode Vite
+ * HMR reload wipes NowPlaying's in-memory copy but not the actual OS window
+ * size — see both call sites). Shared here so the two files can't drift out
+ * of sync on the key name.
+ */
+export const FULLSCREEN_BOUNDS_KEY = "rustify:preFullscreenBounds";
+
 export function volumeToPercent(v: number): number {
   return Math.round((v * 100) / MAX_VOLUME);
 }

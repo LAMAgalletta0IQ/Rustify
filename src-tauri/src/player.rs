@@ -1073,7 +1073,10 @@ mod tests {
             position_ms: 500,
             ..Default::default()
         };
-        assert!(should_apply_pending_resume(&playback, "spotify:episode:abc"));
+        assert!(should_apply_pending_resume(
+            &playback,
+            "spotify:episode:abc"
+        ));
     }
 
     #[test]
@@ -1109,7 +1112,10 @@ mod tests {
             position_ms: 100,
             ..Default::default()
         };
-        assert!(!should_apply_pending_resume(&playback, "spotify:episode:abc"));
+        assert!(!should_apply_pending_resume(
+            &playback,
+            "spotify:episode:abc"
+        ));
     }
 
     #[test]

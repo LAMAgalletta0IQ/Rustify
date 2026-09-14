@@ -15,6 +15,8 @@
   import FullscreenChrome from "./FullscreenChrome.svelte";
   import {
     formatMs,
+    volumeToPercent,
+    FULLSCREEN_BOUNDS_KEY,
     type AudioCapability,
     type EpisodeResume,
     type MusicVideoCapability,
@@ -140,6 +142,7 @@
   let fullscreen = $state(false);
   let fullscreenChanging = $state(false);
   let seekDraft = $state<number | null>(null);
+  let volumeDraft = $state<number | null>(null);
   let mounted = $state(false);
   let queuedTrackUri: string | null | undefined = undefined;
   let brokenImages = $state<Set<string>>(new Set());
@@ -152,6 +155,17 @@
     seekDraft ??
       (pb.durationMs > 0 ? (pb.positionMs / pb.durationMs) * 100 : 0),
   );
+  const volumePercent = $derived(volumeDraft ?? volumeToPercent(pb.volume));
+
+  function previewVolume(event: Event) {
+    volumeDraft = Number((event.currentTarget as HTMLInputElement).value);
+  }
+
+  async function onVolume(event: Event) {
+    const value = Number((event.currentTarget as HTMLInputElement).value);
+    await store.run(() => api.setVolume(value));
+    volumeDraft = null;
+  }
 
   async function refreshQueue() {
     queueLoading = true;
@@ -240,15 +254,49 @@
   let savedBounds: { position: PhysicalPosition; size: PhysicalSize } | null =
     null;
   let savedResizable = true;
+  // A dev-mode Vite HMR reload (or any other webview reload) wipes this
+  // component's in-memory `savedBounds` but leaves the *actual* OS window
+  // sized to the monitor — there is then nothing left in JS that remembers
+  // what to restore. Mirrored to sessionStorage (survives a reload, cleared
+  // on a real app restart) so App.svelte's startup check can still put the
+  // window back even though this component started fresh with no memory of
+  // it. Best-effort: storage can be unavailable, and that must never block
+  // the normal fullscreen enter/exit path below. Key lives in types.ts,
+  // shared with App.svelte's recovery check.
 
   async function enterFullscreenBounds() {
     const monitor = await currentMonitor();
     if (!monitor) return false;
-    savedBounds = {
-      position: await appWindow.outerPosition(),
-      size: await appWindow.outerSize(),
-    };
-    savedResizable = await appWindow.isResizable();
+    // Guard against capturing bounds twice in a row without an intervening
+    // exit (e.g. a stray re-entry while already fullscreen) — a second
+    // capture here would overwrite the true original window bounds with the
+    // *current*, already-fullscreen ones, and exiting would then "restore"
+    // to a monitor-sized window instead of the real original size.
+    if (!savedBounds) {
+      savedBounds = {
+        position: await appWindow.outerPosition(),
+        // setSize() below (and on restore) sets the window's *inner* size,
+        // not outer — save the matching inner size here, or restoring later
+        // via setSize(outerSize) would ask for an inner size equal to the
+        // old *outer* size, leaving the window bigger than it started by
+        // whatever the invisible border margin is, every time fullscreen is
+        // toggled.
+        size: await appWindow.innerSize(),
+      };
+      savedResizable = await appWindow.isResizable();
+      try {
+        sessionStorage.setItem(
+          FULLSCREEN_BOUNDS_KEY,
+          JSON.stringify({
+            position: { x: savedBounds.position.x, y: savedBounds.position.y },
+            size: { width: savedBounds.size.width, height: savedBounds.size.height },
+            resizable: savedResizable,
+          }),
+        );
+      } catch {
+        // Storage unavailable — recovery is best-effort only.
+      }
+    }
     await appWindow.setResizable(false);
     await appWindow.setPosition(monitor.position);
     await appWindow.setSize(monitor.size);
@@ -291,6 +339,11 @@
       savedBounds = null;
     }
     await appWindow.setResizable(savedResizable);
+    try {
+      sessionStorage.removeItem(FULLSCREEN_BOUNDS_KEY);
+    } catch {
+      // Storage unavailable — nothing to clean up.
+    }
   }
 
   async function setFullscreen(value: boolean) {
@@ -392,6 +445,49 @@
     onClose={() => void closeView()}
   />
 
+  {#snippet transportButtons()}
+    <button
+      onclick={(event) => {
+        event.stopPropagation();
+        void store.run(api.previousTrack);
+      }}
+      disabled={!pb.track}
+      title="Previous"
+      aria-label="Previous track"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z" /></svg>
+    </button>
+    <button
+      class="play"
+      onclick={(event) => {
+        event.stopPropagation();
+        void store.run(api.playPause);
+      }}
+      disabled={!pb.track}
+      title={pb.isPlaying ? "Pause" : "Play"}
+      aria-label={pb.isPlaying ? "Pause" : "Play"}
+    >
+      {#if pb.isLoading}
+        <span class="dots">…</span>
+      {:else if pb.isPlaying}
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4h4v16H7zM13 4h4v16h-4z" /></svg>
+      {:else}
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>
+      {/if}
+    </button>
+    <button
+      onclick={(event) => {
+        event.stopPropagation();
+        void store.run(api.nextTrack);
+      }}
+      disabled={!pb.track}
+      title="Next"
+      aria-label="Next track"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
+    </button>
+  {/snippet}
+
   <main>
     <section class="track-pane">
       <div class="artwork-wrap" role="group" aria-label="Artwork and playback controls">
@@ -411,48 +507,15 @@
             <span class="art-placeholder"></span>
           {/if}
         </button>
-        <div class="artwork-overlay">
-          <button
-            onclick={(event) => {
-              event.stopPropagation();
-              void store.run(api.previousTrack);
-            }}
-            disabled={!pb.track}
-            title="Previous"
-            aria-label="Previous track"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z" /></svg>
-          </button>
-          <button
-            class="play"
-            onclick={(event) => {
-              event.stopPropagation();
-              void store.run(api.playPause);
-            }}
-            disabled={!pb.track}
-            title={pb.isPlaying ? "Pause" : "Play"}
-            aria-label={pb.isPlaying ? "Pause" : "Play"}
-          >
-            {#if pb.isLoading}
-              <span class="dots">…</span>
-            {:else if pb.isPlaying}
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4h4v16H7zM13 4h4v16h-4z" /></svg>
-            {:else}
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>
-            {/if}
-          </button>
-          <button
-            onclick={(event) => {
-              event.stopPropagation();
-              void store.run(api.nextTrack);
-            }}
-            disabled={!pb.track}
-            title="Next"
-            aria-label="Next track"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
-          </button>
-        </div>
+        <!-- Fullscreen has no other transport UI (PlayerBar is hidden), so
+             controls need to be permanently visible there — the windowed
+             panel still has PlayerBar right below it, so this hover reveal
+             stays as a convenience rather than the only way to reach them. -->
+        {#if !fullscreen}
+          <div class="artwork-overlay">
+            {@render transportButtons()}
+          </div>
+        {/if}
       </div>
       <div class="track-copy">
         <h1>{pb.track?.name ?? "Nothing playing"}</h1>
@@ -499,22 +562,44 @@
       </div>
 
       {#if fullscreen}
-        <div class="timeline">
-          <span>{formatMs(pb.positionMs)}</span>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="0.1"
-            value={positionPercent}
-            oninput={(event) =>
-              (seekDraft = Number(event.currentTarget.value))}
-            onchange={seekPercent}
-            onblur={() => (seekDraft = null)}
-            disabled={!pb.track}
-            aria-label="Song position"
-          />
-          <span>{formatMs(pb.durationMs)}</span>
+        <div class="playback-cluster">
+          <div class="transport">
+            <div class="transport-buttons">
+              {@render transportButtons()}
+            </div>
+            <div class="transport-volume">
+              <svg class="vicon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 8a5 5 0 0 1 0 8" />
+              </svg>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={volumePercent}
+                oninput={previewVolume}
+                onchange={onVolume}
+                onblur={() => (volumeDraft = null)}
+                aria-label="Volume"
+              />
+            </div>
+          </div>
+          <div class="timeline">
+            <span>{formatMs(pb.positionMs)}</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="0.1"
+              value={positionPercent}
+              oninput={(event) =>
+                (seekDraft = Number(event.currentTarget.value))}
+              onchange={seekPercent}
+              onblur={() => (seekDraft = null)}
+              disabled={!pb.track}
+              aria-label="Song position"
+            />
+            <span>{formatMs(pb.durationMs)}</span>
+          </div>
         </div>
       {/if}
     </section>
@@ -740,6 +825,96 @@
     font-size: 18px;
     line-height: 1;
   }
+  /* Fullscreen-only replacement for .artwork-overlay above — a permanent
+     control cluster sitting directly on top of the seek bar (.timeline)
+     instead of a hover reveal on top of the artwork, since fullscreen has no
+     other transport UI to fall back on. Full width, matching .timeline below
+     it, so the two read as one bar rather than a narrower row sitting above
+     a wider one. */
+  .playback-cluster {
+    margin-top: 26px;
+  }
+  /* .transport-buttons is centered by absolute-positioning it against
+     .transport's own width, not by balancing it against .transport-volume
+     with a matching spacer column — a `1fr auto 1fr` grid was tried first,
+     but the two outer tracks aren't actually symmetric: the volume column
+     has a real minimum content width (icon + slider), while an empty spacer
+     column has none, so the fr split wasn't even and the buttons drifted off
+     centre. Centering against the container directly is immune to whatever
+     .transport-volume's width ends up being. */
+  .transport {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-height: 54px;
+  }
+  .transport-buttons {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .transport-buttons button {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    color: var(--fg-dim);
+    transition: color var(--motion-fast), background var(--motion-fast);
+  }
+  .transport-buttons button:hover:not(:disabled) {
+    color: var(--fg);
+    background: var(--glass-hover);
+  }
+  .transport-buttons button:disabled {
+    opacity: 0.4;
+  }
+  .transport-buttons .play {
+    width: 54px;
+    height: 54px;
+    color: var(--ink);
+    background: var(--fg);
+    transition: transform var(--motion-fast);
+  }
+  .transport-buttons .play:hover:not(:disabled) {
+    color: var(--ink);
+    background: var(--fg);
+    transform: scale(1.05);
+  }
+  .transport-buttons .dots {
+    font-size: 18px;
+    line-height: 1;
+  }
+  /* min-width:0 lets the slider shrink on a narrow window instead of forcing
+     .transport wider than it should be — unlike an icon button, a narrower
+     range input degrades gracefully (just a shorter slider), so it doesn't
+     need the flex:none treatment PlayerBar's icon cluster needed. Sits at
+     the flex-end of .transport; .transport-buttons is centered independently
+     via absolute positioning (see above), so the two never compete for
+     space the way the earlier grid-column version did. */
+  .transport-volume {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+    color: var(--fg-dim);
+  }
+  .transport-volume .vicon {
+    flex: none;
+  }
+  .transport-volume input[type="range"] {
+    flex: 1;
+    min-width: 40px;
+    max-width: 130px;
+    accent-color: var(--accent);
+  }
   .track-copy {
     margin-top: 20px;
   }
@@ -789,7 +964,7 @@
     grid-template-columns: 42px 1fr 42px;
     align-items: center;
     gap: 10px;
-    margin-top: 22px;
+    margin-top: 14px;
     color: var(--fg-dim);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
@@ -904,7 +1079,8 @@
   @media (prefers-reduced-motion: reduce) {
     .artwork,
     .artwork-overlay,
-    .artwork-overlay button {
+    .artwork-overlay button,
+    .transport-buttons button {
       transition: none;
     }
   }

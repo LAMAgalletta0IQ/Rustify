@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
   // The bundle icon itself, not a copy of it — one source of truth, so
   // regenerating the icon set updates the titlebar mark too. `src-tauri/` is
   // inside the Vite root so this resolves and gets emitted as a hashed asset
@@ -23,7 +23,7 @@
   import Setup from "./lib/views/Setup.svelte";
   import Releases from "./lib/views/Releases.svelte";
   import ForYou from "./lib/views/ForYou.svelte";
-  import type { AlbumSummary } from "./lib/types";
+  import { FULLSCREEN_BOUNDS_KEY, type AlbumSummary } from "./lib/types";
 
   type Tab = "home" | "search" | "releases" | "library" | "forYou" | "jams" | "settings";
 
@@ -82,7 +82,51 @@
     fullscreenLyricsRequested = fullscreenLyrics;
   }
 
-  onMount(() => store.init());
+  /**
+   * Recovers from a reload that happened while NowPlaying.svelte had resized
+   * the window to cover the monitor for fullscreen lyrics (see its
+   * `enterFullscreenBounds`/`exitFullscreenBounds`). A dev-mode Vite HMR
+   * reload — or any other webview reload — wipes that component's in-memory
+   * "restore to this size" bounds without ever touching the *actual* OS
+   * window, which stays monitor-sized: on the next load there is a fresh
+   * NowPlaying instance (or none mounted at all yet) with no memory that the
+   * window needs shrinking back down. The bounds were mirrored to
+   * sessionStorage before the resize, which survives the reload, so recover
+   * from it here on startup rather than leaving the window stuck oversized
+   * until the user happens to reopen fullscreen lyrics and exit it again.
+   */
+  async function recoverStrandedFullscreenBounds() {
+    let raw: string | null;
+    try {
+      raw = sessionStorage.getItem(FULLSCREEN_BOUNDS_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as {
+        position: { x: number; y: number };
+        size: { width: number; height: number };
+        resizable: boolean;
+      };
+      await appWindow.setPosition(new PhysicalPosition(saved.position.x, saved.position.y));
+      await appWindow.setSize(new PhysicalSize(saved.size.width, saved.size.height));
+      await appWindow.setResizable(saved.resizable);
+    } catch (error) {
+      console.error("failed to recover stranded fullscreen window bounds", error);
+    } finally {
+      try {
+        sessionStorage.removeItem(FULLSCREEN_BOUNDS_KEY);
+      } catch {
+        // Nothing to clean up.
+      }
+    }
+  }
+
+  onMount(() => {
+    void recoverStrandedFullscreenBounds();
+    store.init();
+  });
   onDestroy(() => store.destroy());
 </script>
 
