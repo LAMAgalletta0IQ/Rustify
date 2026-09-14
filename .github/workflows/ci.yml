@@ -5,10 +5,11 @@ name: CI
 # cargo deny check) on every push and PR, so a broken gate is caught here
 # instead of depending on someone remembering to run it locally.
 #
-# windows-latest only: this app is Windows-only by design (Acrylic window
-# effects, DPAPI credential storage, NSIS-only bundling — see CLAUDE.md and
-# deny.toml's `targets = ["x86_64-pc-windows-msvc"]`), so there is nothing to
-# gain from a Linux/macOS job here.
+# The frontend/backend jobs are windows-latest only: this app is Windows-only
+# by design (Acrylic window effects, DPAPI credential storage, NSIS-only
+# bundling — see CLAUDE.md and deny.toml's `targets = ["x86_64-pc-windows-msvc"]`),
+# so there is nothing to gain from a Linux/macOS job for those. The `deny` job
+# below is the one exception — see its own comment for why.
 
 on:
   push:
@@ -35,7 +36,7 @@ jobs:
       - run: npm test
 
   backend:
-    name: Backend (fmt, clippy, check, test, deny)
+    name: Backend (fmt, clippy, check, test)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +60,21 @@ jobs:
       - name: cargo test --lib
         working-directory: src-tauri
         run: cargo test --no-default-features --lib
+
+  # Separate job, and deliberately ubuntu-latest even though everything else
+  # here is windows-latest: EmbarkStudios/cargo-deny-action is a Docker
+  # container action, and GitHub Actions only supports container actions on
+  # Linux runners — on windows-latest the step fails immediately with
+  # "Container action is only supported on Linux" before it ever gets to
+  # checking anything. Running the action on Linux does not change what it
+  # checks: deny.toml's own `targets = ["x86_64-pc-windows-msvc"]` is what
+  # tells cargo-deny which target's dependency graph to evaluate, independent
+  # of whatever OS the action itself happens to run on.
+  deny:
+    name: cargo deny check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: cargo deny check
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
