@@ -172,6 +172,11 @@
 <style>
   .picker {
     position: relative;
+    /* Same fix as PlayerBar's .lyrics-button/.jam-button: without flex:none
+       this shrinks below its 30px trigger as PlayerBar's .right runs out of
+       room, instead of holding size and letting .right's overflow:hidden
+       clip cleanly. */
+    flex: none;
   }
   .trigger {
     display: grid;

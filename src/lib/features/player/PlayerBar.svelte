@@ -240,7 +240,8 @@
   }
   footer {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(320px, 2fr) minmax(170px, 1fr);
+    /* Third column is `auto`, not `minmax(_, 1fr)` — see .right below for why. */
+    grid-template-columns: minmax(180px, 1fr) minmax(320px, 2fr) auto;
     align-items: center;
     gap: 22px;
     padding: 11px 18px;
@@ -440,13 +441,17 @@
     justify-content: flex-end;
     gap: 10px;
     color: var(--fg-dim);
-    /* A grid item's default min-width is auto, which floors it at its
-       content's natural size — the actual cause of the overlap: at a track
-       width the responsive breakpoints below hadn't yet trimmed for, .right
-       needed more room than its minmax(…, 1fr) track guaranteed and spilled
-       over the center column instead of clipping. min-width:0 lets it
-       actually shrink to the track; overflow:hidden makes a still-too-narrow
-       track clip cleanly instead of spilling. */
+    /* footer's third column is `auto`, sized to .right's actual content
+       instead of a guessed px floor sharing leftover space with the other
+       columns — a `minmax(_, 1fr)` column here previously got starved: any
+       fr-based leftover from a too-narrow window was split 1:2 favouring the
+       center column, so .right ran short of room across a wide range of
+       widths, not just near the app's minimum size. `auto` means the track
+       is never narrower than this row needs, at any width down to
+       tauri.conf.json's 780px minWidth (see the 1180px/920px breakpoints
+       below, which trim what that content *needs* rather than the space it's
+       given). min-width:0 + overflow:hidden stay as a last-resort clip, not
+       the primary defense — content should now never actually reach it. */
     min-width: 0;
     overflow: hidden;
   }
@@ -458,6 +463,16 @@
     padding: 0 9px;
     border-radius: var(--control-radius);
     color: var(--fg-dim);
+    /* Without this, a flex item's default flex-shrink:1 lets the browser
+       compress this button's padding below its designed size once .right
+       runs short on room — which happens well before the 1180px/920px
+       breakpoints below at *some* width, since those are the two widths this
+       was explicitly tuned for, not every width in between. That shrinking is
+       what read as icons "getting closer together" while resizing: each
+       flex-shrinkable icon button loses its padding non-uniformly instead of
+       the row just clipping. flex:none holds this at its natural size so
+       .right's own overflow:hidden (see its comment) clips cleanly instead. */
+    flex: none;
   }
   .lyrics-button:hover:not(:disabled),
   .lyrics-button:focus-visible {
@@ -471,6 +486,7 @@
     height: 30px;
     border-radius: var(--control-radius);
     color: var(--fg-dim);
+    flex: none;
   }
   .jam-button:hover,
   .jam-button:focus-visible {
@@ -485,15 +501,12 @@
     flex: none;
     width: 74px;
   }
-  /* Between full width and the 920px breakpoint below, .right's content
-     (lyrics button, Connect menu, output selector, volume) can add up to
-     more natural width than the grid's minmax(170px, 1fr) floor guarantees,
-     so on a merely-narrow (not yet phone-narrow) window they overlapped the
-     center transport controls instead of shrinking. The output selector is
-     now a fixed-size icon button (no device-name label to trim — see
-     SelectMenu's `iconOnly`), so only the lyrics button's text needs
-     trimming here before that happens, rather than jumping straight to
-     hiding volume entirely at 920px. */
+  /* footer's third column is `auto` now (see .right above), so it always
+     gets exactly what .right's content needs — these breakpoints exist to
+     shrink that *need*, not to fit into a fixed track any more. Below 1180px
+     the lyrics label goes first (cheapest to lose); below 920px volume goes
+     too, since a thumb-sized touch target for it isn't realistic once the
+     window is this narrow anyway. */
   @media (max-width: 1180px) {
     .lyrics-button span {
       display: none;

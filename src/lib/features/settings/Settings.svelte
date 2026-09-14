@@ -165,15 +165,40 @@
     value: preset.id, label: preset.name,
     description: preset.id.startsWith("custom-") ? "Custom" : "Built in",
   })));
-  const curvePoints = $derived(draft.equalizer.bandsDb.map((gain, index) =>
-    `${8 + index * 16.8},${32 - gain * (22 / 12)}`).join(" "));
+  const eqPoints = $derived(draft.equalizer.bandsDb.map((gain, index) => ({
+    x: 8 + index * 16.8,
+    y: 32 - gain * (22 / 12),
+  })));
+  /** Catmull-Rom spline through the band points, converted to the cubic
+   * Bezier segments SVG paths actually take (the 1/6 factor is the standard
+   * uniform Catmull-Rom-to-Bezier tangent scale). Passes through every point
+   * exactly, unlike a fitted approximation, so it still reads as "this is the
+   * curve for these gains" rather than a smoothed guess — it just replaces
+   * the straight segments between them with continuous tangents. */
+  function smoothPath(points: { x: number; y: number }[]): string {
+    if (points.length === 0) return "";
+    let path = `M ${points[0].x},${points[0].y}`;
+    for (let index = 0; index < points.length - 1; index++) {
+      const p0 = points[Math.max(0, index - 1)];
+      const p1 = points[index];
+      const p2 = points[index + 1];
+      const p3 = points[Math.min(points.length - 1, index + 2)];
+      const c1x = p1.x + (p2.x - p0.x) / 6;
+      const c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6;
+      const c2y = p2.y - (p3.y - p1.y) / 6;
+      path += ` C ${c1x},${c1y} ${c2x},${c2y} ${p2.x},${p2.y}`;
+    }
+    return path;
+  }
+  const curvePath = $derived(smoothPath(eqPoints));
   /** Node positions in the same 0-100/0-64 space as the SVG curve above, but
    * expressed as CSS percentages so plain HTML buttons (not SVG shapes,
    * which can't take keyboard focus on their own) can sit on top of it. */
-  const nodePositions = $derived(draft.equalizer.bandsDb.map((gain, index) => ({
-    gain,
-    left: 8 + index * 16.8,
-    top: ((32 - gain * (22 / 12)) / 64) * 100,
+  const nodePositions = $derived(eqPoints.map((point, index) => ({
+    gain: draft.equalizer.bandsDb[index],
+    left: point.x,
+    top: (point.y / 64) * 100,
   })));
 
   let graphEl = $state<HTMLElement | null>(null);
@@ -374,7 +399,7 @@
       <span class="scale top">+12</span><span class="scale zero">0</span><span class="scale bottom">−12 dB</span>
       <svg class="curve" viewBox="0 0 100 64" preserveAspectRatio="none" aria-hidden="true">
         <line x1="0" y1="10" x2="100" y2="10" /><line x1="0" y1="32" x2="100" y2="32" /><line x1="0" y1="54" x2="100" y2="54" />
-        <polyline points={curvePoints} />
+        <path class="curve-path" d={curvePath} />
       </svg>
       <div class="nodes" role="group" aria-label="Equalizer bands">
         {#each nodePositions as node, index (index)}
@@ -491,14 +516,21 @@
 <style>
   .settings{max-width:920px;margin:0 auto;padding:22px 0 42px}header{margin-bottom:24px}h1{margin:0 0 5px;font-size:27px}header p,h2,.audio-status{margin:0}section{margin-top:14px;padding:19px 20px;border:1px solid var(--hairline);background:var(--glass);border-radius:var(--r-md);backdrop-filter:blur(var(--blur))}h2{font-size:15px}.section-title,.field,.preset-control{display:flex;align-items:center;justify-content:space-between;gap:28px}.section-title{margin-bottom:16px}section>h2{margin-bottom:15px}.field>span:first-child,.section-title>div,.preset-control>span:first-child{display:flex;min-width:0;flex-direction:column;gap:4px}small,.notice{color:var(--fg-dim);line-height:1.45}.notice{margin:14px 0 0;font-size:11px}.secondary{padding:8px 12px;border:1px solid var(--control-border);border-radius:var(--control-radius);background:var(--control-bg)}.secondary:hover:not(:disabled){background:var(--control-hover);border-color:var(--control-border-hover)}
   .toggle{display:flex;align-items:center;gap:8px;cursor:pointer}.toggle input{position:absolute;opacity:0;pointer-events:none}.toggle>span{position:relative;width:36px;height:20px;border-radius:999px;background:rgba(255,241,224,.16);transition:background var(--motion-fast)}.toggle>span::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--fg);transition:transform var(--motion-fast)}.toggle input:checked+span{background:var(--accent)}.toggle input:checked+span::after{transform:translateX(16px)}.toggle input:focus-visible+span{box-shadow:var(--focus-ring)}.preset-control{padding:12px 14px;border-radius:var(--r-sm);background:rgba(20,14,8,.2)}
-  .graph-wrap{position:relative;height:200px;margin:18px 0 0;padding-left:44px;transition:opacity var(--motion-normal);touch-action:none}.graph-wrap.bypassed{opacity:.45}.curve{position:absolute;inset:0;left:44px;width:calc(100% - 44px);height:100%;overflow:visible;pointer-events:none}.curve line{stroke:rgba(255,241,224,.11);stroke-width:.35;vector-effect:non-scaling-stroke}.curve polyline{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.scale{position:absolute;left:0;color:var(--fg-faint);font-size:10px;font-variant-numeric:tabular-nums}.scale.top{top:12.6%}.scale.zero{top:50%;transform:translateY(-50%)}.scale.bottom{top:84.4%}
+  .graph-wrap{position:relative;height:200px;margin:18px 0 0;padding-left:44px;transition:opacity var(--motion-normal);touch-action:none}.graph-wrap.bypassed{opacity:.45}.curve{position:absolute;inset:0;left:44px;width:calc(100% - 44px);height:100%;overflow:visible;pointer-events:none}.curve line{stroke:rgba(255,241,224,.11);stroke-width:.35;vector-effect:non-scaling-stroke}.curve-path{fill:none;stroke:var(--accent);stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.scale{position:absolute;left:0;color:var(--fg-faint);font-size:10px;font-variant-numeric:tabular-nums}.scale.top{top:12.6%}.scale.zero{top:50%;transform:translateY(-50%)}.scale.bottom{top:84.4%}
   .nodes{position:absolute;inset:0;left:44px;width:calc(100% - 44px);height:100%}
-  .node{position:absolute;display:grid;place-items:center;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;color:var(--ink);background:var(--accent);border:2px solid rgba(18,11,4,.85);box-shadow:0 2px 8px rgba(0,0,0,.35);cursor:grab;touch-action:none;transition:transform var(--motion-fast)}
-  .node:hover:not(:disabled){transform:scale(1.12)}
-  .node.dragging{cursor:grabbing;transform:scale(1.18)}
-  .node:focus-visible{outline:none;box-shadow:var(--focus-ring),0 2px 8px rgba(0,0,0,.35)}
-  .node:disabled{cursor:default;opacity:.55}
-  .node-value{position:absolute;top:-22px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--fg-dim);pointer-events:none}
+  /* The button is the drag/focus/touch target — keep it roomy enough to grab
+     accurately. What it looks like is a separate concern, drawn as a small
+     ::after dot centered inside it, so the target size and the visual size
+     can differ instead of one forcing the other into "big circle" territory. */
+  .node{position:absolute;display:grid;place-items:center;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;cursor:grab;touch-action:none}
+  .node::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.4);transition:width var(--motion-fast),height var(--motion-fast)}
+  .node:hover:not(:disabled)::after{width:10px;height:10px}
+  .node.dragging{cursor:grabbing}
+  .node.dragging::after{width:11px;height:11px}
+  .node:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:50%}
+  .node:disabled{cursor:default}
+  .node:disabled::after{opacity:.55}
+  .node-value{position:absolute;top:-19px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--fg-dim);pointer-events:none}
   .freq-labels{display:grid;grid-template-columns:repeat(6,1fr);margin:8px 0 0 44px;color:var(--fg-dim);font-size:11px;text-align:center}
   .preamp{margin-top:20px;padding-top:18px;border-top:1px solid var(--hairline)}.range-row,.number-row{display:flex;align-items:center;gap:10px;flex:none}.range-row input{width:180px;accent-color:var(--accent)}output{min-width:54px;text-align:right;font-variant-numeric:tabular-nums}.check{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;cursor:pointer}input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}.preset-tools{display:flex;gap:8px;margin-top:16px}.preset-tools input,.number-row input{min-height:var(--control-height);padding:8px 11px;border:1px solid var(--control-border);border-radius:var(--control-radius);background:var(--control-bg)}.preset-tools input{flex:1}.number-row input{width:96px}.custom-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}.custom-list span{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;background:rgba(20,14,8,.2)}.custom-list button{margin-left:auto;color:var(--fg-dim)}.custom-list button:hover{color:var(--warning)}.audio-status{min-height:18px;margin-top:12px;color:var(--fg-dim);font-size:11px}.audio-status.error,.error{color:#ffaaa2}.actions{display:flex;align-items:center;gap:14px;margin-top:18px}.ok{color:var(--accent)}.audit{flex:none;color:var(--fg-dim);font-size:11px;font-variant-numeric:tabular-nums}
   .stack{display:flex;flex-direction:column;gap:12px}.stack>span:first-child{display:flex;flex-direction:column;gap:4px}

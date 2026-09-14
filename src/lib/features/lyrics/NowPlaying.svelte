@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import {
+    currentMonitor,
+    getCurrentWindow,
+    PhysicalPosition,
+    type PhysicalSize,
+  } from "@tauri-apps/api/window";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import * as api from "../../api";
   import { store } from "../../store.svelte";
@@ -221,11 +226,82 @@
     };
   }
 
+  // Deliberately not `appWindow.setFullscreen()`. On Windows, a real OS
+  // fullscreen transition on a `decorations:false, transparent:true` window
+  // makes Windows treat it as an exclusive-fullscreen surface: the frame
+  // Windows re-adds mid-transition is the "classic Windows 7 titlebar" flash,
+  // Acrylic gets re-composited (and flickers) whenever focus moves to another
+  // app while this window is fullscreen on another monitor, and system
+  // flyouts (volume/media OSD) reposition themselves to the top of the screen
+  // to avoid "covering" the fullscreen content. None of that is triggered by
+  // just resizing an ordinary window to cover the monitor — so "fullscreen"
+  // here means moving/resizing to the current monitor's bounds and letting
+  // the CSS below hide the chrome, never touching real OS fullscreen state.
+  let savedBounds: { position: PhysicalPosition; size: PhysicalSize } | null =
+    null;
+  let savedResizable = true;
+
+  async function enterFullscreenBounds() {
+    const monitor = await currentMonitor();
+    if (!monitor) return false;
+    savedBounds = {
+      position: await appWindow.outerPosition(),
+      size: await appWindow.outerSize(),
+    };
+    savedResizable = await appWindow.isResizable();
+    await appWindow.setResizable(false);
+    await appWindow.setPosition(monitor.position);
+    await appWindow.setSize(monitor.size);
+
+    // setSize() above already sets the window's *inner* (content/visible)
+    // size directly — per its own doc comment, "resizes the window with a
+    // new inner size" — so the visible area is already exactly monitor.size,
+    // no correction needed there. (An earlier version of this also grew the
+    // size by the position correction below, which actually made the inner
+    // content *bigger* than the monitor and spilled it onto the next one —
+    // setSize was never the part that needed fixing.)
+    //
+    // setPosition() is different: its own doc comment says it "sets the
+    // window *outer* position", i.e. the whole window rect including
+    // whatever invisible resize-border margin Windows still draws around a
+    // borderless window even with resizing disabled. That margin sits between
+    // the outer rect and the visible content, so positioning the outer rect
+    // at the monitor's origin left the *visible* content a few pixels short
+    // of the monitor's actual left/top edge — the sliver-of-desktop bug.
+    // innerPosition() reports where the content actually ended up; measure
+    // the gap against outerPosition() and shift the outer position by
+    // exactly that much, whatever the margin turns out to be on this
+    // machine/monitor/DPI.
+    const outerPos = await appWindow.outerPosition();
+    const innerPos = await appWindow.innerPosition();
+    const dx = innerPos.x - outerPos.x;
+    const dy = innerPos.y - outerPos.y;
+    if (dx || dy) {
+      await appWindow.setPosition(
+        new PhysicalPosition(monitor.position.x - dx, monitor.position.y - dy),
+      );
+    }
+    return true;
+  }
+
+  async function exitFullscreenBounds() {
+    if (savedBounds) {
+      await appWindow.setPosition(savedBounds.position);
+      await appWindow.setSize(savedBounds.size);
+      savedBounds = null;
+    }
+    await appWindow.setResizable(savedResizable);
+  }
+
   async function setFullscreen(value: boolean) {
     if (fullscreenChanging || fullscreen === value) return;
     fullscreenChanging = true;
     try {
-      await appWindow.setFullscreen(value);
+      if (value) {
+        if (!(await enterFullscreenBounds())) return;
+      } else {
+        await exitFullscreenBounds();
+      }
       fullscreen = value;
       onFullscreenChange(value);
       if (value) panel = "lyrics";
@@ -256,14 +332,11 @@
   });
 
   onMount(() => {
-    let disposed = false;
     mounted = true;
-    void appWindow.isFullscreen().then(async (value) => {
-      if (disposed) return;
-      fullscreen = value;
-      onFullscreenChange(value);
-      if (startFullscreen && !value) await setFullscreen(true);
-    });
+    // No `appWindow.isFullscreen()` sync needed any more — "fullscreen" here
+    // is this component's own bounds bookkeeping (see setFullscreen above),
+    // not OS window state, so a fresh mount always starts non-fullscreen and
+    // the $effect above drives entry when `startFullscreen` is set.
     // The arrow/page-key-while-focused-in-lyrics branch lives in
     // LyricsPane.svelte now — it needs that panel's own DOM ref.
     const keydown = (event: KeyboardEvent) => {
@@ -277,10 +350,9 @@
     };
     window.addEventListener("keydown", keydown);
     return () => {
-      disposed = true;
       mounted = false;
       window.removeEventListener("keydown", keydown);
-      if (fullscreen) void appWindow.setFullscreen(false);
+      if (fullscreen) void exitFullscreenBounds();
       onFullscreenChange(false);
     };
   });

@@ -6,11 +6,17 @@
 //! family are not real playlist objects the public REST surface exposes to
 //! third-party apps, even though they carry an ordinary `spotify:playlist:`
 //! URI everywhere else (Home cards, `loadContext`, librespot's own Connect
-//! playback all treat them as one). `fetchPlaylistContents` is the same
-//! Pathfinder operation the Spotify web player calls for this, and it works
-//! for both ordinary and generated playlists — so `commands::get_playlist_tracks`
-//! calls here only after the REST attempt has already come back 404, rather
-//! than routing every playlist through Pathfinder by default.
+//! playback all treat them as one).
+//!
+//! Since Spotify's February 2026 Web API change it also answers 403 for any
+//! playlist the signed-in user does not own or collaborate on — reading a
+//! public playlist that belongs to someone else, which used to be an
+//! ordinary REST read, now needs a different path for every third-party app,
+//! not just this one. `fetchPlaylistContents` is the same Pathfinder
+//! operation the Spotify web player itself calls to render a playlist page,
+//! and neither restriction applies to it — so `commands::get_playlist_tracks`
+//! calls here only after the REST attempt has already come back 404 or 403,
+//! rather than routing every playlist through Pathfinder by default.
 //!
 //! Field paths (`playlistV2.content.items[].itemV2.data...`) are undocumented
 //! and parsed defensively for the same reason as `artist_extras`: a renamed

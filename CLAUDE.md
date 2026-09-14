@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication
+
+Always address the user as "Gabriele" at the start of every reply, then answer normally.
+
 ## Commands
 
 ```powershell
@@ -285,6 +289,25 @@ items they already hold.
 and `filter_map` drops it, so the playlist opens to "Nothing here." with a 200
 in the log and no warning anywhere. Confirm a wire shape with `fields=` before
 assuming the field name.
+
+**`/playlists/{id}/items` now 403s for any playlist you don't own or
+collaborate on, public or not.** This is a Spotify-side Web API change
+(February 2026), not a Rustify regression or a scope problem — confirmed
+against Spotify's own endpoint reference, which now documents the endpoint as
+"only accessible for playlists owned by the current user or playlists the
+user is a collaborator of." `playlist-read-private`/`playlist-read-collaborative`
+have been requested since this project's first commit, so a stale token isn't
+the explanation either. `commands::get_playlist_tracks` treats this the same
+way it already treated the 404 that generated/personalized playlists throw
+(see `spotify/playlist_contents.rs`): both `Unavailable` (404) and `Forbidden`
+(403) fall back to Pathfinder's `fetchPlaylistContents`, the same operation
+the Spotify web player itself uses to render a playlist page, which is
+subject to neither restriction. If a playlist still 403s after the fallback,
+that's Pathfinder agreeing you genuinely can't see it (private, not shared,
+not a collaborator) — some users have also reported the fallback failing on
+playlists they *are* an added collaborator on, which multiple reports
+describe as a Spotify-side account bug outside anything this app sends;
+there is no known client-side workaround for that case.
 
 **`/v1/audio-features` is gone for this app.** Spotify closed it to apps in
 Development Mode, which is what a self-registered Client ID is — so

@@ -73,37 +73,45 @@ pub async fn get_playlist_tracks(
     let t = token(&state).await?;
     let limit = limit.unwrap_or(100);
     let offset = offset.unwrap_or(0);
-    match library::playlist_tracks(&state.web_api, &t, &playlist_id, limit, offset).await {
-        // Spotify's generated/personalized playlists (Daily Mix, Discover
-        // Weekly, Release Radar, Daylist…) carry an ordinary spotify:playlist:
-        // URI everywhere else, but the public REST endpoint 404s on their id
-        // specifically. Only that exact failure falls back to Pathfinder —
-        // any other error (auth, rate limit, a genuinely missing playlist)
-        // is returned as-is rather than masked by a second, different error.
-        Err(AppError::Unavailable(rest_message)) => {
-            let session = state
-                .spotify
-                .read()
-                .await
-                .as_ref()
-                .map(|spotify| spotify.session.clone())
-                .ok_or(AppError::NotLoggedIn)?;
-            match state
-                .internal_spotify
-                .playlist_contents(&session, &playlist_id, limit, offset)
-                .await
-            {
-                Ok(page) => Ok(page.tracks),
-                Err(error) => {
-                    log::warn!(
-                        target: "spotify.playlist",
-                        "playlist {playlist_id} 404'd via REST ({rest_message}) and Pathfinder fallback also failed: {error}"
-                    );
-                    Err(AppError::Unavailable(rest_message))
-                }
-            }
+    // Spotify's generated/personalized playlists (Daily Mix, Discover Weekly,
+    // Release Radar, Daylist…) carry an ordinary spotify:playlist: URI
+    // everywhere else, but the public REST endpoint 404s on their id
+    // specifically — that's `Unavailable`. Since Spotify's February 2026 Web
+    // API change, `/playlists/{id}/items` also answers 403 (`Forbidden`) for
+    // any playlist the signed-in user does not own or collaborate on, public
+    // or not — reading someone else's public playlist used to work over REST
+    // and no longer does. Pathfinder's `fetchPlaylistContents` is the same
+    // operation the Spotify web player itself calls and isn't subject to
+    // either restriction, so both failures fall back to it. Any other error
+    // (auth, rate limit, a genuinely missing playlist) is returned as-is
+    // rather than masked by a second, different error.
+    let (rest_message, reconstruct): (String, fn(String) -> AppError) =
+        match library::playlist_tracks(&state.web_api, &t, &playlist_id, limit, offset).await {
+            Err(AppError::Unavailable(msg)) => (msg, AppError::Unavailable),
+            Err(AppError::Forbidden(msg)) => (msg, AppError::Forbidden),
+            other => return other,
+        };
+
+    let session = state
+        .spotify
+        .read()
+        .await
+        .as_ref()
+        .map(|spotify| spotify.session.clone())
+        .ok_or(AppError::NotLoggedIn)?;
+    match state
+        .internal_spotify
+        .playlist_contents(&session, &playlist_id, limit, offset)
+        .await
+    {
+        Ok(page) => Ok(page.tracks),
+        Err(error) => {
+            log::warn!(
+                target: "spotify.playlist",
+                "playlist {playlist_id} failed via REST ({rest_message}) and Pathfinder fallback also failed: {error}"
+            );
+            Err(reconstruct(rest_message))
         }
-        other => other,
     }
 }
 
