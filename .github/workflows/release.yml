@@ -1,0 +1,64 @@
+name: Release
+
+# Builds the NSIS installer and publishes it as a GitHub Release on every
+# push to main. Triggered via workflow_run off the CI workflow rather than
+# `on: push` directly, and gated on that run's conclusion being "success" —
+# so a commit that fails fmt/clippy/tests/deny can never produce a release.
+#
+# Every push to main gets its own release rather than only version-tagged
+# ones, so the tag is suffixed with the commit's short SHA: package.json /
+# Cargo.toml / tauri.conf.json's version (see CLAUDE.md's "Version bumps
+# touch three files" note) won't change on every push, and two releases
+# can't share a tag.
+#
+# windows-latest, matching CI's frontend/backend jobs: this app is
+# Windows-only by design and only bundles NSIS.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Short SHA
+        id: vars
+        shell: bash
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+      # librespot is pinned to a git revision (see Cargo.toml), so a cold
+      # build is the long pole here; cache it across runs. Separate cache
+      # namespace from CI's backend job since that builds the dev profile
+      # and this builds --release.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: app-v__VERSION__-${{ steps.vars.outputs.sha_short }}
+          releaseName: "Rustify v__VERSION__ (${{ steps.vars.outputs.sha_short }})"
+          releaseBody: "Automated build from main @ ${{ github.event.workflow_run.head_sha }}."
+          releaseDraft: false
+          prerelease: false
