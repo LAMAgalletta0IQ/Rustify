@@ -146,8 +146,11 @@ exceptions = [
 
 [licenses.private]
 # rustify itself is `publish = false` (personal project, not distributed via
-# crates.io) and carries no `license` field for the same reason - this skips
-# it in the license check rather than requiring one.
+# crates.io). It does carry a `license` field now (GPL-3.0-or-later, required
+# because player.rs/narration.rs port GPL-3.0 logic from go-librespot - see
+# the root LICENSE and CLAUDE.md's Repository gotchas), but this setting
+# still excludes unpublished workspace crates from the dependency license
+# check either way.
 ignore = true
 # One or more private registries that you might publish crates to, if a crate
 # is only published to private registries, and ignore is true, the crate will

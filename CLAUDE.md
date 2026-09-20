@@ -463,6 +463,15 @@ frosted shell over a Windows 11 Acrylic backdrop. Consequences:
 
 ## Repository gotchas
 
+- **This project is GPL-3.0-or-later, not permissively licensed — do not add
+  or suggest MIT/Apache-2.0.** `player.rs`'s crossfade scheduler and
+  `spawn_dj_advance`, and `narration.rs`'s DJ narration playback, are adapted
+  from [go-librespot](https://github.com/devgianlu/go-librespot) (GPL-3.0).
+  Rustify ships as one non-separable binary, so that copyleft covers the
+  whole project, not just those two files. See the root `LICENSE`. This
+  supersedes any earlier note in this file or its history about staying
+  undistributed to avoid the question — the repo is public, so that question
+  is already resolved rather than deferred.
 - **`Cargo.lock` pins vergen 9.0.6.** 9.1.0 breaks librespot-core 0.8.0's build
   script with a trait-bound error. Do not `cargo update` it blindly.
 - **Cargo bakes absolute paths into `target/`.** Moving or renaming the project
