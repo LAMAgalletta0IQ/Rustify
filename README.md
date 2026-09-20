@@ -278,3 +278,12 @@ does something rather than just render:
     as an artist page loading with empty stats and a
     `spotify.artist: artist overview via Pathfinder failed for {artist_id}`
     line in the log, not as a crash.
+
+## License
+
+GPL-3.0-or-later — see [LICENSE](LICENSE).
+
+The crossfade scheduler and DJ narration playback (`player.rs`, `narration.rs`)
+are adapted from [go-librespot](https://github.com/devgianlu/go-librespot)
+(GPL-3.0). Rustify ships as a single, non-separable binary, so that copyleft
+covers the whole project, not just those two files.

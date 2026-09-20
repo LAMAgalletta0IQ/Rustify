@@ -1,3 +1,13 @@
+//! Playback session lifecycle, librespot event handling, and DJ track
+//! advancement.
+//!
+//! The crossfade scheduling in `playback_config` and the DJ track-advance
+//! logic in `spawn_dj_advance` are adapted from
+//! [go-librespot](https://github.com/devgianlu/go-librespot)
+//! (GPL-3.0-or-later, Copyright (C) devgianlu). Because Rustify ships as one
+//! non-separable binary, this makes the whole project GPL-3.0-or-later — see
+//! the root `LICENSE` and `CLAUDE.md`'s Repository gotchas.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

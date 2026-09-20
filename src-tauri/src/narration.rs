@@ -15,6 +15,11 @@
 //! output device instead, sequenced by pausing/loading around it (see
 //! `player::spawn_dj_advance`) rather than by mixing PCM inside librespot's
 //! Sink chain.
+//!
+//! This module's clip-sequencing approach is adapted from
+//! [go-librespot](https://github.com/devgianlu/go-librespot)
+//! (GPL-3.0-or-later, Copyright (C) devgianlu). See the root `LICENSE` and
+//! `CLAUDE.md`'s Repository gotchas.
 
 use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};

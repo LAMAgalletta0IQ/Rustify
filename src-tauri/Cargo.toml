@@ -4,11 +4,16 @@ version = "0.2.0"
 description = "Lightweight native Spotify client"
 edition = "2021"
 rust-version = "1.82"
-# Personal project, not published to crates.io or distributed. No `license`
-# field for the same reason (see cargo-deny's [licenses.private] setting in
-# deny.toml, which excludes unpublished workspace crates from the license
-# check rather than requiring one).
+# Not published to crates.io (personal project) - see cargo-deny's
+# [licenses.private] setting in deny.toml, which excludes unpublished
+# workspace crates from the license check regardless of this field.
 publish = false
+# GPL-3.0-or-later, not a permissive license: player.rs's crossfade scheduler/
+# spawn_dj_advance and narration.rs's DJ narration playback are adapted from
+# go-librespot (GPL-3.0). Single-binary architecture means that copyleft
+# covers the whole crate. See the root LICENSE and CLAUDE.md's Repository
+# gotchas.
+license = "GPL-3.0-or-later"
 
 [lib]
 name = "rustify_lib"
